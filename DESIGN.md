@@ -872,25 +872,25 @@ neocortex/
 ## 7. 开发路线
 
 ### Phase 1: MVP（核心链路跑通）
-- [ ] CLI 框架 + config 命令
-- [ ] `neocortex init` 首次问卷（含语言选择）
-- [ ] 多语言支持（en / zh），CLI 文本 + Prompt 语言切换
-- [ ] OpenAI-compat LLM 适配（先支持一种，覆盖最多模型）
-- [ ] 项目扫描器（Python/JS/Go 三种语言）
-- [ ] 技能画像生成
-- [ ] URL 内容获取 + 个性化笔记生成
-- [ ] 笔记反馈 + 难度校准
-- [ ] 学习行为自动追踪
-- [ ] Markdown 输出 + 自动打开
+- [x] CLI 框架 + config 命令
+- [x] `neocortex init` 首次问卷（含语言选择）
+- [x] 多语言支持（en / zh），CLI 文本 + Prompt 语言切换
+- [x] OpenAI-compat LLM 适配（先支持一种，覆盖最多模型）
+- [x] 项目扫描器（Python/JS/Go 三种语言）
+- [x] 技能画像生成
+- [x] URL 内容获取 + 个性化笔记生成
+- [x] 笔记反馈 + 难度校准
+- [x] 学习行为自动追踪
+- [x] Markdown 输出 + 自动打开
 
 ### Phase 2: 完善
-- [ ] Claude + Gemini 适配
-- [ ] PDF 解析支持
-- [ ] 聊天记录导入（ChatGPT / Claude）
-- [ ] 聊天洞察与代码分析交叉验证
-- [ ] 更多语言的扫描器（Java, Rust, etc.）
-- [ ] 画像手动编辑（`neocortex profile --edit`）
-- [ ] 笔记搜索
+- [x] Claude + Gemini 适配
+- [x] PDF 解析支持
+- [x] 聊天记录导入（ChatGPT / Claude）
+- [x] 聊天洞察与代码分析交叉验证
+- [x] 更多语言的扫描器（Java, Rust, Kotlin, Swift, C#, Ruby, PHP, Dart）
+- [x] 画像手动编辑（`neocortex profile --edit`）
+- [x] 笔记搜索
 
 ### Phase 3: 进阶
 - [ ] GitHub OAuth 远程仓库扫描

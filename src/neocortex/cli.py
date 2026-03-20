@@ -330,9 +330,18 @@ def scan(
 def profile(
     export: str = typer.Option(None, help="Export profile to file"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    edit: bool = typer.Option(False, "--edit", help="Open profile in editor"),
 ) -> None:
     """View, export, or edit your skill profile."""
-    from neocortex.config import load_profile
+    from neocortex.config import load_profile, get_data_dir
+
+    if edit:
+        import os
+        import subprocess
+        profile_path = get_data_dir() / "profile.json"
+        editor = os.environ.get("EDITOR", "vi")
+        subprocess.run([editor, str(profile_path)])
+        return
 
     prof = load_profile()
     lang = _get_lang()
@@ -499,6 +508,15 @@ def read(
 
         console.print()
         console.print(f"  [green]{t('read_saved', lang, path=str(note_path))}[/green]")
+
+        if cfg.output_settings.auto_open:
+            import platform
+            import subprocess
+            opener = "open" if platform.system() == "Darwin" else "xdg-open"
+            try:
+                subprocess.Popen([opener, str(note_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                pass
 
         _collect_feedback(lang, prof, source, doc.title, focus, note_path)
 
