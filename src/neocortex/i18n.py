@@ -223,6 +223,12 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "推荐资源：",
     },
 
+    # ── Ask ──
+    "ask_thinking": {
+        "en": "Thinking...",
+        "zh": "正在思考...",
+    },
+
     # ── Notes ──
     "notes_title": {
         "en": "Knowledge Base",

@@ -704,6 +704,41 @@ def recommend(
 
 
 @app.command()
+def ask(
+    question: str = typer.Argument(..., help="Your question"),
+) -> None:
+    """Ask a question with your skill profile as context."""
+    from neocortex.config import load_config, load_profile
+    from neocortex.llm import create_provider
+    from neocortex.asker import ask_question
+
+    cfg = load_config()
+    prof = load_profile()
+    lang = _get_lang()
+
+    if not prof.skills.languages and not prof.skills.domains:
+        console.print(f"  {t('profile_empty', lang)}")
+        raise typer.Exit(1)
+
+    try:
+        provider = create_provider(cfg)
+    except ValueError as exc:
+        console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
+        raise typer.Exit(1)
+
+    async def _run() -> str:
+        with console.status(f"  {t('ask_thinking', lang)}"):
+            return await ask_question(question, prof, provider, lang)
+
+    answer = asyncio.run(_run())
+
+    console.print()
+    from rich.markdown import Markdown
+    console.print(Markdown(answer))
+    console.print()
+
+
+@app.command()
 def notes(
     search: str = typer.Option(None, help="Search notes"),
 ) -> None:
