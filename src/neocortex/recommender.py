@@ -46,29 +46,28 @@ async def generate_recommendations(
     return _parse_recommendations(response, count)
 
 
+_VALID_PRIORITIES = {"high", "medium", "low"}
+
+
 def _parse_recommendations(text: str, max_count: int) -> list[Recommendation]:
+    if not text or not text.strip():
+        return []
+
     text = text.strip()
     if text.startswith("```"):
         lines = text.splitlines()
-        start = 1 if lines[0].strip().startswith("```") else 0
         end = len(lines)
         for i in range(len(lines) - 1, 0, -1):
             if lines[i].strip() == "```":
                 end = i
                 break
-        text = "\n".join(lines[start:end])
+        text = "\n".join(lines[1:end])
 
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        start = text.find("[")
-        end = text.rfind("]") + 1
-        if start >= 0 and end > start:
-            try:
-                data = json.loads(text[start:end])
-            except json.JSONDecodeError:
-                return []
-        else:
+        data = _extract_json_fragment(text)
+        if data is None:
             return []
 
     if isinstance(data, dict):
@@ -86,20 +85,50 @@ def _parse_recommendations(text: str, max_count: int) -> list[Recommendation]:
     for item in data[:max_count]:
         if not isinstance(item, dict):
             continue
-        raw_resources = item.get("resources", [])
-        resources = []
-        for r in raw_resources:
-            if isinstance(r, str):
-                resources.append(r)
-            elif isinstance(r, dict):
-                title = r.get("title", "")
-                url = r.get("url", "")
-                resources.append(f"{title} — {url}" if title and url else title or url)
+        topic = item.get("topic", "")
+        if not topic:
+            continue
+        raw_resources = item.get("resources") or []
+        resources = _normalize_resources(raw_resources)
+        priority = str(item.get("priority", "medium")).lower().strip()
+        if priority not in _VALID_PRIORITIES:
+            priority = "medium"
         results.append(Recommendation(
-            topic=item.get("topic", ""),
+            topic=topic,
             reason=item.get("reason", ""),
             resources=resources,
             expected_benefit=item.get("expected_benefit", ""),
-            priority=item.get("priority", "medium"),
+            priority=priority,
         ))
     return results
+
+
+def _extract_json_fragment(text: str) -> list | dict | None:
+    for open_ch, close_ch in ("[", "]"), ("{", "}"):
+        start = text.find(open_ch)
+        end = text.rfind(close_ch) + 1
+        if start >= 0 and end > start:
+            try:
+                return json.loads(text[start:end])
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
+def _normalize_resources(raw: list) -> list[str]:
+    resources: list[str] = []
+    for r in raw:
+        if isinstance(r, str):
+            stripped = r.strip()
+            if stripped:
+                resources.append(stripped)
+        elif isinstance(r, dict):
+            title = str(r.get("title", "")).strip()
+            url = str(r.get("url", "")).strip()
+            if title and url:
+                resources.append(f"{title} — {url}")
+            elif title:
+                resources.append(title)
+            elif url:
+                resources.append(url)
+    return resources

@@ -659,7 +659,11 @@ def recommend(
         console.print(f"  {t('profile_empty', lang)}")
         raise typer.Exit(1)
 
-    provider = create_provider(cfg)
+    try:
+        provider = create_provider(cfg)
+    except ValueError as exc:
+        console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
+        raise typer.Exit(1)
 
     async def _run() -> list:
         with console.status(f"  {t('recommend_generating', lang)}"):
