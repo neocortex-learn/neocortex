@@ -55,14 +55,24 @@ def smart_output(data: dict, human_format_fn, json_flag: bool = False) -> None:
         human_format_fn(data)
 
 
-def _numbered_select(question: str, options: list[tuple[str, any]]) -> any:
-    """Show numbered options and let user pick by number."""
+def _numbered_select(question: str, options: list[tuple[str, any]], default: int = 1) -> any:
+    """Show numbered options. Accept number, label substring, or fuzzy match."""
     console.print(f"  [bold]?[/bold] {question}")
     for i, (label, _) in enumerate(options, 1):
-        console.print(f"    [cyan]{i}[/cyan]) {label}")
-    valid = [str(i) for i in range(1, len(options) + 1)]
-    answer = Prompt.ask("   ", choices=valid, default="1", console=console)
-    return options[int(answer) - 1][1]
+        marker = "[bold cyan]>[/bold cyan]" if i == default else " "
+        console.print(f"  {marker} [cyan]{i}[/cyan]) {label}")
+
+    while True:
+        raw = Prompt.ask(f"    [dim]({default})[/dim]", default=str(default), console=console).strip()
+        if raw.isdigit():
+            idx = int(raw)
+            if 1 <= idx <= len(options):
+                return options[idx - 1][1]
+        lower = raw.lower()
+        for i, (label, value) in enumerate(options):
+            if lower == label.lower() or lower in label.lower():
+                return value
+        console.print(f"    [dim]输入数字 1-{len(options)} 或关键词[/dim]")
 
 
 def _mask_api_key(key: str | None) -> str:
