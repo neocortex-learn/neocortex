@@ -55,6 +55,16 @@ def smart_output(data: dict, human_format_fn, json_flag: bool = False) -> None:
         human_format_fn(data)
 
 
+def _numbered_select(question: str, options: list[tuple[str, any]]) -> any:
+    """Show numbered options and let user pick by number."""
+    console.print(f"  [bold]?[/bold] {question}")
+    for i, (label, _) in enumerate(options, 1):
+        console.print(f"    [cyan]{i}[/cyan]) {label}")
+    valid = [str(i) for i in range(1, len(options) + 1)]
+    answer = Prompt.ask("   ", choices=valid, default="1", console=console)
+    return options[int(answer) - 1][1]
+
+
 def _mask_api_key(key: str | None) -> str:
     if not key:
         return "(not set)"
@@ -108,15 +118,10 @@ def init() -> None:
     console.print("  [bold]Welcome to Neocortex / 欢迎使用 Neocortex[/bold]")
     console.print()
 
-    lang_choices = {"English": Language.EN, "中文": Language.ZH}
-    lang_labels = list(lang_choices.keys())
-    lang_answer = Prompt.ask(
-        "  [bold]?[/bold] Language / 语言",
-        choices=lang_labels,
-        default=lang_labels[1],
-        console=console,
-    )
-    selected_lang = lang_choices[lang_answer]
+    selected_lang = _numbered_select("Language / 语言", [
+        ("English", Language.EN),
+        ("中文", Language.ZH),
+    ])
     lang = selected_lang
 
     # ── Step 2: Quick intro ──
@@ -124,67 +129,35 @@ def init() -> None:
     console.print(f"  [bold]{t('init_welcome', lang)}[/bold]")
     console.print()
 
-    role_choices = {
-        t("role_backend", lang): Role.BACKEND,
-        t("role_frontend", lang): Role.FRONTEND,
-        t("role_fullstack", lang): Role.FULLSTACK,
-        t("role_student", lang): Role.STUDENT,
-        t("role_self_taught", lang): Role.SELF_TAUGHT,
-    }
-    role_labels = list(role_choices.keys())
-    role_answer = Prompt.ask(
-        f"  [bold]?[/bold] {t('init_role', lang)}",
-        choices=role_labels,
-        default=role_labels[0],
-        console=console,
-    )
-    selected_role = role_choices[role_answer]
+    selected_role = _numbered_select(t("init_role", lang), [
+        (t("role_backend", lang), Role.BACKEND),
+        (t("role_frontend", lang), Role.FRONTEND),
+        (t("role_fullstack", lang), Role.FULLSTACK),
+        (t("role_student", lang), Role.STUDENT),
+        (t("role_self_taught", lang), Role.SELF_TAUGHT),
+    ])
 
-    exp_choices = {
-        t("exp_0_1", lang): ExperienceRange.JUNIOR,
-        t("exp_1_3", lang): ExperienceRange.MID,
-        t("exp_3_5", lang): ExperienceRange.SENIOR,
-        t("exp_5_plus", lang): ExperienceRange.EXPERT,
-    }
-    exp_labels = list(exp_choices.keys())
-    exp_answer = Prompt.ask(
-        f"  [bold]?[/bold] {t('init_experience', lang)}",
-        choices=exp_labels,
-        default=exp_labels[0],
-        console=console,
-    )
-    selected_exp = exp_choices[exp_answer]
+    selected_exp = _numbered_select(t("init_experience", lang), [
+        (t("exp_0_1", lang), ExperienceRange.JUNIOR),
+        (t("exp_1_3", lang), ExperienceRange.MID),
+        (t("exp_3_5", lang), ExperienceRange.SENIOR),
+        (t("exp_5_plus", lang), ExperienceRange.EXPERT),
+    ])
 
-    goal_choices = {
-        t("goal_system_design", lang): LearningGoal.SYSTEM_DESIGN,
-        t("goal_new_framework", lang): LearningGoal.NEW_FRAMEWORK,
-        t("goal_interview", lang): LearningGoal.INTERVIEW,
-        t("goal_level_up", lang): LearningGoal.LEVEL_UP,
-        t("goal_side_project", lang): LearningGoal.SIDE_PROJECT,
-    }
-    goal_labels = list(goal_choices.keys())
-    goal_answer = Prompt.ask(
-        f"  [bold]?[/bold] {t('init_goal', lang)}",
-        choices=goal_labels,
-        default=goal_labels[0],
-        console=console,
-    )
-    selected_goal = goal_choices[goal_answer]
+    selected_goal = _numbered_select(t("init_goal", lang), [
+        (t("goal_system_design", lang), LearningGoal.SYSTEM_DESIGN),
+        (t("goal_new_framework", lang), LearningGoal.NEW_FRAMEWORK),
+        (t("goal_interview", lang), LearningGoal.INTERVIEW),
+        (t("goal_level_up", lang), LearningGoal.LEVEL_UP),
+        (t("goal_side_project", lang), LearningGoal.SIDE_PROJECT),
+    ])
 
-    style_choices = {
-        t("style_code", lang): LearningStyle.CODE_EXAMPLES,
-        t("style_theory", lang): LearningStyle.THEORY_FIRST,
-        t("style_do_it", lang): LearningStyle.JUST_DO_IT,
-        t("style_compare", lang): LearningStyle.COMPARE_WITH_KNOWN,
-    }
-    style_labels = list(style_choices.keys())
-    style_answer = Prompt.ask(
-        f"  [bold]?[/bold] {t('init_style', lang)}",
-        choices=style_labels,
-        default=style_labels[0],
-        console=console,
-    )
-    selected_style = style_choices[style_answer]
+    selected_style = _numbered_select(t("init_style", lang), [
+        (t("style_code", lang), LearningStyle.CODE_EXAMPLES),
+        (t("style_theory", lang), LearningStyle.THEORY_FIRST),
+        (t("style_do_it", lang), LearningStyle.JUST_DO_IT),
+        (t("style_compare", lang), LearningStyle.COMPARE_WITH_KNOWN),
+    ])
 
     prof.persona = Persona(
         role=selected_role,
