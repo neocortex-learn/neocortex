@@ -900,12 +900,80 @@ neocortex/
 - [ ] AI Agent 集成（作为 Claude Code / OpenClaw skill 被调用）
 - [ ] 社交收藏导入（Twitter 书签 / 微博收藏）
 - [ ] 更多 UI 语言支持
+- [ ] 音频输出（TTS，"听课模式"）
 
-## 8. 存储架构演进
+### Phase 4: 多模态输出（条件触发）
+- [ ] 动画/白板讲解生成（需学生版数据验证需求后再启动）
+
+## 8. 多模态输出策略
+
+> 参考来源：[NotebookLM](https://notebooklm.google.com/)（音频播客）、[OpenMAIC](https://github.com/THU-MAIC/OpenMAIC)（动画白板）
+
+### 8.1 结论：Phase 1 不做，Phase 3 启动音频，Phase 4 视数据决定动画
+
+NotebookLM 能生成音频播客，OpenMAIC 能生成动画白板讲解。但 Neocortex 当前阶段不做多模态输出。
+
+**不急着做的原因：**
+
+1. **核心价值未验证。** Neocortex 的核心是"了解你 → 教你需要的"。个性化引擎还没跑通，多模态是锦上添花
+2. **工程量与一人团队不匹配。** TTS 需接外部服务，动画需要渲染引擎，分散精力
+3. **CLI 形态不适合。** 当前产品是 CLI + Markdown，音频/动画天然更适合 App/Web
+
+**但长远有价值的原因：**
+
+1. **学生版刚需。** 学生不看 Markdown，但会听音频、看动画。App 形态下多模态是必需品
+2. **NotebookLM 验证了需求。** 播客式音频学习有真实受众（通勤、运动等场景）
+3. **个性化 + 多模态 = 真壁垒。** NotebookLM 的音频不个性化，OpenMAIC 的动画不个性化。"基于你的画像生成个性化音频/动画讲解"是独一无二的组合
+
+### 8.2 渐进式多模态路线
+
+```
+Phase 1 (MVP):   Markdown 笔记（当前）
+Phase 2:         学生版 Web/App 上线
+Phase 3:         音频输出（TTS，最低成本的多模态扩展）
+Phase 4:         动画/白板讲解（需学生版数据验证需求）
+```
+
+**为什么音频是最优先的多模态扩展：**
+
+- 实现成本低：个性化笔记文本 → TTS API → 音频文件，管道最短
+- 不需要自建模型：接 ElevenLabs / Fish Audio / Edge TTS 即可
+- 场景明确：通勤听课、运动听课、睡前复习
+- 学生版的"听课模式"可以作为付费差异化功能
+
+```bash
+# 开发者版（Phase 3）
+neocortex read https://ddia.vonng.com/ch8/ --audio
+# → 生成 ~/.neocortex/notes/ddia-ch8.md + ddia-ch8.mp3
+
+# 学生版（App 内）
+# 点击"听课模式" → 播放个性化音频讲解
+```
+
+**动画为什么排在最后：**
+
+- 工程复杂度高 10 倍：需要白板渲染、图形生成、时间轴同步
+- 投入产出不确定：需要学生版积累使用数据后，确认动画对学习效果有显著提升
+- 等 AI 视频生成技术成熟后成本会大幅下降
+
+### 8.3 竞品多模态对比
+
+| 产品 | 了解用户 | 文本 | 音频 | 动画 | 个性化 |
+|------|:---:|:---:|:---:|:---:|:---:|
+| NotebookLM | ❌ | ✅ | ✅ | ❌ | ❌ |
+| OpenMAIC | ❌ | ✅ | ❌ | ✅ | ❌ |
+| Khan Academy | ❌ | ✅ | ❌ | ✅（人工录制） | ❌ |
+| Khanmigo | ❌ | ✅ | ❌ | ❌ | 弱 |
+| **Neocortex Phase 1** | **✅** | **✅** | ❌ | ❌ | **✅** |
+| **Neocortex Phase 3+** | **✅** | **✅** | **✅** | 待定 | **✅** |
+
+核心差异：**只有 Neocortex 能做到"个性化 × 多模态"的组合。** 其他产品要么有多模态但千人一面，要么有弱个性化但只有文本。
+
+## 9. 存储架构演进
 
 > 参考来源：[OpenClaw Memory](https://docs.openclaw.ai/concepts/memory)、[memsearch](https://github.com/zilliztech/memsearch)、[Local-First RAG with SQLite](https://www.pingcap.com/blog/local-first-rag-using-sqlite-ai-agent-memory-openclaw/)
 
-### 8.1 三阶段演进
+### 9.1 三阶段演进
 
 **Phase 1（MVP）：纯文件**
 
@@ -943,13 +1011,13 @@ SQLite 只做索引层，Markdown 是源文件。删掉 .sqlite 重新 `neocorte
 - 读新内容时自动关联历史笔记
 - 画像评估的依据追溯
 
-### 8.2 为什么 MVP 不上 SQLite
+### 9.2 为什么 MVP 不上 SQLite
 
 - MVP 阶段笔记数量少（<20 篇），遍历文件就够了
 - 减少依赖，降低安装门槛
 - 先验证核心价值（个性化讲解），再优化搜索体验
 
-### 8.3 为什么选 SQLite 而不是其他方案
+### 9.3 为什么选 SQLite 而不是其他方案
 
 OpenClaw 生态验证了 SQLite 做本地 AI 记忆存储的可行性：
 
@@ -963,7 +1031,7 @@ OpenClaw 生态验证了 SQLite 做本地 AI 记忆存储的可行性：
 
 核心原则：**Markdown 是源头，SQLite 只是索引。** 数据永远是人可读、git 友好的。
 
-### 8.4 渐进式检索（参考 claude-mem）
+### 9.4 渐进式检索（参考 claude-mem）
 
 > 参考来源：[claude-mem](https://github.com/thedotmack/claude-mem) 的三层检索设计
 
@@ -991,7 +1059,7 @@ neocortex notes --outline ddia-ch8-transactions.md
 neocortex notes --open ddia-ch8-transactions.md
 ```
 
-### 8.5 潜在数据源扩展
+### 9.5 潜在数据源扩展
 
 claude-mem 记录了用户在 Claude Code 里的所有操作历史。
 如果用户同时安装了 claude-mem 和 Neocortex，claude-mem 的数据可以作为额外的画像来源：
@@ -1004,11 +1072,11 @@ neocortex import --source claude-mem ~/.claude-mem/data/
 这比导入聊天记录更精准——它记录的是你实际的编程行为，而不只是对话。
 优先级低，放在 Phase 3 之后。
 
-## 9. CLI 设计参考
+## 10. CLI 设计参考
 
 > 参考来源：[Obsidian CLI](https://obsidian.md/cli)、[Notion CLI (4ier)](https://github.com/4ier/notion-cli)
 
-### 7.1 从 Obsidian CLI 和 Notion CLI 学到的
+### 10.1 从 Obsidian CLI 和 Notion CLI 学到的
 
 | 设计点 | 它们怎么做 | Neocortex 应用 |
 |--------|-----------|---------------|
@@ -1017,7 +1085,7 @@ neocortex import --source claude-mem ~/.claude-mem/data/
 | **AI Agent 友好** | Notion CLI 专门为 AI Agent 设计了 JSON 输出 + 标准退出码 | Neocortex 可作为 Claude Code / OpenClaw 的 skill 被调用 |
 | **URL 和本地路径双格式** | 支持直接粘贴链接，也支持本地 ID | `neocortex read` 同时支持 URL 和本地文件路径 |
 
-### 7.2 输出模式设计
+### 10.2 输出模式设计
 
 ```python
 import sys
@@ -1048,7 +1116,7 @@ neocortex profile --json
 neocortex profile | jq '.skills.python'
 ```
 
-### 7.3 AI Agent 集成设计（Future）
+### 10.3 AI Agent 集成设计（Future）
 
 Neocortex 可以被 Claude Code、OpenClaw 等 AI Agent 作为 skill 调用。
 当用户在 Claude Code 里写代码时，Claude Code 可以查询用户画像，给出更个性化的建议。
@@ -1076,7 +1144,7 @@ Claude Code 的回答就会跳过 Pub/Sub 基础，
 
 这让 Neocortex 从一个独立 CLI 工具，变成整个 AI 开发生态的一部分。
 
-### 7.4 与知识库工具的定位区分
+### 10.4 与知识库工具的定位区分
 
 Obsidian / Notion 等知识库工具开放 CLI 后，理论上也能做个性化学习。
 但它们本质上是 **存储和组织工具**，Neocortex 是 **理解和教学工具**：

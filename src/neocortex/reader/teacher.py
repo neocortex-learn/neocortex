@@ -1,0 +1,279 @@
+"""Personalized note generation — outline analysis and note writing."""
+
+from __future__ import annotations
+
+import json
+
+from neocortex.llm.base import LLMProvider
+from neocortex.models import Language, LearningStyle, Outline, OutlineItem, Profile
+from neocortex.reader.chunker import Chunk, chunk_content
+from neocortex.reader.fetcher import Document
+
+
+def _profile_summary(profile: Profile) -> str:
+    data = profile.model_dump(exclude_none=True, exclude_defaults=True)
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def _section_titles(doc: Document) -> str:
+    lines: list[str] = []
+    for section in doc.sections:
+        indent = "  " * (section.level - 1)
+        title = section.title or "(untitled section)"
+        lines.append(f"{indent}- {title}")
+    return "\n".join(lines) if lines else doc.title
+
+
+def _language_instruction(profile: Profile) -> str:
+    lang = profile.persona.language
+    if lang == Language.ZH:
+        return "请用中文输出。"
+    return "Output in English."
+
+
+def _level_instruction(profile: Profile) -> str:
+    offset = profile.calibration.level_offset
+    if offset >= 2:
+        return "The student finds the content too easy. Significantly increase depth and complexity. Skip basic explanations entirely."
+    if offset == 1:
+        return "The student prefers slightly more advanced content. Increase depth and assume stronger fundamentals."
+    if offset == -1:
+        return "The student prefers simpler explanations. Add more context and explain more fundamentals."
+    if offset <= -2:
+        return "The student finds the content too hard. Significantly simplify explanations. Break down concepts into smaller steps."
+    return ""
+
+
+def _style_instruction(profile: Profile) -> str:
+    style = profile.persona.learning_style
+    if style is None:
+        return ""
+    mapping = {
+        LearningStyle.CODE_EXAMPLES: "Use real code examples to illustrate every concept. Show before-and-after code when possible.",
+        LearningStyle.THEORY_FIRST: "Start with theory and principles. Explain the 'why' before showing any implementation.",
+        LearningStyle.JUST_DO_IT: "Be concise and actionable. Skip lengthy explanations, focus on what to do and how.",
+        LearningStyle.COMPARE_WITH_KNOWN: "Compare new concepts with things the student already knows. Use analogies from their existing projects.",
+    }
+    inst = mapping.get(style, "")
+    return f"\nTeaching style: {inst}" if inst else ""
+
+
+async def generate_outline(
+    doc: Document,
+    profile: Profile,
+    provider: LLMProvider,
+) -> Outline:
+    profile_json = _profile_summary(profile)
+    titles = _section_titles(doc)
+    lang_inst = _language_instruction(profile)
+    level_inst = _level_instruction(profile)
+
+    system_prompt = f"""\
+You are a private tutor who understands your student well.
+
+Student profile:
+{profile_json}
+
+Below are the chapter/section titles of the content the student is about to read:
+{titles}
+
+Analyze each section against the student's skill profile and mark:
+- "skip": Content the student has already mastered (summarize in one sentence)
+- "brief": Content the student should know but doesn't need deep explanation
+- "deep": Knowledge gaps or key areas the student needs to focus on
+
+{level_inst}
+
+Output valid JSON with this exact structure:
+{{
+  "items": [
+    {{"title": "section title", "marker": "skip|brief|deep", "reason": "why this marking"}}
+  ]
+}}
+
+{lang_inst}"""
+
+    messages = [
+        {"role": "user", "content": system_prompt},
+    ]
+
+    response = await provider.chat(messages, json_mode=True)
+
+    try:
+        data = json.loads(response)
+    except json.JSONDecodeError:
+        start = response.find("{")
+        end = response.rfind("}") + 1
+        if start >= 0 and end > start:
+            try:
+                data = json.loads(response[start:end])
+            except json.JSONDecodeError:
+                raise ValueError(f"Failed to parse outline from LLM response")
+        else:
+            raise ValueError(f"Failed to parse outline from LLM response")
+
+    items: list[OutlineItem] = []
+    for raw_item in data.get("items", []):
+        marker = raw_item.get("marker", "brief")
+        if marker not in ("skip", "brief", "deep"):
+            marker = "brief"
+        items.append(OutlineItem(
+            title=raw_item.get("title", ""),
+            marker=marker,
+            reason=raw_item.get("reason", ""),
+        ))
+
+    return Outline(source=doc.source, items=items)
+
+
+def _build_chunk_prompt(
+    chunk: Chunk,
+    outline: Outline,
+    profile: Profile,
+    focus: str | None,
+    question: str | None,
+) -> str:
+    profile_json = _profile_summary(profile)
+    lang_inst = _language_instruction(profile)
+    level_inst = _level_instruction(profile)
+    style_inst = _style_instruction(profile)
+
+    marker_map: dict[str, str] = {}
+    for item in outline.items:
+        marker_map[item.title] = item.marker
+
+    chunk_marker = marker_map.get(chunk.title)
+    if chunk_marker is None:
+        for item_title, marker in marker_map.items():
+            if len(item_title) >= 5 and (item_title in chunk.title or chunk.title in item_title):
+                chunk_marker = marker
+                break
+    if chunk_marker is None:
+        chunk_marker = "brief"
+
+    if chunk_marker == "skip":
+        depth_instruction = (
+            "This section covers content the student already masters. "
+            "Provide only a one-sentence summary. Do not elaborate."
+        )
+    elif chunk_marker == "brief":
+        depth_instruction = (
+            "This section covers content the student should know. "
+            "Provide a clear explanation with key principles. Keep it concise but complete."
+        )
+    else:
+        depth_instruction = (
+            "This is a KEY LEARNING AREA for this student. "
+            "Provide detailed explanation. Use analogies from the student's own projects when possible. "
+            "Include concrete examples. End with Action Items the student can apply to their own work."
+        )
+
+    focus_instruction = ""
+    if focus:
+        focus_instruction = f"\nThe student has specifically asked to focus on: **{focus}**. Emphasize this topic throughout."
+
+    question_instruction = ""
+    if question:
+        question_instruction = f"\nThe student has a specific question: **{question}**. Address this question at the end of the notes."
+
+    prev_context = ""
+    if chunk.prev_summary:
+        prev_context = f"\nContext from previous section:\n{chunk.prev_summary}\n"
+
+    prompt = f"""\
+You are a private tutor who understands your student well.
+
+Student profile:
+{profile_json}
+
+{depth_instruction}
+
+{level_inst}{style_inst}
+{prev_context}
+The student is reading the following content (section: {chunk.position}):
+
+---
+{chunk.content}
+---
+{focus_instruction}
+{question_instruction}
+
+Generate personalized study notes for this section. Requirements:
+1. Skip concepts the student already masters — don't waste space on them
+2. For areas the student has experience in, use analogies from their own projects
+3. Expand on the student's knowledge gaps (the "gaps" in their profile)
+4. If this is a deep-dive section, include Action Items: specific, actionable improvements for the student's own projects
+5. Keep difficulty at the student's current level +1 to +2 — stretch but don't overwhelm
+
+Output format: Markdown with clear heading hierarchy. Suitable for future review.
+
+{lang_inst}"""
+
+    return prompt
+
+
+async def generate_notes(
+    doc: Document,
+    outline: Outline,
+    profile: Profile,
+    provider: LLMProvider,
+    focus: str | None = None,
+    question: str | None = None,
+) -> str:
+    max_ctx = provider.max_context_tokens()
+    reserved_for_prompt = 2000
+    reserved_for_response = max(max_ctx // 4, 4000)
+    max_chunk_tokens = max_ctx - reserved_for_prompt - reserved_for_response
+    max_chunk_tokens = max(max_chunk_tokens, 2000)
+
+    chunks = chunk_content(doc, max_tokens=max_chunk_tokens)
+
+    note_parts: list[str] = []
+    lang = profile.persona.language
+    if lang == Language.ZH:
+        header = f"# {doc.title}\n\n> 来源: {doc.source}\n"
+    else:
+        header = f"# {doc.title}\n\n> Source: {doc.source}\n"
+    note_parts.append(header)
+
+    for chunk in chunks:
+        prompt = _build_chunk_prompt(chunk, outline, profile, focus, question)
+        messages = [{"role": "user", "content": prompt}]
+        response = await provider.chat(messages)
+        note_parts.append(response.strip())
+
+    if question:
+        already_answered = any(question.lower() in part.lower() for part in note_parts)
+        if not already_answered:
+            q_prompt = _build_question_section(question, doc, profile)
+            messages = [{"role": "user", "content": q_prompt}]
+            response = await provider.chat(messages)
+            note_parts.append(response.strip())
+
+    return "\n\n---\n\n".join(note_parts)
+
+
+def _build_question_section(
+    question: str,
+    doc: Document,
+    profile: Profile,
+) -> str:
+    profile_json = _profile_summary(profile)
+    lang_inst = _language_instruction(profile)
+
+    return f"""\
+You are a private tutor who understands your student well.
+
+Student profile:
+{profile_json}
+
+The student just read: "{doc.title}" (source: {doc.source})
+
+The student has this specific question:
+**{question}**
+
+Please answer this question in the context of what the student just read, considering their skill level and project experience. Be specific and actionable.
+
+Output format: Markdown, starting with a "## Q&A" heading.
+
+{lang_inst}"""
