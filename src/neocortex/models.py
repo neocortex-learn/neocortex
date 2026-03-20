@@ -149,6 +149,16 @@ class Profile(BaseModel):
     calibration: Calibration = Field(default_factory=Calibration)
 
 
+# ── Profile snapshots (growth tracking) ──
+
+class ProfileSnapshot(BaseModel):
+    date: str
+    skills: Skills = Field(default_factory=Skills)
+    total_lines: int = 0
+    total_projects: int = 0
+    notes_count: int = 0
+
+
 # ── Learning recommendations ──
 
 class Recommendation(BaseModel):

@@ -223,6 +223,40 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "推荐资源：",
     },
 
+    # ── Growth ──
+    "growth_title": {
+        "en": "Skill Growth",
+        "zh": "技能成长",
+    },
+    "growth_no_data": {
+        "en": "No snapshots yet. Run [bold]neocortex scan[/bold] to start tracking.",
+        "zh": "还没有快照数据。运行 [bold]neocortex scan[/bold] 开始追踪。",
+    },
+    "growth_snapshots": {
+        "en": "{count} snapshots recorded",
+        "zh": "已记录 {count} 次快照",
+    },
+    "growth_current": {
+        "en": "Current:",
+        "zh": "当前：",
+    },
+    "growth_new_langs": {
+        "en": "New languages learned:",
+        "zh": "新学的语言：",
+    },
+    "growth_level_ups": {
+        "en": "Level ups:",
+        "zh": "技能升级：",
+    },
+    "growth_new_domains": {
+        "en": "New domains explored:",
+        "zh": "新探索的领域：",
+    },
+    "growth_gaps_closed": {
+        "en": "Gaps closed:",
+        "zh": "已补的盲区：",
+    },
+
     # ── Ask ──
     "ask_thinking": {
         "en": "Thinking...",

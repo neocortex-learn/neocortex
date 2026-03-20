@@ -262,7 +262,7 @@ def scan(
     update: bool = typer.Option(False, help="Update existing profile"),
 ) -> None:
     """Scan local projects to build/update your skill profile."""
-    from neocortex.config import load_config, load_profile, save_profile
+    from neocortex.config import load_config, load_profile, save_profile, get_data_dir, get_notes_dir
     from neocortex.llm import create_provider
     from neocortex.scanner.extractors import extract_key_files
     from neocortex.scanner.profile import merge_profiles
@@ -321,6 +321,11 @@ def scan(
         if all_skills is not None:
             prof.skills = all_skills
             save_profile(prof)
+
+            from neocortex.growth import save_snapshot
+            notes_count = len(list(get_notes_dir().glob("*.md")))
+            save_snapshot(prof, get_data_dir(), notes_count)
+
             console.print(f"  [green]{t('scan_complete', lang)}[/green]")
 
     asyncio.run(_run_scan())
@@ -699,6 +704,71 @@ def recommend(
             console.print(f"     [dim]{t('recommend_resources', lang)}[/dim]")
             for res in rec.resources:
                 console.print(f"       - {res}")
+
+    console.print()
+
+
+@app.command()
+def growth(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Show your skill growth over time."""
+    from neocortex.config import get_data_dir
+    from neocortex.growth import load_snapshots, compute_diff
+
+    lang = _get_lang()
+    snapshots = load_snapshots(get_data_dir())
+
+    if len(snapshots) < 1:
+        console.print(f"  [yellow]{t('growth_no_data', lang)}[/yellow]")
+        return
+
+    if json_output or not sys.stdout.isatty():
+        if len(snapshots) >= 2:
+            diff = compute_diff(snapshots[0], snapshots[-1])
+            typer.echo(json_lib.dumps(diff, ensure_ascii=False, indent=2))
+        else:
+            typer.echo(json_lib.dumps({"snapshots": 1, "message": "Need at least 2 scans to show growth"}, ensure_ascii=False, indent=2))
+        return
+
+    console.print()
+    console.print(f"  [bold]{t('growth_title', lang)}[/bold]")
+    console.print("  " + "\u2501" * 52)
+
+    latest = snapshots[-1]
+    console.print(f"\n  [dim]{t('growth_snapshots', lang, count=str(len(snapshots)))}[/dim]")
+    console.print(f"  {t('growth_current', lang)}  [bold]{latest.total_lines:,}[/bold] lines | [bold]{latest.total_projects}[/bold] projects | [bold]{latest.notes_count}[/bold] notes")
+
+    if len(snapshots) >= 2:
+        diff = compute_diff(snapshots[0], snapshots[-1])
+        console.print(f"\n  [bold]{diff['period']}[/bold]")
+
+        if diff["lines_delta"] > 0:
+            console.print(f"  [green]+{diff['lines_delta']:,} lines[/green]")
+        if diff["projects_delta"] > 0:
+            console.print(f"  [green]+{diff['projects_delta']} projects[/green]")
+        if diff["notes_delta"] > 0:
+            console.print(f"  [green]+{diff['notes_delta']} notes[/green]")
+
+        if diff["new_languages"]:
+            console.print(f"\n  [bold cyan]{t('growth_new_langs', lang)}[/bold cyan]")
+            for lang_name in diff["new_languages"]:
+                console.print(f"    + {lang_name}")
+
+        if diff["level_ups"]:
+            console.print(f"\n  [bold green]{t('growth_level_ups', lang)}[/bold green]")
+            for up in diff["level_ups"]:
+                console.print(f"    {up['skill']}: {up['from']} → {up['to']}")
+
+        if diff["new_domains"]:
+            console.print(f"\n  [bold cyan]{t('growth_new_domains', lang)}[/bold cyan]")
+            for d in diff["new_domains"]:
+                console.print(f"    + {d}")
+
+        if diff["gaps_closed"]:
+            console.print(f"\n  [bold green]{t('growth_gaps_closed', lang)}[/bold green]")
+            for g in diff["gaps_closed"]:
+                console.print(f"    ✓ {g}")
 
     console.print()
 
