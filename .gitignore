@@ -1,0 +1,10 @@
+ROADMAP-INTERNAL.md
+__pycache__/
+*.pyc
+.env
+dist/
+build/
+*.egg-info/
+.venv/
+node_modules/
+.DS_Store
