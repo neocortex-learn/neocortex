@@ -901,7 +901,110 @@ neocortex/
 - [ ] 社交收藏导入（Twitter 书签 / 微博收藏）
 - [ ] 更多 UI 语言支持
 
-## 8. CLI 设计参考
+## 8. 存储架构演进
+
+> 参考来源：[OpenClaw Memory](https://docs.openclaw.ai/concepts/memory)、[memsearch](https://github.com/zilliztech/memsearch)、[Local-First RAG with SQLite](https://www.pingcap.com/blog/local-first-rag-using-sqlite-ai-agent-memory-openclaw/)
+
+### 8.1 三阶段演进
+
+**Phase 1（MVP）：纯文件**
+
+```
+~/.neocortex/
+├── config.json          # LLM 配置
+├── profile.json         # 技能画像 + 学习历史 + 校准参数
+└── notes/               # Markdown 笔记
+```
+
+够用。简单、无依赖、数据完全在用户手里。
+
+**Phase 2：JSON + SQLite 混合搜索**
+
+```
+~/.neocortex/
+├── config.json
+├── profile.json
+├── neocortex.sqlite     # 新增：FTS5 全文 + sqlite-vec 向量，混合搜索
+└── notes/               # Markdown 依然是源头
+```
+
+SQLite 只做索引层，Markdown 是源文件。删掉 .sqlite 重新 `neocortex index` 即可重建。
+
+直接上混合搜索（FTS5 + sqlite-vec），不做"先全文后语义"的递进。原因：
+- 用户已经配了 LLM API Key，embedding 零额外配置
+- 本地 embedding（ONNX bge-m3）也很成熟，不需要 API Key
+- sqlite-vec 只是一个 SQLite 扩展，不是独立服务，不重
+- 全文搜索和语义搜索的体验差距是"好用"和"不好用"的区别
+
+新增能力：
+- 语义搜索（"并发写入怎么保证一致性" → 找到事务章节笔记）
+- 全文搜索（精确关键词匹配）
+- 混合排名（BM25 + 向量余弦相似度加权融合）
+- 读新内容时自动关联历史笔记
+- 画像评估的依据追溯
+
+### 8.2 为什么 MVP 不上 SQLite
+
+- MVP 阶段笔记数量少（<20 篇），遍历文件就够了
+- 减少依赖，降低安装门槛
+- 先验证核心价值（个性化讲解），再优化搜索体验
+
+### 8.3 为什么选 SQLite 而不是其他方案
+
+OpenClaw 生态验证了 SQLite 做本地 AI 记忆存储的可行性：
+
+| 方案 | 优点 | 缺点 | 适合 Neocortex？ |
+|------|------|------|:---:|
+| **SQLite + FTS5 + sqlite-vec** | 单文件、全文+语义搜索、零服务依赖 | 需加载扩展 | Phase 2 ✅ |
+| **memsearch (Milvus)** | 开箱即用、混合搜索 | 依赖重 | ❌ 太重 |
+| **Chroma** | 向量搜索好用 | 额外进程 | ❌ 违背单文件原则 |
+| **PostgreSQL** | 功能全 | 需要运行服务 | ❌ 违背本地优先 |
+| **纯 JSON** | 最简单 | 搜索差、规模上限低 | Phase 1 ✅ |
+
+核心原则：**Markdown 是源头，SQLite 只是索引。** 数据永远是人可读、git 友好的。
+
+### 8.4 渐进式检索（参考 claude-mem）
+
+> 参考来源：[claude-mem](https://github.com/thedotmack/claude-mem) 的三层检索设计
+
+claude-mem 搜索记忆时用三层渐进式检索，实现 10 倍 token 节省：
+
+```
+Layer 1: search       → 紧凑索引（~50-100 tokens）→ 先看有没有相关的
+Layer 2: timeline     → 时间线上下文            → 确认具体是哪些
+Layer 3: get_details  → 完整内容（~500-1000 tokens）→ 拿到细节
+```
+
+Neocortex 的 `read` 两阶段管道已经体现了这个思路（大纲→详细笔记），
+在笔记搜索中也应该采用类似策略：
+
+```bash
+# Layer 1：搜索标题和摘要（快，省 token）
+neocortex notes --search "事务隔离"
+# → ddia-ch8-transactions.md (2026-03-20) — 丢失更新、写偏差、分布式事务
+
+# Layer 2：查看某篇笔记的大纲
+neocortex notes --outline ddia-ch8-transactions.md
+# → 显示标题结构和关键要点
+
+# Layer 3：打开完整内容
+neocortex notes --open ddia-ch8-transactions.md
+```
+
+### 8.5 潜在数据源扩展
+
+claude-mem 记录了用户在 Claude Code 里的所有操作历史。
+如果用户同时安装了 claude-mem 和 Neocortex，claude-mem 的数据可以作为额外的画像来源：
+
+```bash
+# Future: 从 claude-mem 导入 AI 编程行为数据
+neocortex import --source claude-mem ~/.claude-mem/data/
+```
+
+这比导入聊天记录更精准——它记录的是你实际的编程行为，而不只是对话。
+优先级低，放在 Phase 3 之后。
+
+## 9. CLI 设计参考
 
 > 参考来源：[Obsidian CLI](https://obsidian.md/cli)、[Notion CLI (4ier)](https://github.com/4ier/notion-cli)
 

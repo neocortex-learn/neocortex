@@ -1,5 +1,7 @@
 # Neocortex
 
+English | [中文](README.zh-CN.md)
+
 > AI-powered developer skill analyzer & personalized learning assistant.
 >
 > Scan your projects, build your skill profile, learn what matters to **you**.
