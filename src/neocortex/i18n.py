@@ -65,6 +65,56 @@ STRINGS: dict[str, dict[str, str]] = {
         "ko": "프로필 초기화 완료! [bold]neocortex scan[/bold]을 실행하여 프로젝트를 분석하세요.",
     },
 
+    # ── Init onboarding ──
+    "init_scanning_title": {
+        "en": "Let me find your projects...",
+        "zh": "让我找找你的项目...",
+    },
+    "init_discovering": {
+        "en": "Scanning for projects...",
+        "zh": "正在搜索项目...",
+    },
+    "init_no_projects": {
+        "en": "No projects found. You can scan manually later: neocortex scan <path>",
+        "zh": "没找到项目。你可以稍后手动扫描：neocortex scan <path>",
+    },
+    "init_found_projects": {
+        "en": "Found {count} projects:",
+        "zh": "找到 {count} 个项目：",
+    },
+    "init_more_projects": {
+        "en": "and {count} more",
+        "zh": "还有 {count} 个",
+    },
+    "init_scan_confirm": {
+        "en": "Scan these projects to build your profile?",
+        "zh": "扫描这些项目来构建你的画像？",
+    },
+    "init_complete": {
+        "en": "Setup complete! I now know your skills.",
+        "zh": "设置完成！我已经了解你的技能了。",
+    },
+    "init_next_steps": {
+        "en": "What to do next:",
+        "zh": "接下来可以：",
+    },
+    "init_hint_read": {
+        "en": "Read an article with personalized notes",
+        "zh": "读文章，生成个性化笔记",
+    },
+    "init_hint_ask": {
+        "en": "Ask anything, I know your background",
+        "zh": "问问题，我了解你的背景",
+    },
+    "init_hint_recommend": {
+        "en": "See what you should learn next",
+        "zh": "看看你该学什么",
+    },
+    "init_hint_profile": {
+        "en": "View your full skill profile",
+        "zh": "查看完整技能画像",
+    },
+
     # ── Role choices ──
     "role_backend": {"en": "Backend Engineer", "zh": "后端工程师"},
     "role_frontend": {"en": "Frontend Engineer", "zh": "前端工程师"},

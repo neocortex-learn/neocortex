@@ -103,6 +103,23 @@ def init() -> None:
     prof = load_profile()
     lang = cfg.output_settings.language
 
+    # ── Step 1: Language first (affects all subsequent prompts) ──
+    console.print()
+    console.print("  [bold]Welcome to Neocortex / 欢迎使用 Neocortex[/bold]")
+    console.print()
+
+    lang_choices = {"English": Language.EN, "中文": Language.ZH}
+    lang_labels = list(lang_choices.keys())
+    lang_answer = Prompt.ask(
+        "  [bold]?[/bold] Language / 语言",
+        choices=lang_labels,
+        default=lang_labels[1],
+        console=console,
+    )
+    selected_lang = lang_choices[lang_answer]
+    lang = selected_lang
+
+    # ── Step 2: Quick intro ──
     console.print()
     console.print(f"  [bold]{t('init_welcome', lang)}[/bold]")
     console.print()
@@ -169,19 +186,6 @@ def init() -> None:
     )
     selected_style = style_choices[style_answer]
 
-    lang_choices = {
-        t("lang_en", lang): Language.EN,
-        t("lang_zh", lang): Language.ZH,
-    }
-    lang_labels = list(lang_choices.keys())
-    lang_answer = Prompt.ask(
-        f"  [bold]?[/bold] {t('init_language', lang)}",
-        choices=lang_labels,
-        default=lang_labels[0],
-        console=console,
-    )
-    selected_lang = lang_choices[lang_answer]
-
     prof.persona = Persona(
         role=selected_role,
         experience_years=selected_exp,
@@ -190,12 +194,129 @@ def init() -> None:
         language=selected_lang,
     )
     save_profile(prof)
-
     cfg.output_settings.language = selected_lang
     save_config(cfg)
 
+    # ── Step 3: Auto-discover and scan projects ──
     console.print()
-    console.print(f"  {t('init_done', selected_lang)}")
+
+    if not cfg.provider:
+        console.print(f"  [yellow]{t('config_no_provider', lang)}[/yellow]")
+        console.print(f"  {t('init_done', lang)}")
+        console.print()
+        return
+
+    from neocortex.discovery import discover_projects
+
+    console.print(f"  [bold]{t('init_scanning_title', lang)}[/bold]")
+    with console.status(f"  {t('init_discovering', lang)}"):
+        projects = discover_projects()
+
+    if not projects:
+        console.print(f"  [dim]{t('init_no_projects', lang)}[/dim]")
+        console.print()
+        console.print(f"  {t('init_done', lang)}")
+        console.print()
+        return
+
+    console.print(f"  {t('init_found_projects', lang, count=str(len(projects)))}")
+    console.print()
+    for i, p in enumerate(projects[:15], 1):
+        console.print(f"    {i:2d}. [cyan]{p['name']}[/cyan] [dim]({p['type']})[/dim] {p['path']}")
+    if len(projects) > 15:
+        console.print(f"    ... {t('init_more_projects', lang, count=str(len(projects) - 15))}")
+    console.print()
+
+    scan_answer = Prompt.ask(
+        f"  [bold]?[/bold] {t('init_scan_confirm', lang)}",
+        choices=["Y", "n"],
+        default="Y",
+        console=console,
+    )
+
+    if scan_answer.lower() == "n":
+        console.print()
+        console.print(f"  {t('init_done', lang)}")
+        console.print()
+        return
+
+    # Scan selected projects
+    from neocortex.config import get_data_dir, get_notes_dir
+    from neocortex.llm import create_provider
+    from neocortex.scanner.extractors import extract_key_files
+    from neocortex.scanner.profile import merge_profiles
+    from neocortex.scanner.project import ProjectScanner
+
+    try:
+        provider = create_provider(cfg)
+    except ValueError as exc:
+        console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
+        console.print(f"  {t('init_done', lang)}")
+        console.print()
+        return
+
+    scanner = ProjectScanner(cfg.scan_settings.exclude_patterns)
+    scan_paths = [p["path"] for p in projects[:10]]
+
+    async def _run_init_scan() -> None:
+        from neocortex.scanner.analyzer import analyze_project
+
+        all_skills = None
+        for p_path in scan_paths:
+            name = Path(p_path).name
+            with console.status(f"  {t('scan_project', lang, name=name)}"):
+                project_info = scanner.scan(p_path)
+                key_files = extract_key_files(
+                    p_path,
+                    max_lines=cfg.scan_settings.max_file_lines,
+                    exclude_patterns=cfg.scan_settings.exclude_patterns,
+                )
+                skills = await analyze_project(project_info, key_files, provider)
+
+            langs_str = ", ".join(
+                f"{ln} ({lines})" for ln, lines in sorted(project_info.languages.items(), key=lambda x: -x[1])
+            ) or "-"
+            console.print(f"  [dim]  {name}: {langs_str}[/dim]")
+
+            if all_skills is not None:
+                all_skills = merge_profiles(all_skills, skills)
+            else:
+                all_skills = skills
+
+        if all_skills is not None:
+            prof.skills = all_skills
+            save_profile(prof)
+            from neocortex.growth import save_snapshot
+            notes_count = len(list(get_notes_dir().glob("*.md")))
+            save_snapshot(prof, get_data_dir(), notes_count)
+
+    asyncio.run(_run_init_scan())
+
+    # ── Step 4: Show result + next steps ──
+    console.print()
+    console.print(f"  [bold green]{t('init_complete', lang)}[/bold green]")
+    console.print()
+
+    # Show top skills
+    top_langs = sorted(prof.skills.languages.items(), key=lambda x: -x[1].lines)[:5]
+    if top_langs:
+        console.print(f"  [bold]{t('profile_languages', lang)}[/bold]")
+        for name, skill in top_langs:
+            bar = _skill_bar(skill.level, lang)
+            line = Text()
+            line.append(f"    {name:<14}", style="cyan")
+            line.append_text(bar)
+            if skill.lines > 0:
+                line.append(f"  ({_format_lines(skill.lines)})", style="dim")
+            console.print(line)
+        console.print()
+
+    # Next steps
+    console.print(f"  [bold]{t('init_next_steps', lang)}[/bold]")
+    console.print(f"    neocortex read <url>              {t('init_hint_read', lang)}")
+    console.print(f"    neocortex ask \"your question\"     {t('init_hint_ask', lang)}")
+    console.print(f"    neocortex recommend               {t('init_hint_recommend', lang)}")
+    console.print(f"    neocortex profile                 {t('init_hint_profile', lang)}")
     console.print()
 
 
