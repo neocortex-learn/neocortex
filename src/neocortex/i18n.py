@@ -201,6 +201,28 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "已从画像中清除聊天洞察。",
     },
 
+    # ── Recommend ──
+    "recommend_generating": {
+        "en": "Generating learning recommendations...",
+        "zh": "正在生成学习建议...",
+    },
+    "recommend_title": {
+        "en": "Learning Recommendations",
+        "zh": "学习路径推荐",
+    },
+    "recommend_empty": {
+        "en": "Could not generate recommendations. Try again later.",
+        "zh": "未能生成推荐。请稍后重试。",
+    },
+    "recommend_benefit": {
+        "en": "Benefit:",
+        "zh": "预期收益：",
+    },
+    "recommend_resources": {
+        "en": "Resources:",
+        "zh": "推荐资源：",
+    },
+
     # ── Notes ──
     "notes_title": {
         "en": "Knowledge Base",

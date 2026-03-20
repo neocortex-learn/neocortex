@@ -642,6 +642,64 @@ def import_data(
 
 
 @app.command()
+def recommend(
+    count: int = typer.Option(5, help="Number of recommendations"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Get personalized learning recommendations based on your profile."""
+    from neocortex.config import load_config, load_profile
+    from neocortex.llm import create_provider
+    from neocortex.recommender import generate_recommendations
+
+    cfg = load_config()
+    prof = load_profile()
+    lang = _get_lang()
+
+    if not prof.skills.languages and not prof.skills.domains:
+        console.print(f"  {t('profile_empty', lang)}")
+        raise typer.Exit(1)
+
+    provider = create_provider(cfg)
+
+    async def _run() -> list:
+        with console.status(f"  {t('recommend_generating', lang)}"):
+            return await generate_recommendations(prof, provider, count)
+
+    recs = asyncio.run(_run())
+
+    if not recs:
+        console.print(f"  [yellow]{t('recommend_empty', lang)}[/yellow]")
+        return
+
+    if json_output or not sys.stdout.isatty():
+        typer.echo(json_lib.dumps(
+            [r.model_dump(mode="json") for r in recs],
+            ensure_ascii=False, indent=2,
+        ))
+        return
+
+    console.print()
+    console.print(f"  [bold]{t('recommend_title', lang)}[/bold]")
+    console.print("  " + "\u2501" * 52)
+
+    priority_icons = {"high": "[red]!!![/red]", "medium": "[yellow]!![/yellow]", "low": "[dim]![/dim]"}
+
+    for i, rec in enumerate(recs, 1):
+        icon = priority_icons.get(rec.priority, "[yellow]!![/yellow]")
+        console.print()
+        console.print(f"  {icon} [bold cyan]{i}. {rec.topic}[/bold cyan]")
+        console.print(f"     {rec.reason}")
+        if rec.expected_benefit:
+            console.print(f"     [green]{t('recommend_benefit', lang)}[/green] {rec.expected_benefit}")
+        if rec.resources:
+            console.print(f"     [dim]{t('recommend_resources', lang)}[/dim]")
+            for res in rec.resources:
+                console.print(f"       - {res}")
+
+    console.print()
+
+
+@app.command()
 def notes(
     search: str = typer.Option(None, help="Search notes"),
 ) -> None:

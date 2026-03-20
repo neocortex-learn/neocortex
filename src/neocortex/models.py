@@ -149,6 +149,16 @@ class Profile(BaseModel):
     calibration: Calibration = Field(default_factory=Calibration)
 
 
+# ── Learning recommendations ──
+
+class Recommendation(BaseModel):
+    topic: str
+    reason: str
+    resources: list[str] = Field(default_factory=list)
+    expected_benefit: str = ""
+    priority: str = "medium"  # high / medium / low
+
+
 # ── App config ──
 
 class ProviderType(str, Enum):
