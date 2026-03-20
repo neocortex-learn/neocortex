@@ -257,10 +257,54 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "已补的盲区：",
     },
 
+    # ── Audio / TTS ──
+    "audio_generating": {
+        "en": "Generating audio...",
+        "zh": "正在生成音频...",
+    },
+    "audio_saved": {
+        "en": "Audio saved: {path}",
+        "zh": "音频已保存：{path}",
+    },
+
     # ── Ask ──
     "ask_thinking": {
         "en": "Thinking...",
         "zh": "正在思考...",
+    },
+
+    # ── GitHub ──
+    "github_cloning": {
+        "en": "Cloning {repo}...",
+        "zh": "正在克隆 {repo}...",
+    },
+    "github_listing": {
+        "en": "Listing repositories for {user}...",
+        "zh": "正在列出 {user} 的仓库...",
+    },
+    "github_no_token": {
+        "en": "GitHub token not configured. Run: neocortex config --github-token <token>",
+        "zh": "未配置 GitHub token。运行：neocortex config --github-token <token>",
+    },
+    "github_scanning": {
+        "en": "Scanning {count} repositories...",
+        "zh": "正在扫描 {count} 个仓库...",
+    },
+    "github_no_repos": {
+        "en": "No repositories found for {user}.",
+        "zh": "未找到 {user} 的仓库。",
+    },
+    "github_clone_failed": {
+        "en": "Failed to clone {repo}: {error}",
+        "zh": "克隆 {repo} 失败：{error}",
+    },
+    "github_api_error": {
+        "en": "GitHub API error: {error}",
+        "zh": "GitHub API 错误：{error}",
+    },
+    "github_token_saved": {
+        "en": "GitHub token saved.",
+        "zh": "GitHub token 已保存。",
     },
 
     # ── Notes ──

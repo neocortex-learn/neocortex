@@ -206,6 +206,7 @@ def config(
     base_url: str = typer.Option(None, help="Base URL for openai-compat"),
     model: str = typer.Option(None, help="Model name"),
     language: str = typer.Option(None, help="Note language (en/zh)"),
+    github_token: str = typer.Option(None, "--github-token", help="GitHub Personal Access Token"),
 ) -> None:
     """Configure LLM provider, API key, and preferences."""
     from neocortex.config import load_config, save_config
@@ -214,17 +215,18 @@ def config(
     cfg = load_config()
     lang = cfg.output_settings.language
 
-    has_updates = any(v is not None for v in [provider, api_key, base_url, model, language])
+    has_updates = any(v is not None for v in [provider, api_key, base_url, model, language, github_token])
 
     if not has_updates:
         console.print()
         console.print(f"  [bold]{t('config_show', lang)}[/bold]")
         console.print()
-        console.print(f"  provider:   {cfg.provider.value if cfg.provider else '(not set)'}")
-        console.print(f"  api_key:    {_mask_api_key(cfg.api_key)}")
-        console.print(f"  base_url:   {cfg.base_url or '(not set)'}")
-        console.print(f"  model:      {cfg.model or '(not set)'}")
-        console.print(f"  language:   {cfg.output_settings.language.value}")
+        console.print(f"  provider:      {cfg.provider.value if cfg.provider else '(not set)'}")
+        console.print(f"  api_key:       {_mask_api_key(cfg.api_key)}")
+        console.print(f"  base_url:      {cfg.base_url or '(not set)'}")
+        console.print(f"  model:         {cfg.model or '(not set)'}")
+        console.print(f"  github_token:  {_mask_api_key(cfg.github_token)}")
+        console.print(f"  language:      {cfg.output_settings.language.value}")
         console.print()
         return
 
@@ -245,6 +247,9 @@ def config(
     if model is not None:
         cfg.model = model
 
+    if github_token is not None:
+        cfg.github_token = github_token
+
     if language is not None:
         try:
             cfg.output_settings.language = Language(language)
@@ -258,12 +263,18 @@ def config(
 
 @app.command()
 def scan(
-    paths: list[str] = typer.Argument(..., help="Project paths to scan"),
+    paths: list[str] = typer.Argument(None, help="Local project paths to scan"),
+    github: str = typer.Option(None, "--github", help="GitHub username or user/repo to scan"),
     update: bool = typer.Option(False, help="Update existing profile"),
 ) -> None:
-    """Scan local projects to build/update your skill profile."""
+    """Scan local projects or GitHub repos to build/update your skill profile."""
+    import subprocess
+
+    import httpx
+
     from neocortex.config import load_config, load_profile, save_profile, get_data_dir, get_notes_dir
     from neocortex.llm import create_provider
+    from neocortex.models import Skills
     from neocortex.scanner.extractors import extract_key_files
     from neocortex.scanner.profile import merge_profiles
     from neocortex.scanner.project import ProjectScanner
@@ -272,7 +283,7 @@ def scan(
     lang = cfg.output_settings.language
     prof = load_profile()
 
-    if not paths:
+    if not paths and not github:
         console.print(f"  [red]{t('scan_no_projects', lang)}[/red]")
         raise typer.Exit(1)
 
@@ -284,10 +295,11 @@ def scan(
 
     scanner = ProjectScanner(cfg.scan_settings.exclude_patterns)
 
-    async def _run_scan() -> None:
+    async def _scan_local_paths(all_skills: Skills | None) -> Skills | None:
         from neocortex.scanner.analyzer import analyze_project
 
-        all_skills = prof.skills if update else None
+        if not paths:
+            return all_skills
 
         for p in paths:
             resolved = Path(p).resolve()
@@ -317,6 +329,91 @@ def scan(
                 all_skills = merge_profiles(all_skills, skills)
             else:
                 all_skills = skills
+
+        return all_skills
+
+    async def _scan_github(all_skills: Skills | None) -> Skills | None:
+        from neocortex.scanner.analyzer import analyze_project
+        from neocortex.scanner.github import (
+            cleanup_repo,
+            clone_repo,
+            get_single_repo,
+            list_user_repos,
+        )
+
+        if not github:
+            return all_skills
+
+        token = cfg.github_token
+
+        if "/" in github:
+            owner, repo_name = github.split("/", 1)
+            try:
+                with console.status(f"  {t('github_listing', lang, user=github)}"):
+                    repo_info = await get_single_repo(owner, repo_name, token)
+                repos = [repo_info]
+            except httpx.HTTPStatusError as exc:
+                console.print(f"  [red]{t('github_api_error', lang, error=str(exc.response.status_code))}[/red]")
+                return all_skills
+        else:
+            try:
+                with console.status(f"  {t('github_listing', lang, user=github)}"):
+                    repos = await list_user_repos(github, token)
+            except httpx.HTTPStatusError as exc:
+                console.print(f"  [red]{t('github_api_error', lang, error=str(exc.response.status_code))}[/red]")
+                return all_skills
+
+            if not repos:
+                console.print(f"  [yellow]{t('github_no_repos', lang, user=github)}[/yellow]")
+                return all_skills
+
+            repos = repos[:10]
+
+        console.print(f"  {t('github_scanning', lang, count=str(len(repos)))}")
+
+        for repo in repos:
+            clone_path = None
+            try:
+                with console.status(f"  {t('github_cloning', lang, repo=repo['full_name'])}"):
+                    clone_path = await clone_repo(repo["clone_url"], token)
+
+                with console.status(f"  {t('scan_project', lang, name=repo['name'])}"):
+                    project_info = scanner.scan(str(clone_path))
+
+                langs_str = ", ".join(
+                    f"{ln} ({lines})"
+                    for ln, lines in sorted(project_info.languages.items(), key=lambda x: -x[1])
+                )
+                frameworks_str = ", ".join(project_info.frameworks) if project_info.frameworks else "-"
+                console.print(f"  {t('scan_detected', lang, langs=langs_str or '-', frameworks=frameworks_str)}")
+
+                with console.status(f"  {t('analyzing', lang)}"):
+                    key_files = extract_key_files(
+                        str(clone_path),
+                        max_lines=cfg.scan_settings.max_file_lines,
+                        exclude_patterns=cfg.scan_settings.exclude_patterns,
+                    )
+                    skills = await analyze_project(project_info, key_files, provider)
+
+                if all_skills is not None:
+                    all_skills = merge_profiles(all_skills, skills)
+                else:
+                    all_skills = skills
+
+            except subprocess.CalledProcessError as exc:
+                stderr = exc.stderr or ""
+                console.print(f"  [red]{t('github_clone_failed', lang, repo=repo['full_name'], error=stderr)}[/red]")
+            finally:
+                if clone_path is not None:
+                    cleanup_repo(clone_path)
+
+        return all_skills
+
+    async def _run_scan() -> None:
+        all_skills = prof.skills if update else None
+
+        all_skills = await _scan_local_paths(all_skills)
+        all_skills = await _scan_github(all_skills)
 
         if all_skills is not None:
             prof.skills = all_skills
@@ -436,6 +533,7 @@ def read(
     source: str = typer.Argument(..., help="URL, PDF, or file path"),
     focus: str = typer.Option(None, help="Focus topic"),
     question: str = typer.Option(None, help="Question to answer"),
+    audio: bool = typer.Option(False, "--audio", help="Generate audio version"),
 ) -> None:
     """Read a URL/file and generate personalized notes."""
     from neocortex.config import get_notes_dir, load_config, load_profile, save_profile
@@ -513,6 +611,19 @@ def read(
 
         console.print()
         console.print(f"  [green]{t('read_saved', lang, path=str(note_path))}[/green]")
+
+        if audio:
+            from neocortex.tts import prepare_text_for_speech, text_to_speech
+
+            audio_path = note_path.with_suffix(".mp3")
+            speech_text = prepare_text_for_speech(notes_content)
+            if speech_text:
+                try:
+                    with console.status(f"  {t('audio_generating', lang)}"):
+                        await text_to_speech(speech_text, str(audio_path), lang.value)
+                    console.print(f"  [green]{t('audio_saved', lang, path=str(audio_path))}[/green]")
+                except RuntimeError as exc:
+                    console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
 
         if cfg.output_settings.auto_open:
             import platform

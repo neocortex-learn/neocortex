@@ -20,6 +20,9 @@ dependencies = [
     "readability-lxml>=0.8.0",
     "pymupdf>=1.25.0",
 
+    # TTS
+    "edge-tts>=6.1.0",
+
     # Utilities
     "tiktoken>=0.8.0",
     "cryptography>=44.0.0",

@@ -88,6 +88,14 @@ def load_config() -> AppConfig:
             import warnings
             warnings.warn("Failed to decrypt API key. Please reconfigure with: neocortex config --api-key <key>")
             data["api_key"] = None
+    github_token = data.get("github_token")
+    if github_token and isinstance(github_token, str) and github_token.startswith(_ENC_PREFIX):
+        try:
+            data["github_token"] = _decrypt(github_token)
+        except Exception:
+            import warnings
+            warnings.warn("Failed to decrypt GitHub token. Please reconfigure with: neocortex config --github-token <token>")
+            data["github_token"] = None
     return AppConfig.model_validate(data)
 
 
@@ -95,6 +103,8 @@ def save_config(config: AppConfig) -> None:
     data = config.model_dump(mode="json")
     if data.get("api_key") and not data["api_key"].startswith(_ENC_PREFIX):
         data["api_key"] = _encrypt(data["api_key"])
+    if data.get("github_token") and not data["github_token"].startswith(_ENC_PREFIX):
+        data["github_token"] = _encrypt(data["github_token"])
     path = _config_path()
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 

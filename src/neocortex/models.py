@@ -198,6 +198,7 @@ class AppConfig(BaseModel):
     api_key: str | None = None
     base_url: str | None = None
     model: str | None = None
+    github_token: str | None = None
     scan_settings: ScanSettings = Field(default_factory=ScanSettings)
     output_settings: OutputSettings = Field(default_factory=OutputSettings)
 
