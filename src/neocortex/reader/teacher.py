@@ -34,13 +34,13 @@ def _language_instruction(profile: Profile) -> str:
 def _level_instruction(profile: Profile) -> str:
     offset = profile.calibration.level_offset
     if offset >= 2:
-        return "The student finds the content too easy. Significantly increase depth and complexity. Skip basic explanations entirely."
+        return "The reader finds the content too easy. Significantly increase depth and complexity. Skip basic explanations entirely."
     if offset == 1:
-        return "The student prefers slightly more advanced content. Increase depth and assume stronger fundamentals."
+        return "The reader prefers slightly more advanced content. Increase depth and assume stronger fundamentals."
     if offset == -1:
-        return "The student prefers simpler explanations. Add more context and explain more fundamentals."
+        return "The reader prefers simpler explanations. Add more context and explain more fundamentals."
     if offset <= -2:
-        return "The student finds the content too hard. Significantly simplify explanations. Break down concepts into smaller steps."
+        return "The reader finds the content too hard. Significantly simplify explanations. Break down concepts into smaller steps."
     return ""
 
 
@@ -52,7 +52,7 @@ def _style_instruction(profile: Profile) -> str:
         LearningStyle.CODE_EXAMPLES: "Use real code examples to illustrate every concept. Show before-and-after code when possible.",
         LearningStyle.THEORY_FIRST: "Start with theory and principles. Explain the 'why' before showing any implementation.",
         LearningStyle.JUST_DO_IT: "Be concise and actionable. Skip lengthy explanations, focus on what to do and how.",
-        LearningStyle.COMPARE_WITH_KNOWN: "Compare new concepts with things the student already knows. Use analogies from their existing projects.",
+        LearningStyle.COMPARE_WITH_KNOWN: "Compare new concepts with things the reader already knows. Use analogies from their existing projects.",
     }
     inst = mapping.get(style, "")
     return f"\nTeaching style: {inst}" if inst else ""
@@ -69,18 +69,18 @@ async def generate_outline(
     level_inst = _level_instruction(profile)
 
     system_prompt = f"""\
-You are a private tutor who understands your student well.
+You are a technical advisor who knows the reader's background.
 
-Student profile:
+Reader profile:
 {profile_json}
 
-Below are the chapter/section titles of the content the student is about to read:
+Below are the chapter/section titles of the content the reader is about to read:
 {titles}
 
-Analyze each section against the student's skill profile and mark:
-- "skip": Content the student has already mastered (summarize in one sentence)
-- "brief": Content the student should know but doesn't need deep explanation
-- "deep": Knowledge gaps or key areas the student needs to focus on
+Analyze each section against the reader's skill profile and mark:
+- "skip": Content the reader has already mastered (summarize in one sentence)
+- "brief": Content the reader should know but doesn't need deep explanation
+- "deep": Knowledge gaps or key areas the reader needs to focus on
 
 {level_inst}
 
@@ -153,44 +153,44 @@ def _build_chunk_prompt(
 
     if chunk_marker == "skip":
         depth_instruction = (
-            "This section covers content the student already masters. "
+            "This section covers content the reader already masters. "
             "Provide only a one-sentence summary. Do not elaborate."
         )
     elif chunk_marker == "brief":
         depth_instruction = (
-            "This section covers content the student should know. "
+            "This section covers content the reader should know. "
             "Provide a clear explanation with key principles. Keep it concise but complete."
         )
     else:
         depth_instruction = (
-            "This is a KEY LEARNING AREA for this student. "
-            "Provide detailed explanation. Use analogies from the student's own projects when possible. "
-            "Include concrete examples. End with Action Items the student can apply to their own work."
+            "This is a KEY LEARNING AREA for this reader. "
+            "Provide detailed explanation. Use analogies from the reader's own projects when possible. "
+            "Include concrete examples. End with Action Items the reader can apply to their own work."
         )
 
     focus_instruction = ""
     if focus:
-        focus_instruction = f"\nThe student has specifically asked to focus on: **{focus}**. Emphasize this topic throughout."
+        focus_instruction = f"\nThe reader has specifically asked to focus on: **{focus}**. Emphasize this topic throughout."
 
     question_instruction = ""
     if question:
-        question_instruction = f"\nThe student has a specific question: **{question}**. Address this question at the end of the notes."
+        question_instruction = f"\nThe reader has a specific question: **{question}**. Address this question at the end of the notes."
 
     prev_context = ""
     if chunk.prev_summary:
         prev_context = f"\nContext from previous section:\n{chunk.prev_summary}\n"
 
     prompt = f"""\
-You are a private tutor who understands your student well.
+You are a technical advisor who knows the reader's background.
 
-Student profile:
+Reader profile:
 {profile_json}
 
 {depth_instruction}
 
 {level_inst}{style_inst}
 {prev_context}
-The student is reading the following content (section: {chunk.position}):
+The reader is reading the following content (section: {chunk.position}):
 
 ---
 {chunk.content}
@@ -199,11 +199,11 @@ The student is reading the following content (section: {chunk.position}):
 {question_instruction}
 
 Generate personalized study notes for this section. Requirements:
-1. Skip concepts the student already masters — don't waste space on them
-2. For areas the student has experience in, use analogies from their own projects
-3. Expand on the student's knowledge gaps (the "gaps" in their profile)
-4. If this is a deep-dive section, include Action Items: specific, actionable improvements for the student's own projects
-5. Keep difficulty at the student's current level +1 to +2 — stretch but don't overwhelm
+1. Skip concepts the reader already masters — don't waste space on them
+2. For areas the reader has experience in, use analogies from their own projects
+3. Expand on the reader's knowledge gaps (the "gaps" in their profile)
+4. If this is a deep-dive section, include Action Items: specific, actionable improvements for the reader's own projects
+5. Keep difficulty at the reader's current level +1 to +2 — stretch but don't overwhelm
 
 Output format: Markdown with clear heading hierarchy. Suitable for future review.
 
@@ -262,17 +262,17 @@ def _build_question_section(
     lang_inst = _language_instruction(profile)
 
     return f"""\
-You are a private tutor who understands your student well.
+You are a technical advisor who knows the reader's background.
 
-Student profile:
+Reader profile:
 {profile_json}
 
-The student just read: "{doc.title}" (source: {doc.source})
+The reader just read: "{doc.title}" (source: {doc.source})
 
-The student has this specific question:
+The reader has this specific question:
 **{question}**
 
-Please answer this question in the context of what the student just read, considering their skill level and project experience. Be specific and actionable.
+Please answer this question in the context of what the reader just read, considering their skill level and project experience. Be specific and actionable.
 
 Output format: Markdown, starting with a "## Q&A" heading.
 
