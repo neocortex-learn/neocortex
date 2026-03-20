@@ -86,6 +86,8 @@ class LearningStyle(str, Enum):
 class Language(str, Enum):
     EN = "en"
     ZH = "zh"
+    JA = "ja"
+    KO = "ko"
 
 
 class Persona(BaseModel):

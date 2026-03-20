@@ -9,24 +9,34 @@ STRINGS: dict[str, dict[str, str]] = {
     "scanning": {
         "en": "Scanning project...",
         "zh": "正在扫描项目...",
+        "ja": "プロジェクトをスキャン中...",
+        "ko": "프로젝트 스캔 중...",
     },
     "analyzing": {
         "en": "Analyzing with LLM...",
         "zh": "正在用 LLM 分析...",
+        "ja": "LLM で分析中...",
+        "ko": "LLM으로 분석 중...",
     },
     "done": {
         "en": "Done!",
         "zh": "完成！",
+        "ja": "完了！",
+        "ko": "완료!",
     },
     "error": {
         "en": "Error",
         "zh": "错误",
+        "ja": "エラー",
+        "ko": "오류",
     },
 
     # ── Init questionnaire ──
     "init_welcome": {
         "en": "Let's get to know you.",
         "zh": "让我们了解一下你。",
+        "ja": "あなたについて教えてください。",
+        "ko": "당신에 대해 알려주세요.",
     },
     "init_role": {
         "en": "Your current role?",
@@ -51,6 +61,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "init_done": {
         "en": "Profile initialized! Run [bold]neocortex scan[/bold] to analyze your projects.",
         "zh": "画像已初始化！运行 [bold]neocortex scan[/bold] 来分析你的项目。",
+        "ja": "プロファイル初期化完了！[bold]neocortex scan[/bold] を実行してプロジェクトを分析しましょう。",
+        "ko": "프로필 초기화 완료! [bold]neocortex scan[/bold]을 실행하여 프로젝트를 분석하세요.",
     },
 
     # ── Role choices ──
@@ -87,6 +99,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "config_saved": {
         "en": "Configuration saved.",
         "zh": "配置已保存。",
+        "ja": "設定を保存しました。",
+        "ko": "설정이 저장되었습니다.",
     },
     "config_no_provider": {
         "en": "No LLM provider configured. Run [bold]neocortex config --provider <name> --api-key <key>[/bold]",
@@ -95,6 +109,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "config_show": {
         "en": "Current configuration:",
         "zh": "当前配置：",
+        "ja": "現在の設定：",
+        "ko": "현재 설정:",
     },
 
     # ── Scan ──
@@ -117,37 +133,90 @@ STRINGS: dict[str, dict[str, str]] = {
     "scan_complete": {
         "en": "Scan complete. Profile updated.",
         "zh": "扫描完成。画像已更新。",
+        "ja": "スキャン完了。プロファイルを更新しました。",
+        "ko": "스캔 완료. 프로필이 업데이트되었습니다.",
     },
 
     # ── Profile ──
     "profile_title": {
         "en": "Skill Profile",
         "zh": "技能画像",
+        "ja": "スキルプロファイル",
+        "ko": "스킬 프로필",
     },
     "profile_empty": {
         "en": "No profile data yet. Run [bold]neocortex scan[/bold] first.",
         "zh": "还没有画像数据。请先运行 [bold]neocortex scan[/bold]。",
+        "ja": "プロファイルデータがありません。まず [bold]neocortex scan[/bold] を実行してください。",
+        "ko": "프로필 데이터가 없습니다. 먼저 [bold]neocortex scan[/bold]을 실행하세요.",
     },
-    "profile_languages": {"en": "Languages", "zh": "编程语言"},
-    "profile_frameworks": {"en": "Frameworks & Tools", "zh": "框架与工具"},
-    "profile_domains": {"en": "Domains", "zh": "技术领域"},
-    "profile_integrations": {"en": "Integrations", "zh": "第三方集成"},
-    "profile_architecture": {"en": "Architecture", "zh": "架构模式"},
+    "profile_languages": {
+        "en": "Languages",
+        "zh": "编程语言",
+        "ja": "プログラミング言語",
+        "ko": "프로그래밍 언어",
+    },
+    "profile_frameworks": {
+        "en": "Frameworks & Tools",
+        "zh": "框架与工具",
+        "ja": "フレームワーク・ツール",
+        "ko": "프레임워크 및 도구",
+    },
+    "profile_domains": {
+        "en": "Domains",
+        "zh": "技术领域",
+        "ja": "技術領域",
+        "ko": "기술 도메인",
+    },
+    "profile_integrations": {
+        "en": "Integrations",
+        "zh": "第三方集成",
+        "ja": "外部連携",
+        "ko": "외부 연동",
+    },
+    "profile_architecture": {
+        "en": "Architecture",
+        "zh": "架构模式",
+        "ja": "アーキテクチャ",
+        "ko": "아키텍처",
+    },
     "profile_exported": {
         "en": "Profile exported to {path}",
         "zh": "画像已导出到 {path}",
     },
 
     # ── Skill levels ──
-    "level_beginner": {"en": "Beginner", "zh": "入门"},
-    "level_proficient": {"en": "Proficient", "zh": "熟练"},
-    "level_advanced": {"en": "Advanced", "zh": "进阶"},
-    "level_expert": {"en": "Expert", "zh": "精通"},
+    "level_beginner": {
+        "en": "Beginner",
+        "zh": "入门",
+        "ja": "初心者",
+        "ko": "입문",
+    },
+    "level_proficient": {
+        "en": "Proficient",
+        "zh": "熟练",
+        "ja": "中級",
+        "ko": "숙련",
+    },
+    "level_advanced": {
+        "en": "Advanced",
+        "zh": "进阶",
+        "ja": "上級",
+        "ko": "고급",
+    },
+    "level_expert": {
+        "en": "Expert",
+        "zh": "精通",
+        "ja": "エキスパート",
+        "ko": "전문가",
+    },
 
     # ── Read ──
     "read_fetching": {
         "en": "Fetching content...",
         "zh": "正在获取内容...",
+        "ja": "コンテンツを取得中...",
+        "ko": "콘텐츠를 가져오는 중...",
     },
     "read_outline_title": {
         "en": "Personalized outline for: {title}",
@@ -160,10 +229,14 @@ STRINGS: dict[str, dict[str, str]] = {
     "read_generating": {
         "en": "Generating personalized notes...",
         "zh": "正在生成个性化笔记...",
+        "ja": "パーソナライズされたノートを生成中...",
+        "ko": "맞춤형 노트를 생성 중...",
     },
     "read_saved": {
         "en": "Note saved: {path}",
         "zh": "笔记已保存：{path}",
+        "ja": "ノートを保存しました：{path}",
+        "ko": "노트가 저장되었습니다: {path}",
     },
     "read_marker_skip": {"en": "skip", "zh": "跳过"},
     "read_marker_brief": {"en": "brief overview", "zh": "简要概览"},
@@ -173,11 +246,33 @@ STRINGS: dict[str, dict[str, str]] = {
     "feedback_prompt": {
         "en": "How was this note?",
         "zh": "这篇笔记怎么样？",
+        "ja": "このノートはいかがでしたか？",
+        "ko": "이 노트는 어떠셨나요?",
     },
-    "feedback_too_easy": {"en": "Too easy", "zh": "太简单"},
-    "feedback_just_right": {"en": "Just right", "zh": "刚好"},
-    "feedback_too_hard": {"en": "Too hard", "zh": "太难"},
-    "feedback_skip": {"en": "Skip", "zh": "跳过"},
+    "feedback_too_easy": {
+        "en": "Too easy",
+        "zh": "太简单",
+        "ja": "簡単すぎる",
+        "ko": "너무 쉬움",
+    },
+    "feedback_just_right": {
+        "en": "Just right",
+        "zh": "刚好",
+        "ja": "ちょうどいい",
+        "ko": "딱 적당함",
+    },
+    "feedback_too_hard": {
+        "en": "Too hard",
+        "zh": "太难",
+        "ja": "難しすぎる",
+        "ko": "너무 어려움",
+    },
+    "feedback_skip": {
+        "en": "Skip",
+        "zh": "跳过",
+        "ja": "スキップ",
+        "ko": "건너뛰기",
+    },
 
     # ── Import ──
     "import_parsing": {
@@ -205,10 +300,14 @@ STRINGS: dict[str, dict[str, str]] = {
     "recommend_generating": {
         "en": "Generating learning recommendations...",
         "zh": "正在生成学习建议...",
+        "ja": "学習レコメンドを生成中...",
+        "ko": "학습 추천을 생성 중...",
     },
     "recommend_title": {
         "en": "Learning Recommendations",
         "zh": "学习路径推荐",
+        "ja": "学習レコメンド",
+        "ko": "학습 추천",
     },
     "recommend_empty": {
         "en": "Could not generate recommendations. Try again later.",
@@ -227,6 +326,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "growth_title": {
         "en": "Skill Growth",
         "zh": "技能成长",
+        "ja": "スキル成長",
+        "ko": "스킬 성장",
     },
     "growth_no_data": {
         "en": "No snapshots yet. Run [bold]neocortex scan[/bold] to start tracking.",
@@ -271,6 +372,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "ask_thinking": {
         "en": "Thinking...",
         "zh": "正在思考...",
+        "ja": "考え中...",
+        "ko": "생각 중...",
     },
 
     # ── GitHub ──
@@ -311,14 +414,32 @@ STRINGS: dict[str, dict[str, str]] = {
     "notes_title": {
         "en": "Knowledge Base",
         "zh": "知识库",
+        "ja": "ナレッジベース",
+        "ko": "지식 베이스",
     },
     "notes_empty": {
         "en": "No notes yet. Run [bold]neocortex read <url>[/bold] to get started.",
         "zh": "还没有笔记。运行 [bold]neocortex read <url>[/bold] 开始学习。",
+        "ja": "ノートがありません。[bold]neocortex read <url>[/bold] を実行して学習を始めましょう。",
+        "ko": "아직 노트가 없습니다. [bold]neocortex read <url>[/bold]을 실행하여 학습을 시작하세요.",
     },
     "notes_no_match": {
         "en": "No notes matching: {query}",
         "zh": "没有匹配的笔记：{query}",
+    },
+
+    # ── Index / Search ──
+    "index_building": {
+        "en": "Building search index...",
+        "zh": "正在构建搜索索引...",
+    },
+    "index_done": {
+        "en": "Indexed {count} notes.",
+        "zh": "已索引 {count} 篇笔记。",
+    },
+    "search_result": {
+        "en": "Search results for: {query}",
+        "zh": "搜索结果：{query}",
     },
 }
 

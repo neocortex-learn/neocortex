@@ -45,30 +45,93 @@ Answer 5 quick questions (role, experience, learning goal, learning style, langu
 ### Configure your LLM
 
 ```bash
-# Use any LLM provider you prefer
+neocortex config --provider claude --api-key sk-xxx
+```
+
+### Scan & Learn
+
+```bash
+neocortex scan ~/projects/my-app          # Build skill profile
+neocortex profile                          # View your profile
+neocortex read https://ddia.vonng.com/ch8/ # Personalized notes
+neocortex recommend                        # Learning path
+neocortex ask "When should I use Raft vs Paxos?"  # Q&A
+```
+
+## Commands
+
+### `neocortex init`
+
+First-time setup — role, experience, learning goal, learning style, language.
+
+```bash
+neocortex init
+```
+
+Interactive prompts walk you through 5 questions. Takes 30 seconds.
+
+### `neocortex config`
+
+Configure LLM provider, API key, GitHub token, and preferences. Run without options to view current config.
+
+```bash
+# Set LLM provider
 neocortex config --provider claude --api-key sk-xxx
 
-# Or use OpenAI
-neocortex config --provider openai --api-key sk-xxx
-
-# Or any OpenAI-compatible provider (Kimi, DeepSeek, MiniMax, etc.)
+# OpenAI-compatible providers (Kimi, DeepSeek, MiniMax, etc.)
 neocortex config --provider openai-compat \
   --api-key sk-xxx \
   --base-url https://api.moonshot.cn/v1 \
   --model moonshot-v1-128k
+
+# Set GitHub token (needed for --github scanning)
+neocortex config --github-token ghp_xxx
+
+# Switch output language
+neocortex config --language zh
 ```
 
-### Scan your projects
+**Options:** `--provider`, `--api-key`, `--base-url`, `--model`, `--github-token`, `--language`
+
+### `neocortex scan`
+
+Scan local projects or GitHub repos to build/update your skill profile.
 
 ```bash
-# Scan one or more local projects
+# Scan local projects
 neocortex scan ~/projects/my-app ~/projects/my-api
 
-# See your skill profile
-neocortex profile
+# Update existing profile (merge, don't replace)
+neocortex scan ~/projects/new-project --update
+
+# Scan GitHub repos (requires --github-token in config)
+neocortex scan --github octocat           # All repos for a user
+neocortex scan --github octocat/my-repo   # Single repo
 ```
 
-Output:
+**Options:** `--github <user or user/repo>`, `--update`
+
+### `neocortex profile`
+
+View, export, or edit your skill profile.
+
+```bash
+# View profile in terminal
+neocortex profile
+
+# Export as JSON
+neocortex profile --export profile.json
+
+# Output as JSON to stdout (for piping)
+neocortex profile --json
+
+# Open profile.json in your $EDITOR
+neocortex profile --edit
+```
+
+**Options:** `--export <path>`, `--json`, `--edit`
+
+Example output:
 
 ```
  Skill Profile — Updated 2026-03-20
@@ -78,89 +141,115 @@ Languages
   Python        ██████████████████░░  Expert     (85K+ lines, 3 projects)
   TypeScript    ████████████████░░░░  Advanced   (40K+ lines, 2 projects)
   Go            ██████████░░░░░░░░░░  Proficient (3 projects, WebSocket focus)
-  Java          ████████████████░░░░  Advanced   (15+ Android apps)
-
-Frameworks & Tools
-  FastAPI       ██████████████████░░  Expert
-  Tornado       ██████████████████░░  Expert
-  React         ████████████████░░░░  Advanced
-  React Native  ████████████░░░░░░░░  Proficient
-  Android MVVM  ████████████████░░░░  Advanced
 
 Domains
   Real-time Systems   ██████████████████░░  Expert  (3x Redis→Go→WS architecture)
   Payment Integration ██████████████████░░  Expert  (9 providers)
-  Database Design     ████████████████░░░░  Advanced (200+ tables)
-  Stream Processing   ████████░░░░░░░░░░░░  Basic   (practical, no theory)
-  Distributed Systems ██████░░░░░░░░░░░░░░  Basic   (no formal knowledge)
 ```
 
-### Learn something
+### `neocortex read`
+
+Read a URL, PDF, or file and generate personalized notes based on your skill profile.
 
 ```bash
-# Feed it a book chapter URL
+# Read a web page
 neocortex read https://ddia.vonng.com/ch8/
 
-# Feed it a local PDF
+# Read a local PDF
 neocortex read ~/books/system-design.pdf
 
 # Focus on a specific topic
 neocortex read https://ddia.vonng.com/ch8/ --focus "transaction isolation"
 
-# Read with a specific question in mind
+# Read with a question in mind
 neocortex read https://some-article.com --question "How does this apply to my payment system?"
+
+# Generate audio version alongside the notes
+neocortex read https://some-article.com --audio
 ```
 
-Neocortex generates a personalized Markdown note:
+**Options:** `--focus <topic>`, `--question <text>`, `--audio`
 
-```
- Note saved: ~/.neocortex/notes/ddia-ch8-transactions.md
- Opening...
-```
+Neocortex shows a personalized outline first (skip/brief/deep dive per section), then generates notes that skip what you know and focus on what matters to you.
 
-The note skips what you already know, highlights what's new and relevant, and maps concepts to your actual code and projects.
+### `neocortex import`
 
-### Import your AI chat history (optional)
-
-Your past conversations with ChatGPT/Claude reveal what you struggled with — questions you asked = things you weren't sure about. Neocortex extracts these insights to sharpen your skill profile.
+Import ChatGPT or Claude chat history to enrich your skill profile. Questions you asked reveal knowledge gaps.
 
 ```bash
-# Import ChatGPT history (Settings → Data Controls → Export)
+# Import ChatGPT export (Settings → Data Controls → Export)
 neocortex import --source chatgpt ~/Downloads/conversations.json
 
-# Import Claude history (Settings → Privacy → Export data)
+# Import Claude export (Settings → Privacy → Export data)
 neocortex import --source claude ~/Downloads/claude-export/
+
+# Clear previously imported insights
+neocortex import --clear
 ```
+
+**Options:** `--source <chatgpt|claude>`, `--clear`
 
 Privacy: only structured insights are stored, never raw chat logs. See [Data & Privacy](#data--privacy).
 
-### Set your language
+### `neocortex notes`
+
+List or search your knowledge base.
 
 ```bash
-# Default is English. Switch to Chinese:
-neocortex config --language zh
-
-# Switch back to English:
-neocortex config --language en
-```
-
-This affects CLI messages, note output, and LLM prompts.
-
-### Manage your knowledge base
-
-```bash
-# List all notes
+# List all notes (sorted by date)
 neocortex notes
 
-# Search notes
+# Search notes by keyword
 neocortex notes --search "isolation"
-
-# Re-scan projects to update profile
-neocortex scan ~/projects/new-project --update
-
-# Export profile as JSON
-neocortex profile --export profile.json
 ```
+
+**Options:** `--search <query>`
+
+### `neocortex recommend`
+
+Get personalized learning path recommendations based on your skill profile and gaps.
+
+```bash
+# Get 5 recommendations (default)
+neocortex recommend
+
+# Get more recommendations
+neocortex recommend --count 10
+
+# Output as JSON
+neocortex recommend --json
+```
+
+**Options:** `--count <n>`, `--json`
+
+Each recommendation includes a topic, why it matters for you, expected benefit, and suggested resources.
+
+### `neocortex ask`
+
+Ask any question with your skill profile as context. The answer is tailored to your level and references your actual projects.
+
+```bash
+neocortex ask "When should I use Raft vs Paxos?"
+neocortex ask "How do I add idempotency to my payment flow?"
+```
+
+The response is rendered as Markdown in your terminal.
+
+### `neocortex growth`
+
+Track how your skills evolve over time. Each `scan` creates a snapshot; `growth` compares them.
+
+```bash
+# View growth summary
+neocortex growth
+
+# Output as JSON
+neocortex growth --json
+```
+
+**Options:** `--json`
+
+Shows new languages learned, skill level-ups, new domains, closed knowledge gaps, and line/project/note counts over time.
 
 ## How It Works
 

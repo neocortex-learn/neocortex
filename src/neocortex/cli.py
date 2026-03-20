@@ -535,7 +535,7 @@ def read(
     audio: bool = typer.Option(False, "--audio", help="Generate audio version"),
 ) -> None:
     """Read a URL/file and generate personalized notes."""
-    from neocortex.config import get_notes_dir, load_config, load_profile, save_profile
+    from neocortex.config import get_data_dir, get_notes_dir, load_config, load_profile, save_profile
     from neocortex.llm import create_provider
 
     cfg = load_config()
@@ -612,6 +612,11 @@ def read(
             filename = f"{safe_title}-{today}-{counter}.md"
             note_path = notes_dir / filename
         note_path.write_text(notes_content, encoding="utf-8")
+
+        from neocortex.search import NoteIndex
+
+        note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
+        note_index.index_note(note_path.name, doc.title, notes_content)
 
         console.print()
         console.print(f"  [green]{t('read_saved', lang, path=str(note_path))}[/green]")
@@ -924,11 +929,28 @@ def ask(
 
 
 @app.command()
+def index() -> None:
+    """Build or rebuild the note search index."""
+    from neocortex.config import get_data_dir, get_notes_dir
+    from neocortex.search import NoteIndex
+
+    lang = _get_lang()
+    notes_dir = get_notes_dir()
+    db_path = get_data_dir() / "neocortex.sqlite"
+
+    with console.status(f"  {t('index_building', lang)}"):
+        note_index = NoteIndex(db_path)
+        count = note_index.index_all(notes_dir)
+
+    console.print(f"  [green]{t('index_done', lang, count=str(count))}[/green]")
+
+
+@app.command()
 def notes(
     search: str = typer.Option(None, help="Search notes"),
 ) -> None:
     """List or search your knowledge base."""
-    from neocortex.config import get_notes_dir
+    from neocortex.config import get_data_dir, get_notes_dir
 
     lang = _get_lang()
     notes_dir = get_notes_dir()
@@ -940,6 +962,30 @@ def notes(
         return
 
     if search:
+        fts_results = _fts_search(search)
+        if fts_results is not None:
+            if not fts_results:
+                console.print(f"  {t('notes_no_match', lang, query=search)}")
+                return
+
+            console.print()
+            console.print(f"  [bold]{t('search_result', lang, query=search)}[/bold]")
+            console.print("  " + "\u2501" * 52)
+            console.print()
+
+            table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
+            table.add_column("File", style="cyan")
+            table.add_column("Title")
+            table.add_column("Snippet", style="dim")
+
+            for r in fts_results:
+                snippet = r["snippet"].replace(">>>", "[bold yellow]").replace("<<<", "[/bold yellow]")
+                table.add_row(r["filename"], r["title"], snippet)
+
+            console.print(table)
+            console.print()
+            return
+
         query = search.lower()
         matched: list[Path] = []
         for f in md_files:
@@ -976,6 +1022,23 @@ def notes(
 
     console.print(table)
     console.print()
+
+
+def _fts_search(query: str) -> list[dict] | None:
+    """Try FTS5 search. Returns *None* if no index is available."""
+    from neocortex.config import get_data_dir
+    from neocortex.search import NoteIndex
+
+    db_path = get_data_dir() / "neocortex.sqlite"
+    if not db_path.exists():
+        return None
+    note_index = NoteIndex(db_path)
+    if not note_index.has_index():
+        return None
+    try:
+        return note_index.search(query)
+    except Exception:
+        return None
 
 
 def _format_lines(lines: int) -> str:
