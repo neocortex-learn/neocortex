@@ -391,8 +391,7 @@ class ContentFetcher:
             return self._fetch_pdf(source)       # PyMuPDF
         elif source.endswith(".md"):
             return self._read_markdown(source)
-        elif source.endswith(".epub"):
-            return self._read_epub(source)       # ebooklib
+        # epub 支持计划在后续版本添加
         else:
             return self._read_text(source)
 ```

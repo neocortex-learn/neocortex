@@ -33,8 +33,14 @@ async def list_user_repos(
     page = 1
 
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+        is_self = False
+        if token:
+            resp = await client.get(f"{_GITHUB_API}/user")
+            if resp.status_code == 200:
+                is_self = resp.json().get("login", "").lower() == username.lower()
+
         while True:
-            if token:
+            if token and is_self:
                 url = f"{_GITHUB_API}/user/repos"
                 params = {
                     "per_page": "100",
@@ -58,8 +64,6 @@ async def list_user_repos(
                 break
 
             for repo in data:
-                if token and repo.get("owner", {}).get("login", "").lower() != username.lower():
-                    continue
                 repos.append({
                     "name": repo["name"],
                     "full_name": repo["full_name"],
@@ -106,16 +110,23 @@ async def get_single_repo(
 async def clone_repo(clone_url: str, token: str | None = None) -> Path:
     """Shallow-clone a repository into a temporary directory.
 
-    If *token* is provided, it is injected into the HTTPS URL for
-    authentication (works for private repos).
+    If *token* is provided, it is passed via GIT_ASKPASS so that
+    credentials never appear in process arguments or error output.
 
     Returns the Path to the cloned directory.
     """
-    url = clone_url
-    if token and url.startswith("https://"):
-        url = url.replace("https://", f"https://{token}@", 1)
+    import os
+    import stat
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="neocortex-gh-"))
+
+    env = os.environ.copy()
+    if token:
+        askpass_script = tmp_dir / "_askpass.sh"
+        askpass_script.write_text(f"#!/bin/sh\necho {token}\n")
+        askpass_script.chmod(stat.S_IRWXU)
+        env["GIT_ASKPASS"] = str(askpass_script)
+        env["GIT_TERMINAL_PROMPT"] = "0"
 
     def _do_clone() -> None:
         subprocess.run(
@@ -123,12 +134,13 @@ async def clone_repo(clone_url: str, token: str | None = None) -> Path:
                 "git", "clone",
                 "--depth", "1",
                 "--single-branch",
-                url,
+                clone_url,
                 str(tmp_dir / "repo"),
             ],
             check=True,
             capture_output=True,
             text=True,
+            env=env,
         )
 
     await asyncio.to_thread(_do_clone)

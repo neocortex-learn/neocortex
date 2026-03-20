@@ -286,19 +286,22 @@ Different models have different context windows. Neocortex automatically adjusts
 
 ## Roadmap
 
-- [ ] Core CLI framework
-- [ ] Multi-LLM provider support
-- [ ] Local project scanning
-- [ ] Skill profile generation
-- [ ] URL content fetching & personalized notes
-- [ ] PDF parsing support
-- [ ] Chat history import (ChatGPT / Claude) — learn from your past AI conversations
-- [ ] GitHub OAuth — scan remote repos directly
-- [ ] Profile diff — track skill growth over time
-- [ ] Learning path generation — "What should I learn next?"
-- [ ] Interactive mode — Q&A with context of your profile
+- [x] Core CLI framework (10 commands)
+- [x] Multi-LLM provider support (Claude, OpenAI, Gemini, OpenAI-compat)
+- [x] Local project scanning (Python, JS/TS, Go, Java, Kotlin, Swift, Rust, Ruby, PHP, C/C++, C#, Dart)
+- [x] Skill profile generation
+- [x] URL content fetching & personalized notes
+- [x] PDF parsing support
+- [x] Chat history import (ChatGPT / Claude)
+- [x] GitHub remote repo scanning (`neocortex scan --github`)
+- [x] Skill growth tracking (`neocortex growth`)
+- [x] Learning path recommendations (`neocortex recommend`)
+- [x] Interactive Q&A with profile context (`neocortex ask`)
+- [x] Audio output / TTS (`neocortex read --audio`)
+- [x] Localization (English, Chinese)
+- [x] AI Agent integration (Claude Code commands)
 - [ ] Plugin system — community-contributed skill extractors
-- [ ] Localization (English, Chinese)
+- [ ] Web/App version (student edition)
 
 ## Contributing
 

@@ -400,9 +400,8 @@ def scan(
                 else:
                     all_skills = skills
 
-            except subprocess.CalledProcessError as exc:
-                stderr = exc.stderr or ""
-                console.print(f"  [red]{t('github_clone_failed', lang, repo=repo['full_name'], error=stderr)}[/red]")
+            except subprocess.CalledProcessError:
+                console.print(f"  [red]{t('github_clone_failed', lang, repo=repo['full_name'], error='clone failed')}[/red]")
             finally:
                 if clone_path is not None:
                     cleanup_repo(clone_path)
@@ -607,6 +606,11 @@ def read(
         today = date.today().isoformat()
         filename = f"{safe_title}-{today}.md"
         note_path = notes_dir / filename
+        counter = 1
+        while note_path.exists():
+            counter += 1
+            filename = f"{safe_title}-{today}-{counter}.md"
+            note_path = notes_dir / filename
         note_path.write_text(notes_content, encoding="utf-8")
 
         console.print()
@@ -783,7 +787,7 @@ def recommend(
 
     async def _run() -> list:
         with console.status(f"  {t('recommend_generating', lang)}"):
-            return await generate_recommendations(prof, provider, count)
+            return await generate_recommendations(prof, provider, count, lang)
 
     recs = asyncio.run(_run())
 

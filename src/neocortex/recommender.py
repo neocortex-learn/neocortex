@@ -5,17 +5,9 @@ from __future__ import annotations
 import json
 
 from neocortex.llm.base import LLMProvider
-from neocortex.models import Profile, Recommendation
+from neocortex.models import Language, Profile, Recommendation
 
-
-async def generate_recommendations(
-    profile: Profile,
-    provider: LLMProvider,
-    count: int = 5,
-) -> list[Recommendation]:
-    profile_json = json.dumps(profile.model_dump(mode="json"), ensure_ascii=False, indent=2)
-
-    prompt = f"""你是一个资深技术导师。根据以下开发者画像，推荐 {count} 个最值得学习的主题。
+_PROMPT_ZH = """你是一个资深技术导师。根据以下开发者画像，推荐 {count} 个最值得学习的主题。
 
 开发者画像：
 {profile_json}
@@ -34,10 +26,44 @@ async def generate_recommendations(
 - expected_benefit: 学完后能获得什么（具体到项目层面）
 - priority: high / medium / low
 
-输出 JSON 数组格式。"""
+用中文回答。输出 JSON 数组格式。"""
 
+_PROMPT_EN = """You are a senior technical mentor. Based on the developer profile below, recommend {count} topics most worth learning.
+
+Developer profile:
+{profile_json}
+
+Principles:
+1. Prioritize filling gaps — these are missing critical knowledge in existing skills
+2. Align with learning_goal
+3. Consider learning_history — don't recommend what's already being studied
+4. ROI — prioritize topics that quickly improve and directly help existing projects
+5. Difficulty match — recommend +1~+2 levels above current, don't jump too far
+
+For each recommendation, provide:
+- topic: specific learning topic (e.g. "Redis Cluster setup & operations" not just "Redis")
+- reason: why learn this (reference specific projects and skills from the profile)
+- resources: 2-3 recommended resources (book chapters, official doc URLs, quality articles)
+- expected_benefit: what you gain after learning (specific to project level)
+- priority: high / medium / low
+
+Output as a JSON array."""
+
+
+async def generate_recommendations(
+    profile: Profile,
+    provider: LLMProvider,
+    count: int = 5,
+    language: Language = Language.EN,
+) -> list[Recommendation]:
+    profile_json = json.dumps(profile.model_dump(mode="json"), ensure_ascii=False, indent=2)
+
+    template = _PROMPT_ZH if language == Language.ZH else _PROMPT_EN
+    prompt = template.format(count=count, profile_json=profile_json)
+
+    system_msg = "You are a technical learning advisor. Always respond in valid JSON only."
     messages = [
-        {"role": "system", "content": "You are a technical learning advisor. Always respond in valid JSON only."},
+        {"role": "system", "content": system_msg},
         {"role": "user", "content": prompt},
     ]
 

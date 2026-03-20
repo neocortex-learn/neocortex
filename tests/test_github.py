@@ -79,7 +79,8 @@ class TestListUserRepos:
         assert "Authorization" not in mock_client.get.call_args_list[0]
 
     @pytest.mark.asyncio
-    async def test_list_repos_with_token(self):
+    async def test_list_repos_with_token_self(self):
+        user_resp = _make_httpx_response({"login": "myuser"})
         repos_payload = [
             {
                 "name": "private-proj",
@@ -88,63 +89,53 @@ class TestListUserRepos:
                 "language": "TypeScript",
                 "size": 999,
                 "description": "Secret stuff",
-                "owner": {"login": "myuser"},
             },
         ]
+        repos_resp = _make_httpx_response(repos_payload)
+        empty_resp = _make_httpx_response([])
 
-        mock_resp = _make_httpx_response(repos_payload)
         mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("neocortex.scanner.github.httpx.AsyncClient", return_value=mock_client) as mock_cls:
-            repos = await list_user_repos("myuser", token="ghp_test123")
-
-        assert len(repos) == 1
-        assert repos[0]["name"] == "private-proj"
-
-        init_kwargs = mock_cls.call_args[1]
-        assert init_kwargs["headers"]["Authorization"] == "Bearer ghp_test123"
-
-        call_args = mock_client.get.call_args
-        assert "/user/repos" in call_args[0][0]
-        assert call_args[1]["params"]["affiliation"] == "owner"
-
-    @pytest.mark.asyncio
-    async def test_list_repos_filters_by_username(self):
-        repos_payload = [
-            {
-                "name": "mine",
-                "full_name": "alice/mine",
-                "clone_url": "https://github.com/alice/mine.git",
-                "language": "Python",
-                "size": 100,
-                "description": "",
-                "owner": {"login": "alice"},
-            },
-            {
-                "name": "other-org-repo",
-                "full_name": "bigcorp/other-org-repo",
-                "clone_url": "https://github.com/bigcorp/other-org-repo.git",
-                "language": "Java",
-                "size": 500,
-                "description": "",
-                "owner": {"login": "bigcorp"},
-            },
-        ]
-
-        mock_resp = _make_httpx_response(repos_payload)
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_resp)
+        mock_client.get = AsyncMock(side_effect=[user_resp, repos_resp, empty_resp])
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("neocortex.scanner.github.httpx.AsyncClient", return_value=mock_client):
-            repos = await list_user_repos("alice", token="ghp_xxx")
+            repos = await list_user_repos("myuser", token="ghp_test123")
 
         assert len(repos) == 1
-        assert repos[0]["full_name"] == "alice/mine"
+        assert repos[0]["name"] == "private-proj"
+        calls = mock_client.get.call_args_list
+        assert "/user" == calls[0][0][0].split("api.github.com")[1]
+        assert "/user/repos" in calls[1][0][0]
+
+    @pytest.mark.asyncio
+    async def test_list_repos_with_token_other_user(self):
+        user_resp = _make_httpx_response({"login": "me"})
+        repos_payload = [
+            {
+                "name": "public-proj",
+                "full_name": "other/public-proj",
+                "clone_url": "https://github.com/other/public-proj.git",
+                "language": "Python",
+                "size": 100,
+                "description": "",
+            },
+        ]
+        repos_resp = _make_httpx_response(repos_payload)
+        empty_resp = _make_httpx_response([])
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=[user_resp, repos_resp, empty_resp])
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("neocortex.scanner.github.httpx.AsyncClient", return_value=mock_client):
+            repos = await list_user_repos("other", token="ghp_xxx")
+
+        assert len(repos) == 1
+        assert repos[0]["full_name"] == "other/public-proj"
+        calls = mock_client.get.call_args_list
+        assert "/users/other/repos" in calls[1][0][0]
 
     @pytest.mark.asyncio
     async def test_list_repos_empty_response(self):
@@ -247,7 +238,7 @@ class TestCloneRepo:
         cleanup_repo(result)
 
     @pytest.mark.asyncio
-    async def test_clone_repo_with_token(self):
+    async def test_clone_repo_with_token_uses_askpass(self):
         with patch("neocortex.scanner.github.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             result = await clone_repo(
@@ -256,7 +247,11 @@ class TestCloneRepo:
             )
 
         call_args = mock_run.call_args[0][0]
-        assert call_args[5] == "https://ghp_secret123@github.com/octocat/private.git"
+        assert call_args[5] == "https://github.com/octocat/private.git"
+        env = mock_run.call_args[1]["env"]
+        assert "GIT_ASKPASS" in env
+        assert "GIT_TERMINAL_PROMPT" in env
+        assert env["GIT_TERMINAL_PROMPT"] == "0"
 
         cleanup_repo(result)
 
