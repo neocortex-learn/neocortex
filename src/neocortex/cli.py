@@ -829,6 +829,68 @@ def recommend(
 
 
 @app.command()
+def plan(
+    weeks: int = typer.Option(4, help="Number of weeks"),
+) -> None:
+    """Generate a personalized learning plan."""
+    from neocortex.config import get_data_dir, get_notes_dir, load_config, load_profile
+    from neocortex.llm import create_provider
+    from neocortex.planner import generate_plan
+
+    cfg = load_config()
+    prof = load_profile()
+    lang = cfg.output_settings.language
+
+    if not prof.skills.languages and not prof.skills.domains:
+        console.print(f"  {t('profile_empty', lang)}")
+        raise typer.Exit(1)
+
+    try:
+        provider = create_provider(cfg)
+    except ValueError as exc:
+        console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
+        raise typer.Exit(1)
+
+    async def _run() -> str:
+        with console.status(f"  {t('plan_generating', lang)}"):
+            return await generate_plan(prof, provider, weeks, lang)
+
+    plan_md = asyncio.run(_run())
+
+    today = date.today().isoformat()
+    plan_md = plan_md.replace("{date}", today)
+
+    notes_dir = get_notes_dir()
+    filename = f"learning-plan-{today}.md"
+    plan_path = notes_dir / filename
+    counter = 1
+    while plan_path.exists():
+        counter += 1
+        filename = f"learning-plan-{today}-{counter}.md"
+        plan_path = notes_dir / filename
+    plan_path.write_text(plan_md, encoding="utf-8")
+
+    from neocortex.search import NoteIndex
+
+    note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
+    title = "Personalized Learning Plan" if lang == Language.EN else "个性化学习计划"
+    note_index.index_note(plan_path.name, title, plan_md)
+
+    console.print()
+    console.print(f"  [green]{t('plan_saved', lang, path=str(plan_path))}[/green]")
+    console.print()
+
+    if cfg.output_settings.auto_open:
+        import platform
+        import subprocess
+        opener = "open" if platform.system() == "Darwin" else "xdg-open"
+        try:
+            subprocess.Popen([opener, str(plan_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
+
+
+@app.command()
 def growth(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
@@ -929,20 +991,94 @@ def ask(
 
 
 @app.command()
+def chat() -> None:
+    """Start an interactive multi-turn Q&A session with your profile as context."""
+    from rich.markdown import Markdown
+
+    from neocortex.asker import ChatSession
+    from neocortex.config import load_config, load_profile
+    from neocortex.llm import create_provider
+
+    cfg = load_config()
+    prof = load_profile()
+    lang = _get_lang()
+
+    if not prof.skills.languages and not prof.skills.domains:
+        console.print(f"  {t('profile_empty', lang)}")
+        raise typer.Exit(1)
+
+    try:
+        provider = create_provider(cfg)
+    except ValueError as exc:
+        console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
+        raise typer.Exit(1)
+
+    session = ChatSession(prof, provider, lang)
+    empty_count = 0
+
+    console.print()
+    console.print(f"  [bold]{t('chat_welcome', lang)}[/bold]")
+    console.print(f"  [dim]{t('chat_profile_loaded', lang)}[/dim]")
+    console.print()
+
+    async def _send(msg: str) -> str:
+        with console.status(f"  {t('ask_thinking', lang)}"):
+            return await session.send(msg)
+
+    while True:
+        try:
+            user_input = Prompt.ask(f"  [bold cyan]{t('chat_prompt', lang)}[/bold cyan]", console=console)
+        except KeyboardInterrupt:
+            console.print()
+            console.print(f"  {t('chat_goodbye', lang)}")
+            break
+
+        stripped = user_input.strip()
+
+        if stripped.lower() in ("exit", "quit"):
+            console.print(f"  {t('chat_goodbye', lang)}")
+            break
+
+        if not stripped:
+            empty_count += 1
+            if empty_count >= 2:
+                console.print(f"  {t('chat_goodbye', lang)}")
+                break
+            continue
+
+        empty_count = 0
+
+        try:
+            answer = asyncio.run(_send(stripped))
+        except KeyboardInterrupt:
+            console.print("\n")
+            continue
+
+        console.print()
+        console.print(Markdown(answer))
+        console.print()
+
+
+@app.command()
 def index() -> None:
-    """Build or rebuild the note search index."""
+    """Build or rebuild the note search index (FTS5 + embeddings)."""
     from neocortex.config import get_data_dir, get_notes_dir
     from neocortex.search import NoteIndex
 
     lang = _get_lang()
     notes_dir = get_notes_dir()
     db_path = get_data_dir() / "neocortex.sqlite"
+    note_index = NoteIndex(db_path)
 
     with console.status(f"  {t('index_building', lang)}"):
-        note_index = NoteIndex(db_path)
         count = note_index.index_all(notes_dir)
 
     console.print(f"  [green]{t('index_done', lang, count=str(count))}[/green]")
+
+    if note_index.has_embeddings():
+        console.print(f"  [green]{t('index_embedding_done', lang)}[/green]")
+    else:
+        console.print(f"  [dim]{t('index_embedding_skip', lang)}[/dim]")
 
 
 @app.command()
@@ -1025,7 +1161,10 @@ def notes(
 
 
 def _fts_search(query: str) -> list[dict] | None:
-    """Try FTS5 search. Returns *None* if no index is available."""
+    """Try hybrid search (FTS5 + vector) if embeddings exist, otherwise pure FTS5.
+
+    Returns *None* if no index is available at all.
+    """
     from neocortex.config import get_data_dir
     from neocortex.search import NoteIndex
 
@@ -1036,6 +1175,8 @@ def _fts_search(query: str) -> list[dict] | None:
     if not note_index.has_index():
         return None
     try:
+        if note_index.has_embeddings():
+            return note_index.hybrid_search(query)
         return note_index.search(query)
     except Exception:
         return None

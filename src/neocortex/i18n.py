@@ -376,6 +376,32 @@ STRINGS: dict[str, dict[str, str]] = {
         "ko": "생각 중...",
     },
 
+    # ── Chat ──
+    "chat_welcome": {
+        "en": "Neocortex Chat (type 'exit' to quit)",
+        "zh": "Neocortex 对话模式（输入 exit 退出）",
+        "ja": "Neocortex チャット（exit で終了）",
+        "ko": "Neocortex 채팅 (exit 입력으로 종료)",
+    },
+    "chat_profile_loaded": {
+        "en": "Your profile is loaded. Ask me anything.",
+        "zh": "已加载你的画像，问我任何问题。",
+        "ja": "プロファイルを読み込みました。何でも聞いてください。",
+        "ko": "프로필이 로드되었습니다. 무엇이든 물어보세요.",
+    },
+    "chat_prompt": {
+        "en": "You",
+        "zh": "你",
+        "ja": "あなた",
+        "ko": "You",
+    },
+    "chat_goodbye": {
+        "en": "Goodbye!",
+        "zh": "再见！",
+        "ja": "さようなら！",
+        "ko": "안녕히 가세요!",
+    },
+
     # ── GitHub ──
     "github_cloning": {
         "en": "Cloning {repo}...",
@@ -440,6 +466,32 @@ STRINGS: dict[str, dict[str, str]] = {
     "search_result": {
         "en": "Search results for: {query}",
         "zh": "搜索结果：{query}",
+    },
+    "index_embedding": {
+        "en": "Generating embeddings...",
+        "zh": "正在生成向量索引...",
+    },
+    "index_embedding_done": {
+        "en": "Embeddings generated.",
+        "zh": "向量索引已生成。",
+    },
+    "index_embedding_skip": {
+        "en": "Embeddings skipped (fastembed not installed).",
+        "zh": "向量索引已跳过（fastembed 未安装）。",
+    },
+
+    # ── Plan ──
+    "plan_generating": {
+        "en": "Generating learning plan...",
+        "zh": "正在生成学习计划...",
+        "ja": "学習プランを生成中...",
+        "ko": "학습 계획을 생성 중...",
+    },
+    "plan_saved": {
+        "en": "Learning plan saved: {path}",
+        "zh": "学习计划已保存：{path}",
+        "ja": "学習プランを保存しました：{path}",
+        "ko": "학습 계획이 저장되었습니다: {path}",
     },
 }
 
