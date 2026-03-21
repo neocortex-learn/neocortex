@@ -1323,11 +1323,14 @@ def growth(
 
         if rec_records:
             completed = sum(1 for r in rec_records if r.status == "completed")
+            skipped = sum(1 for r in rec_records if r.status == "skipped")
             total = sum(1 for r in rec_records if r.status in ("pending", "completed"))
             if total > 0:
                 rate = round(completed / total * 100)
                 console.print(f"  {t('growth_rec_completed', lang)} [bold]{completed}[/bold]")
                 console.print(f"  {t('growth_rec_rate', lang, rate=str(rate))}")
+            if skipped > 0:
+                console.print(f"  [dim]{t('recommend_skipped', lang)}: {skipped}[/dim]")
 
         if gap_progress:
             learning = [k for k, v in gap_progress.items() if v.status == "learning"]
