@@ -559,6 +559,22 @@ STRINGS: dict[str, dict[str, str]] = {
     },
 
     # ── Recommend (closed-loop) ──
+    "recommend_path_title": {
+        "en": "Learning Path",
+        "zh": "学习路径",
+    },
+    "recommend_depends_on": {
+        "en": "Requires: {deps}",
+        "zh": "前置：{deps}",
+    },
+    "recommend_locked": {
+        "en": "locked (complete prerequisites first)",
+        "zh": "未解锁（请先完成前置步骤）",
+    },
+    "recommend_step": {
+        "en": "Step {step}",
+        "zh": "第 {step} 步",
+    },
     "recommend_gap_label": {
         "en": "Filling gap:",
         "zh": "补盲区：",

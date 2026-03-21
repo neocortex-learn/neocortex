@@ -39,7 +39,11 @@ def _build_context(
 
     gaps = _extract_gaps(profile)
     if gaps:
-        lines = [f"- {g['gap']} ({g['domain']}, {g['level']})" for g in gaps]
+        grouped: dict[str, list[str]] = {}
+        for g in gaps:
+            key = f"{g['domain']} ({g['level']})"
+            grouped.setdefault(key, []).append(g["gap"])
+        lines = [f"- {key}: {', '.join(names)}" for key, names in grouped.items()]
         sections.append("## Skill gaps\n" + "\n".join(lines))
 
     if records:
@@ -50,53 +54,57 @@ def _build_context(
 
     topics_read = profile.learning_history.topics_read[-10:]
     if topics_read:
-        lines = [f"- {t.title} ({t.source})" for t in topics_read]
+        lines = [f"- {tr.title}" for tr in topics_read]
         sections.append("## Recently read\n" + "\n".join(lines))
 
     return "\n\n".join(sections)
 
 
-_PROMPT_ZH = """你是一个资深技术导师。根据以下开发者画像，推荐 {count} 个最值得学习的主题。
+_PROMPT_ZH = """你是一个资深技术导师。根据以下开发者画像，设计一条包含 {count} 步的学习路径。
 
 {context}
 
-推荐原则：
-1. 优先补盲区（gaps）——这些是已有技能中缺失的关键知识
-2. 结合学习目标（learning_goal）——推荐方向要与目标一致
-3. 考虑已完成和已读内容——不要推荐已经在学的
-4. 投入产出比——优先推荐能快速提升且对现有项目有直接帮助的
-5. 难度匹配——基于当前水平推荐 +1~+2 级别的内容，不要跳太远
+设计原则：
+1. 按学习顺序排列——基础在前，进阶在后，每一步尽量建立在前面的基础上
+2. 优先补盲区（gaps）
+3. 结合学习目标（learning_goal）
+4. 考虑已完成和已读内容——不要推荐已经在学的
+5. 难度匹配——基于当前水平推荐 +1~+2 级别的内容
 
-对每个推荐，提供：
-- topic: 具体的学习主题（不要太宽泛，如"Redis Cluster 配置与运维"而不是"Redis"）
-- reason: 为什么要学（结合画像中的具体项目和技能说明）
-- resources: 2-3 个推荐的学习资源（每个资源为 {{"title": "...", "url": "...", "type": "article"}} 格式）
-- expected_benefit: 学完后能获得什么（具体到项目层面）
+对每一步，提供：
+- step: 学习顺序编号（从 1 开始）
+- topic: 具体的学习主题
+- reason: 为什么在这一步学这个
+- resources: 2-3 个学习资源（格式 {{"title": "...", "url": "...", "type": "article"}}）
+- expected_benefit: 学完后的收益
 - priority: high / medium / low
-- related_gaps: 这个推荐对应的 gap 名称列表（必须来自上面的 Skill gaps 列表）
+- related_gaps: 对应的 gap 名称列表
+- depends_on: 前置步骤的 topic 名称列表（如果没有前置则为空数组）
 
-用中文回答。输出 JSON 数组格式。"""
+用中文回答。输出 JSON 数组格式，按 step 排序。"""
 
-_PROMPT_EN = """You are a senior technical mentor. Based on the developer profile below, recommend {count} topics most worth learning.
+_PROMPT_EN = """You are a senior technical mentor. Based on the developer profile below, design a learning path with {count} steps.
 
 {context}
 
 Principles:
-1. Prioritize filling gaps — these are missing critical knowledge in existing skills
-2. Align with learning_goal
-3. Consider completed and recently read content — don't recommend what's already being studied
-4. ROI — prioritize topics that quickly improve and directly help existing projects
-5. Difficulty match — recommend +1~+2 levels above current, don't jump too far
+1. Arrange in learning order — fundamentals first, advanced later, each step builds on previous ones where possible
+2. Prioritize filling gaps
+3. Align with learning_goal
+4. Consider completed and recently read content — don't repeat
+5. Difficulty match — recommend +1~+2 levels above current
 
-For each recommendation, provide:
-- topic: specific learning topic (e.g. "Redis Cluster setup & operations" not just "Redis")
-- reason: why learn this (reference specific projects and skills from the profile)
-- resources: 2-3 recommended resources (each as {{"title": "...", "url": "...", "type": "article"}})
-- expected_benefit: what you gain after learning (specific to project level)
+For each step, provide:
+- step: learning order number (starting from 1)
+- topic: specific learning topic
+- reason: why learn this at this step
+- resources: 2-3 resources (each as {{"title": "...", "url": "...", "type": "article"}})
+- expected_benefit: what you gain after learning
 - priority: high / medium / low
-- related_gaps: list of gap names this recommendation addresses (must come from the Skill gaps list above)
+- related_gaps: list of gap names this addresses
+- depends_on: list of prerequisite topic names from earlier steps (empty array if none)
 
-Output as a JSON array."""
+Output as a JSON array, sorted by step."""
 
 
 async def generate_recommendations(
@@ -163,7 +171,7 @@ def _parse_recommendations(
         return []
 
     results = []
-    for item in data[:max_count]:
+    for i, item in enumerate(data[:max_count]):
         if not isinstance(item, dict):
             continue
         topic = item.get("topic", "")
@@ -177,6 +185,12 @@ def _parse_recommendations(
         related_gaps = _validate_related_gaps(
             item.get("related_gaps") or [], gap_names
         )
+        step = int(item.get("step", i + 1))
+        depends_on = [
+            str(d).strip()
+            for d in (item.get("depends_on") or [])
+            if isinstance(d, str) and d.strip()
+        ]
         results.append(Recommendation(
             topic=topic,
             reason=item.get("reason", ""),
@@ -184,6 +198,8 @@ def _parse_recommendations(
             expected_benefit=item.get("expected_benefit", ""),
             priority=priority,
             related_gaps=related_gaps,
+            step=step,
+            depends_on=depends_on,
         ))
     return results
 

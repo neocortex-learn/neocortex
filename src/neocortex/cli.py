@@ -1136,6 +1136,8 @@ def recommend(
             topic=rec.topic,
             resources=[parse_resource(r) for r in rec.resources],
             related_gaps=rec.related_gaps,
+            step=rec.step,
+            depends_on=rec.depends_on,
             created_at=date.today().isoformat(),
         )
         new_records.append(record)
@@ -1157,7 +1159,7 @@ def recommend(
     done_gaps = sum(1 for v in gap_progress.values() if v.status in ("learning", "known"))
 
     console.print()
-    console.print(f"  [bold]{t('recommend_title', lang)}[/bold]")
+    console.print(f"  [bold]{t('recommend_path_title', lang)}[/bold]")
     console.print("  " + "\u2501" * 52)
 
     if total_gaps > 0:
@@ -1167,24 +1169,33 @@ def recommend(
     if completed:
         console.print()
         for rec in completed[-3:]:
-            console.print(f"  [dim]✅ {rec.topic} — {t('recommend_completed', lang)}[/dim]")
-
-    priority_icons = {"high": "[red]!!![/red]", "medium": "[yellow]!![/yellow]", "low": "[dim]![/dim]"}
+            console.print(f"  [dim]\u2705 {rec.topic} \u2014 {t('recommend_completed', lang)}[/dim]")
 
     for i, rec in enumerate(recs, 1):
-        icon = priority_icons.get(rec.priority, "[yellow]!![/yellow]")
+        is_first = i == 1
+        is_last = i == len(recs)
+        if is_first:
+            connector = "  \u250c\u2500"
+        elif is_last:
+            connector = "  \u2514\u2500"
+        else:
+            connector = "  \u251c\u2500"
+
+        step_num = rec.step if hasattr(rec, 'step') and rec.step else i
         console.print()
-        console.print(f"  {icon} [bold cyan]{i}. {rec.topic}[/bold cyan]")
+        console.print(f"{connector} [bold cyan]Step {step_num}: {rec.topic}[/bold cyan]")
+        if rec.depends_on:
+            deps_str = ", ".join(rec.depends_on)
+            console.print(f"  \u2502  [dim]{t('recommend_depends_on', lang, deps=deps_str)}[/dim]")
         if rec.related_gaps:
             gaps_str = ", ".join(rec.related_gaps)
-            console.print(f"     [magenta]{t('recommend_gap_label', lang)}[/magenta] {gaps_str}")
-        console.print(f"     {rec.reason}")
+            console.print(f"  \u2502  [magenta]{t('recommend_gap_label', lang)}[/magenta] {gaps_str}")
+        console.print(f"  \u2502  {rec.reason}")
         if rec.expected_benefit:
-            console.print(f"     [green]{t('recommend_benefit', lang)}[/green] {rec.expected_benefit}")
+            console.print(f"  \u2502  [green]{t('recommend_benefit', lang)}[/green] {rec.expected_benefit}")
         if rec.resources:
-            console.print(f"     [dim]{t('recommend_resources', lang)}[/dim]")
             for res in rec.resources:
-                console.print(f"       - {res}")
+                console.print(f"  \u2502    [dim]- {res}[/dim]")
 
     console.print()
 

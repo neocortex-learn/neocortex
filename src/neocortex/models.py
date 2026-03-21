@@ -170,6 +170,8 @@ class Recommendation(BaseModel):
     expected_benefit: str = ""
     priority: str = "medium"  # high / medium / low
     related_gaps: list[str] = Field(default_factory=list)
+    step: int = 0
+    depends_on: list[str] = Field(default_factory=list)
 
 
 class Resource(BaseModel):
@@ -193,6 +195,8 @@ class RecommendationRecord(BaseModel):
     topic: str
     resources: list[Resource] = Field(default_factory=list)
     related_gaps: list[str] = Field(default_factory=list)
+    step: int = 0
+    depends_on: list[str] = Field(default_factory=list)
     created_at: str = ""
     status: str = "pending"  # pending / completed / skipped
     completed_at: str | None = None

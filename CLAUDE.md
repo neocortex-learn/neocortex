@@ -50,11 +50,21 @@ src/neocortex/
 
 ### 闭环学习
 推荐 → 阅读 → 自动匹配推荐 → 更新 gap 状态 → 下次推荐更精准。
-- 数据流：`recommend` 生成 RecommendationRecord → `read` 自动匹配（三级：URL/域名关键词/用户确认）→ gap 状态迁移（gap → learning → known）→ 下次 `recommend` 跳过已完成
+- 数据流：`recommend` 生成有序学习路径 → `read` 自动匹配（三级：URL/域名关键词/用户确认）→ gap 状态迁移（gap → learning → known）→ 下次 `recommend` 跳过已完成
 - 存储：`~/.neocortex/recommendations.json` + `~/.neocortex/gap_progress.json`
+
+### 学习路径（参考 [learn-claude-code](https://github.com/shareAI-lab/learn-claude-code) 的渐进式设计）
+推荐不再是平铺的独立主题，而是**有序的学习路径**：
+- 每条推荐有 `step`（学习顺序）和 `depends_on`（前置主题列表）
+- 前置未完成的步骤处于锁定状态，完成后自动解锁下游步骤
+- LLM prompt 要求按"基础→进阶"顺序排列，建立知识依赖关系
+- `tracker.get_unlocked_recommendations()` 过滤出当前可学的步骤
 
 ### Gap 语义去重
 `scanner/profile.py` 中的同义词表（`_GAP_SYNONYMS`）将 LLM 输出的不同表述归一化为统一名称。新发现的同义词直接加到表里。
+
+### Token 优化（参考 learn-claude-code 的 Skill 按需加载思路）
+`_build_context()` 按域分组展示 gap（减少重复 domain/level 标签），阅读历史只传标题不传完整路径，降低每次 LLM 调用的 token 消耗。
 
 ## 注意事项
 - Commit message 用中文
@@ -63,3 +73,7 @@ src/neocortex/
 - LLM 响应可能包含 <think> 标签（推理模型），已在 openai_compat.py 中统一剥离
 - gap 名称必须通过 `normalize_gap_name()` 规范化后再存储/比较
 - JSON 文件写入使用原子写入（temp file + os.replace），见 `config.py._save_json`
+- 推荐必须包含 `step` 和 `depends_on` 字段，保持学习路径的有序性
+
+## 设计参考
+- [learn-claude-code](https://github.com/shareAI-lab/learn-claude-code) — 渐进式学习路径设计、Skill 按需加载、任务依赖图

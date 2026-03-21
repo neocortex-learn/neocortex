@@ -55,6 +55,17 @@ def _extract_keywords(topic: str) -> list[str]:
     return [t for t in tokens if len(t) >= 3]
 
 
+def get_unlocked_recommendations(
+    pending: list[RecommendationRecord],
+    completed_topics: set[str],
+) -> list[RecommendationRecord]:
+    """Return pending recommendations whose dependencies are all satisfied."""
+    return [
+        r for r in pending
+        if not r.depends_on or all(dep in completed_topics for dep in r.depends_on)
+    ]
+
+
 def expire_stale_recommendations(
     records: list[RecommendationRecord],
     max_age_days: int = 30,
