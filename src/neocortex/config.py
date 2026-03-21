@@ -197,6 +197,8 @@ def save_gap_progress(progress: dict[str, GapProgress]) -> None:
 def update_gap_status(gap_name: str, profile: Profile) -> str:
     """Update gap status after reading related content. Returns new status."""
     from datetime import date as _date
+    from neocortex.scanner.profile import normalize_gap_name
+    gap_name = normalize_gap_name(gap_name)
     progress = load_gap_progress()
     entry = progress.get(gap_name)
     if entry is None:

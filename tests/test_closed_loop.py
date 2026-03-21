@@ -179,27 +179,40 @@ class TestConfigPersistence:
 
 class TestUpdateGapStatus:
     def test_gap_to_learning(self, tmp_path: Path):
-        from neocortex.config import update_gap_status, load_gap_progress, save_gap_progress
+        from neocortex.config import update_gap_status, load_gap_progress
 
         with patch("neocortex.config.get_data_dir", return_value=tmp_path):
             prof = Profile(skills=Skills(domains={
-                "testing": DomainSkill(gaps=["pytest"]),
+                "testing": DomainSkill(gaps=["pytest_fixtures"]),
             }))
-            status = update_gap_status("pytest", prof)
+            status = update_gap_status("pytest_fixtures", prof)
             assert status == "learning"
 
             progress = load_gap_progress()
-            assert progress["pytest"].reads == 1
+            assert progress["pytest_fixtures"].reads == 1
+
+    def test_synonym_normalized_in_progress(self, tmp_path: Path):
+        from neocortex.config import update_gap_status, load_gap_progress
+
+        with patch("neocortex.config.get_data_dir", return_value=tmp_path):
+            prof = Profile(skills=Skills(domains={
+                "testing": DomainSkill(gaps=["testing"]),
+            }))
+            # "pytest" normalizes to "testing"
+            status = update_gap_status("pytest", prof)
+            assert status == "learning"
+            progress = load_gap_progress()
+            assert "testing" in progress
 
     def test_learning_stays_until_3_reads(self, tmp_path: Path):
         from neocortex.config import update_gap_status, save_gap_progress
 
         with patch("neocortex.config.get_data_dir", return_value=tmp_path):
             save_gap_progress({
-                "pytest": GapProgress(status="learning", reads=1, first_seen="2026-03-21"),
+                "pytest_fixtures": GapProgress(status="learning", reads=1, first_seen="2026-03-21"),
             })
-            prof = Profile(skills=Skills(domains={"testing": DomainSkill(gaps=["pytest"])}))
-            status = update_gap_status("pytest", prof)
+            prof = Profile(skills=Skills(domains={"testing": DomainSkill(gaps=["pytest_fixtures"])}))
+            status = update_gap_status("pytest_fixtures", prof)
             assert status == "learning"
 
     def test_learning_to_known_at_3_reads(self, tmp_path: Path):
@@ -207,22 +220,22 @@ class TestUpdateGapStatus:
 
         with patch("neocortex.config.get_data_dir", return_value=tmp_path):
             save_gap_progress({
-                "pytest": GapProgress(status="learning", reads=2, first_seen="2026-03-21"),
+                "pytest_fixtures": GapProgress(status="learning", reads=2, first_seen="2026-03-21"),
             })
-            prof = Profile(skills=Skills(domains={"testing": DomainSkill(gaps=["pytest"])}))
-            status = update_gap_status("pytest", prof)
+            prof = Profile(skills=Skills(domains={"testing": DomainSkill(gaps=["pytest_fixtures"])}))
+            status = update_gap_status("pytest_fixtures", prof)
             assert status == "known"
-            assert "pytest" not in prof.skills.domains["testing"].gaps
+            assert "pytest_fixtures" not in prof.skills.domains["testing"].gaps
 
     def test_known_is_noop(self, tmp_path: Path):
         from neocortex.config import update_gap_status, save_gap_progress
 
         with patch("neocortex.config.get_data_dir", return_value=tmp_path):
             save_gap_progress({
-                "pytest": GapProgress(status="known", reads=5, first_seen="2026-03-21"),
+                "pytest_fixtures": GapProgress(status="known", reads=5, first_seen="2026-03-21"),
             })
             prof = Profile()
-            status = update_gap_status("pytest", prof)
+            status = update_gap_status("pytest_fixtures", prof)
             assert status == "known"
 
 

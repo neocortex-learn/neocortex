@@ -175,15 +175,19 @@ def _parse_skills(response: str) -> Skills:
             projects=lang_data.get("projects", []),
         )
 
+    from neocortex.scanner.profile import normalize_gap_name
+
     domains: dict[str, DomainSkill] = {}
     for domain_name, domain_data in data.get("domains", {}).items():
         key = _normalize_key(domain_name)
         if _is_noise(key):
             continue
+        raw_gaps = domain_data.get("gaps", [])
+        normalized_gaps = list(dict.fromkeys(normalize_gap_name(g) for g in raw_gaps if g))
         domains[key] = DomainSkill(
             level=SKILL_LEVELS.get(domain_data.get("level", "beginner"), SkillLevel.BEGINNER),
             evidence=domain_data.get("evidence", []),
-            gaps=domain_data.get("gaps", []),
+            gaps=normalized_gaps,
         )
 
     integrations: dict[str, IntegrationSkill] = {}
@@ -191,10 +195,12 @@ def _parse_skills(response: str) -> Skills:
         key = _normalize_key(int_name)
         if _is_noise(key):
             continue
+        raw_gaps = int_data.get("gaps", [])
+        normalized_gaps = list(dict.fromkeys(normalize_gap_name(g) for g in raw_gaps if g))
         integrations[key] = IntegrationSkill(
             level=SKILL_LEVELS.get(int_data.get("level", "beginner"), SkillLevel.BEGINNER),
             providers=int_data.get("providers", []),
-            gaps=int_data.get("gaps", []),
+            gaps=normalized_gaps,
         )
 
     architecture: dict[str, ArchitectureSkill] = {}

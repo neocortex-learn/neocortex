@@ -4,9 +4,9 @@
 Neocortex 是一个 AI 驱动的开发者技能分析和个性化学习助手。Python CLI 工具。
 
 ## 技术栈
-- Python 3.10+, Typer + Rich (CLI), Pydantic (数据模型)
+- Python 3.10+, Typer + Rich + InquirerPy (CLI), Pydantic (数据模型)
 - LLM: anthropic, openai, google-genai SDK
-- 内容: httpx, readability-lxml, pymupdf
+- 内容: httpx, readability-lxml, pymupdf, ebooklib, markdownify
 - TTS: edge-tts
 - 搜索: SQLite FTS5
 - 测试: pytest + pytest-asyncio
@@ -30,22 +30,36 @@ neocortex --help          # 查看 CLI 帮助
 ```
 src/neocortex/
 ├── cli.py          # CLI 入口，所有命令
-├── config.py       # 配置和画像读写
+├── config.py       # 配置、画像、推荐记录、gap 进度读写
 ├── models.py       # 所有 Pydantic 数据模型
 ├── i18n.py         # 中英文国际化
-├── recommender.py  # 学习路径推荐
+├── recommender.py  # 学习路径推荐（结构化上下文 + gap 关联）
+├── tracker.py      # 推荐跟踪：阅读 → 匹配推荐 → 更新 gap 状态
+├── scan_cache.py   # 扫描结果缓存（按 git HEAD / 文件 mtime）
 ├── asker.py        # 交互式问答
 ├── growth.py       # 技能成长追踪
 ├── tts.py          # 音频输出
 ├── search.py       # SQLite FTS5 搜索
-├── llm/            # LLM 适配层
-├── scanner/        # 项目扫描
-├── reader/         # 内容阅读 + 笔记生成
+├── llm/            # LLM 适配层（含 describe_image）
+├── scanner/        # 项目扫描（含 gap 同义词规范化）
+├── reader/         # 内容阅读 + 笔记生成（URL/PDF/EPUB/图片）
 └── importer/       # 聊天记录导入
 ```
+
+## 核心机制
+
+### 闭环学习
+推荐 → 阅读 → 自动匹配推荐 → 更新 gap 状态 → 下次推荐更精准。
+- 数据流：`recommend` 生成 RecommendationRecord → `read` 自动匹配（三级：URL/域名关键词/用户确认）→ gap 状态迁移（gap → learning → known）→ 下次 `recommend` 跳过已完成
+- 存储：`~/.neocortex/recommendations.json` + `~/.neocortex/gap_progress.json`
+
+### Gap 语义去重
+`scanner/profile.py` 中的同义词表（`_GAP_SYNONYMS`）将 LLM 输出的不同表述归一化为统一名称。新发现的同义词直接加到表里。
 
 ## 注意事项
 - Commit message 用中文
 - 不要在 commit message 中加 Co-Authored-By
 - 新增面向用户的文本必须同时添加中英文 i18n
 - LLM 响应可能包含 <think> 标签（推理模型），已在 openai_compat.py 中统一剥离
+- gap 名称必须通过 `normalize_gap_name()` 规范化后再存储/比较
+- JSON 文件写入使用原子写入（temp file + os.replace），见 `config.py._save_json`

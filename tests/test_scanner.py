@@ -292,8 +292,8 @@ class TestMergeProfiles:
         )
         merged = merge_profiles(existing, new)
         gaps = merged.domains["web"].gaps
-        assert "no caching" in gaps
-        assert "no rate limiting" in gaps
+        assert "no_caching" in gaps
+        assert "no_rate_limiting" in gaps
         assert len(gaps) == 2
 
     def test_merge_empty_skills(self):
@@ -354,8 +354,8 @@ class TestMergeProfiles:
         stripe = merged.integrations["stripe"]
         assert stripe.level == SkillLevel.ADVANCED
         assert stripe.providers == ["stripe"]
-        assert "no webhooks" in stripe.gaps
-        assert "no 3D secure" in stripe.gaps
+        assert "no_webhooks" in stripe.gaps
+        assert "no_3d_secure" in stripe.gaps
 
     def test_merge_architecture(self):
         existing = Skills(

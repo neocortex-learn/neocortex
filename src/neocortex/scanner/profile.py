@@ -18,6 +18,81 @@ LEVEL_ORDER: dict[SkillLevel, int] = {
     SkillLevel.EXPERT: 3,
 }
 
+# ── Gap synonym table ──
+# Maps variant names to a canonical form. Covers common LLM output variations.
+# Add new entries as they're discovered in real usage.
+
+_GAP_SYNONYMS: dict[str, str] = {
+    # Testing
+    "unit_testing": "testing",
+    "unit_test": "testing",
+    "test": "testing",
+    "pytest": "testing",
+    "jest": "testing",
+    "mocha": "testing",
+    "testing_framework": "testing",
+    "test_coverage": "test_coverage",
+    "code_coverage": "test_coverage",
+    "coverage": "test_coverage",
+    "pytest_fixtures": "pytest_fixtures",
+    "test_fixtures": "pytest_fixtures",
+    # CI/CD
+    "ci": "ci_cd",
+    "cd": "ci_cd",
+    "ci_cd": "ci_cd",
+    "continuous_integration": "ci_cd",
+    "continuous_deployment": "ci_cd",
+    "github_actions": "ci_cd",
+    # Docker / Containers
+    "docker": "containerization",
+    "docker_compose": "docker_compose",
+    "containers": "containerization",
+    "containerization": "containerization",
+    "kubernetes": "kubernetes",
+    "k8s": "kubernetes",
+    # Databases
+    "sql": "sql",
+    "sql_query": "sql",
+    "query_optimization": "query_optimization",
+    "database_optimization": "query_optimization",
+    "indexing": "query_optimization",
+    "database_indexing": "query_optimization",
+    # Security
+    "security": "security",
+    "web_security": "security",
+    "authentication": "authentication",
+    "auth": "authentication",
+    "oauth": "authentication",
+    "authorization": "authorization",
+    # API
+    "api_design": "api_design",
+    "rest_api": "api_design",
+    "api": "api_design",
+    # Performance
+    "performance": "performance",
+    "optimization": "performance",
+    "caching": "caching",
+    "cache": "caching",
+    "redis": "caching",
+    # Architecture
+    "system_design": "system_design",
+    "architecture": "system_design",
+    "design_patterns": "design_patterns",
+    "patterns": "design_patterns",
+    # Monitoring
+    "monitoring": "monitoring",
+    "observability": "monitoring",
+    "logging": "monitoring",
+    "error_handling": "error_handling",
+    "exception_handling": "error_handling",
+}
+
+
+def normalize_gap_name(gap: str) -> str:
+    """Normalize a gap name using synonym table + lowercase/snake_case."""
+    normalized = gap.strip().lower().replace("-", "_").replace(" ", "_")
+    return _GAP_SYNONYMS.get(normalized, normalized)
+
 
 def _higher_level(a: SkillLevel, b: SkillLevel) -> SkillLevel:
     return a if LEVEL_ORDER[a] >= LEVEL_ORDER[b] else b
@@ -114,6 +189,11 @@ def _merge_languages(
     return result
 
 
+def _normalize_gaps(gaps: list[str]) -> list[str]:
+    """Deduplicate gaps after applying synonym normalization."""
+    return list(dict.fromkeys(normalize_gap_name(g) for g in gaps if g))
+
+
 def _merge_domains(
     a: dict[str, DomainSkill], b: dict[str, DomainSkill]
 ) -> dict[str, DomainSkill]:
@@ -121,10 +201,11 @@ def _merge_domains(
     all_keys = set(a) | set(b)
     for key in all_keys:
         if key in a and key in b:
+            merged_gaps = _merge_unique(a[key].gaps, b[key].gaps)
             result[key] = DomainSkill(
                 level=_higher_level(a[key].level, b[key].level),
                 evidence=_merge_unique(a[key].evidence, b[key].evidence),
-                gaps=_merge_unique(a[key].gaps, b[key].gaps),
+                gaps=_normalize_gaps(merged_gaps),
             )
         elif key in a:
             result[key] = a[key].model_copy()
@@ -140,10 +221,11 @@ def _merge_integrations(
     all_keys = set(a) | set(b)
     for key in all_keys:
         if key in a and key in b:
+            merged_gaps = _merge_unique(a[key].gaps, b[key].gaps)
             result[key] = IntegrationSkill(
                 level=_higher_level(a[key].level, b[key].level),
                 providers=_merge_unique(a[key].providers, b[key].providers),
-                gaps=_merge_unique(a[key].gaps, b[key].gaps),
+                gaps=_normalize_gaps(merged_gaps),
             )
         elif key in a:
             result[key] = a[key].model_copy()
