@@ -925,15 +925,18 @@ def _match_and_update_recommendations(
     matched = match_recommendation(source, title, pending)
 
     if matched is None and pending:
-        top = pending[0]
+        # Show up to 3 pending recommendations, let user pick or skip
+        shown = pending[:3]
+        console.print()
+        for i, rec in enumerate(shown, 1):
+            console.print(f"    [dim]{i})[/dim] {rec.topic}")
         answer = Prompt.ask(
-            f"  [bold]?[/bold] {t('recommend_match_confirm', lang, topic=top.topic)}",
-            choices=["Y", "n"],
+            f"  [bold]?[/bold] {t('recommend_match_confirm', lang, topic=shown[0].topic)}  [dim](1-{len(shown)}/n)[/dim]",
             default="n",
             console=console,
         )
-        if answer.lower() == "y":
-            matched = top
+        if answer.isdigit() and 1 <= int(answer) <= len(shown):
+            matched = shown[int(answer) - 1]
 
     if matched is None:
         save_recommendations(all_records)
@@ -1139,7 +1142,6 @@ def recommend(
         existing_topics.add(rec.topic)
 
     all_records = existing_records + new_records
-    save_recommendations(all_records)
 
     if json_output or not sys.stdout.isatty():
         typer.echo(json_lib.dumps(
@@ -1147,6 +1149,8 @@ def recommend(
             ensure_ascii=False, indent=2,
         ))
         return
+
+    save_recommendations(all_records)
 
     gap_progress = load_gap_progress()
     total_gaps = len(gap_progress)

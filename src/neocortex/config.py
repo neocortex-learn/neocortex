@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import socket
 import uuid
 from pathlib import Path
@@ -137,9 +138,20 @@ def _load_json(filename: str, default: Any = None) -> Any:
 
 
 def _save_json(filename: str, data: Any) -> None:
-    """Generic JSON file writer to data dir."""
+    """Atomic JSON file writer to data dir (temp file + rename)."""
+    import tempfile
     path = get_data_dir() / filename
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def load_recommendations(status: str | None = None) -> list[RecommendationRecord]:

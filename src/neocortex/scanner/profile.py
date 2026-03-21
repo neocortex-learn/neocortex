@@ -34,15 +34,29 @@ def _merge_unique(a: list[str], b: list[str]) -> list[str]:
 
 
 def _normalize_dict_keys(d: dict) -> dict:
-    """Normalize dictionary keys to lowercase, merging duplicates by taking higher level."""
+    """Normalize dictionary keys to lowercase, merging data from duplicate keys."""
     result: dict = {}
     for key, value in d.items():
         normalized = key.strip().lower()
         if normalized in result:
             existing = result[normalized]
+            # Merge both entries instead of discarding one
             if hasattr(existing, "level") and hasattr(value, "level"):
-                if LEVEL_ORDER.get(value.level, 0) > LEVEL_ORDER.get(existing.level, 0):
-                    result[normalized] = value
+                higher = _higher_level(existing.level, value.level)
+                # Merge list fields from both entries
+                merged = existing.model_copy()
+                merged.level = higher
+                for field_name in ("evidence", "gaps", "frameworks", "patterns",
+                                   "providers", "projects"):
+                    if hasattr(merged, field_name) and hasattr(value, field_name):
+                        existing_list = getattr(merged, field_name)
+                        new_list = getattr(value, field_name)
+                        setattr(merged, field_name, _merge_unique(existing_list, new_list))
+                if hasattr(merged, "lines") and hasattr(value, "lines"):
+                    merged.lines = max(existing.lines, value.lines)
+                result[normalized] = merged
+            else:
+                result[normalized] = value
         else:
             result[normalized] = value
     return result

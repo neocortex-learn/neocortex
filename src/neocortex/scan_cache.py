@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -12,7 +13,7 @@ from neocortex.models import Skills
 def _get_project_hash(project_path: str) -> str:
     """Get a hash representing the project's current state.
 
-    Uses git HEAD if available, otherwise falls back to config file mtime.
+    Uses git HEAD + dirty state if available, otherwise hashes source file mtimes.
     """
     p = Path(project_path)
     git_dir = p / ".git"
@@ -34,12 +35,13 @@ def _get_project_hash(project_path: str) -> str:
             )
             if head.returncode == 0:
                 commit = head.stdout.strip()
-                dirty_hash = str(hash(dirty.stdout)) if dirty.stdout else "clean"
+                dirty_hash = hashlib.md5(dirty.stdout.encode()).hexdigest()[:12] if dirty.stdout else "clean"
                 return f"{commit}:{dirty_hash}"
         except (subprocess.TimeoutExpired, OSError):
             pass
 
-    # Fallback: hash of config file mtimes
+    # Fallback: deterministic hash of source file mtimes
+    source_extensions = {".py", ".js", ".ts", ".go", ".rs", ".java", ".rb", ".c", ".cpp", ".h"}
     config_files = [
         "package.json", "pyproject.toml", "requirements.txt", "go.mod",
         "Cargo.toml", "build.gradle", "pom.xml", "Gemfile", "composer.json",
@@ -49,7 +51,30 @@ def _get_project_hash(project_path: str) -> str:
         f = p / name
         if f.exists():
             mtimes.append(f"{name}:{f.stat().st_mtime}")
-    return "|".join(mtimes) if mtimes else "unknown"
+    # Also hash a sample of source files (up to 50) for non-git projects
+    source_files = []
+    try:
+        for f in p.rglob("*"):
+            if f.is_file() and f.suffix in source_extensions and not any(
+                part.startswith(".") or part in ("node_modules", "__pycache__", "venv", ".venv", "dist", "build")
+                for part in f.parts
+            ):
+                source_files.append(f)
+                if len(source_files) >= 50:
+                    break
+    except PermissionError:
+        pass
+    for f in sorted(source_files):
+        mtimes.append(f"{f.relative_to(p)}:{f.stat().st_mtime}")
+
+    if not mtimes:
+        try:
+            entries = sorted(e.name for e in p.iterdir() if not e.name.startswith("."))
+            return hashlib.md5("|".join(entries).encode()).hexdigest()
+        except PermissionError:
+            return "empty"
+
+    return hashlib.md5("|".join(mtimes).encode()).hexdigest()
 
 
 class ScanCache:

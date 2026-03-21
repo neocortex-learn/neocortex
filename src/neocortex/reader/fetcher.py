@@ -87,7 +87,8 @@ class ContentFetcher:
         markdown_text = self._html_to_markdown(summary_html)
 
         # Fallback to Jina Reader if readability extracted very little content
-        if len(markdown_text.strip()) < 100:
+        # Skip for private/local URLs to avoid leaking sensitive URLs to third party
+        if len(markdown_text.strip()) < 100 and self._is_public_url(url):
             jina_doc = await self._fetch_url_jina(url)
             if jina_doc is not None:
                 return jina_doc
@@ -100,6 +101,31 @@ class ContentFetcher:
             source=url,
             sections=sections,
         )
+
+    @staticmethod
+    def _is_public_url(url: str) -> bool:
+        """Check if URL is safe to send to third-party services."""
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        # Block private/local hosts
+        if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+            return False
+        if host.endswith(".local") or host.endswith(".internal"):
+            return False
+        # Block private IP ranges
+        if host.startswith(("10.", "172.16.", "172.17.", "172.18.", "172.19.",
+                           "172.20.", "172.21.", "172.22.", "172.23.",
+                           "172.24.", "172.25.", "172.26.", "172.27.",
+                           "172.28.", "172.29.", "172.30.", "172.31.",
+                           "192.168.")):
+            return False
+        # Block URLs with sensitive query params
+        query = parsed.query.lower()
+        sensitive_params = ("token", "key", "secret", "password", "auth", "credential", "sig", "signature")
+        if any(param in query for param in sensitive_params):
+            return False
+        return True
 
     async def _fetch_url_jina(self, url: str) -> Document | None:
         jina_url = f"https://r.jina.ai/{url}"
@@ -182,6 +208,12 @@ class ContentFetcher:
         file_path = Path(path)
         if not file_path.exists():
             raise ValueError(f"File not found: {path}")
+
+        # Guard against oversized images (max 20MB)
+        file_size = file_path.stat().st_size
+        max_size = 20 * 1024 * 1024  # 20MB
+        if file_size > max_size:
+            raise ValueError(f"Image too large ({file_size // 1024 // 1024}MB). Maximum is 20MB.")
 
         image_data = file_path.read_bytes()
         suffix = file_path.suffix.lower()
