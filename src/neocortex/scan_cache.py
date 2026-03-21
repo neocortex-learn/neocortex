@@ -71,7 +71,7 @@ def _get_project_hash(project_path: str) -> str:
         try:
             entries = sorted(e.name for e in p.iterdir() if not e.name.startswith("."))
             return hashlib.md5("|".join(entries).encode()).hexdigest()
-        except PermissionError:
+        except (PermissionError, FileNotFoundError):
             return "empty"
 
     return hashlib.md5("|".join(mtimes).encode()).hexdigest()
