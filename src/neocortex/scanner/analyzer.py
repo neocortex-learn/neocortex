@@ -23,6 +23,22 @@ SKILL_LEVELS = {
     "expert": SkillLevel.EXPERT,
 }
 
+_NOISE_KEYS = frozenset({
+    "none", "general", "other", "misc", "unknown", "n/a", "na", "",
+    "backend_api", "rest_api", "backend", "frontend", "api",
+    "build_tools", "video_codecs", "ui_component",
+})
+
+
+def _normalize_key(key: str) -> str:
+    """Normalize a skill key to lowercase, stripped."""
+    return key.strip().lower()
+
+
+def _is_noise(key: str) -> bool:
+    """Check if a key is meaningless noise."""
+    return _normalize_key(key) in _NOISE_KEYS
+
 
 async def analyze_project(
     project_info: ProjectInfo,
@@ -124,6 +140,12 @@ def build_analysis_prompt(project_info: ProjectInfo, key_files: list[dict]) -> s
 - advanced: 深度使用，处理过复杂问题
 - expert: 大规模生产环境，多项目验证
 
+命名规范：
+- 所有 key 使用小写下划线格式
+- 用简短的通用名称（如 aws, redis, stripe），不要用冗长描述
+- 不要使用 none, general, other, unknown 等无意义的 key
+- 知名缩写保持简短：aws（不要 amazon_web_services）, gcp, spa（不要 spa_single_page_application）
+
 重要：也要指出可能的知识盲区（gaps），基于项目中缺失的最佳实践。
 只输出 JSON，不要输出其他内容。"""
 
@@ -155,7 +177,10 @@ def _parse_skills(response: str) -> Skills:
 
     domains: dict[str, DomainSkill] = {}
     for domain_name, domain_data in data.get("domains", {}).items():
-        domains[domain_name] = DomainSkill(
+        key = _normalize_key(domain_name)
+        if _is_noise(key):
+            continue
+        domains[key] = DomainSkill(
             level=SKILL_LEVELS.get(domain_data.get("level", "beginner"), SkillLevel.BEGINNER),
             evidence=domain_data.get("evidence", []),
             gaps=domain_data.get("gaps", []),
@@ -163,7 +188,10 @@ def _parse_skills(response: str) -> Skills:
 
     integrations: dict[str, IntegrationSkill] = {}
     for int_name, int_data in data.get("integrations", {}).items():
-        integrations[int_name] = IntegrationSkill(
+        key = _normalize_key(int_name)
+        if _is_noise(key):
+            continue
+        integrations[key] = IntegrationSkill(
             level=SKILL_LEVELS.get(int_data.get("level", "beginner"), SkillLevel.BEGINNER),
             providers=int_data.get("providers", []),
             gaps=int_data.get("gaps", []),
@@ -171,7 +199,10 @@ def _parse_skills(response: str) -> Skills:
 
     architecture: dict[str, ArchitectureSkill] = {}
     for arch_name, arch_data in data.get("architecture", {}).items():
-        architecture[arch_name] = ArchitectureSkill(
+        key = _normalize_key(arch_name)
+        if _is_noise(key):
+            continue
+        architecture[key] = ArchitectureSkill(
             level=SKILL_LEVELS.get(arch_data.get("level", "beginner"), SkillLevel.BEGINNER),
             patterns=arch_data.get("patterns", []),
             evidence=arch_data.get("evidence", []),

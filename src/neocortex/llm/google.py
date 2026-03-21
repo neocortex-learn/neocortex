@@ -68,6 +68,21 @@ class GoogleProvider(LLMProvider):
             raise ValueError("LLM returned empty response")
         return response.text
 
+    async def describe_image(self, image_data: bytes, media_type: str, prompt: str) -> str:
+        contents = [
+            types.Content(role="user", parts=[
+                types.Part(inline_data=types.Blob(mime_type=media_type, data=image_data)),
+                types.Part(text=prompt),
+            ]),
+        ]
+        response = await self._client.aio.models.generate_content(
+            model=self._model,
+            contents=contents,
+        )
+        if response.text is None:
+            raise ValueError("LLM returned empty response")
+        return response.text
+
     def max_context_tokens(self) -> int:
         return _CONTEXT_SIZES.get(self._model, _DEFAULT_CONTEXT)
 

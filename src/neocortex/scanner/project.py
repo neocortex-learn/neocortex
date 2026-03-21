@@ -230,6 +230,8 @@ class ProjectScanner:
         for part in relative_parts:
             if part in self._exclude:
                 return True
+            if part.endswith(".egg-info"):
+                return True
         return False
 
     def _count_lines(self, file_path: Path) -> int:

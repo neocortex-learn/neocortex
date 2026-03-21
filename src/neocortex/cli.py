@@ -55,24 +55,93 @@ def smart_output(data: dict, human_format_fn, json_flag: bool = False) -> None:
         human_format_fn(data)
 
 
-def _numbered_select(question: str, options: list[tuple[str, any]], default: int = 1) -> any:
-    """Show numbered options. Accept number, label substring, or fuzzy match."""
-    console.print(f"  [bold]?[/bold] {question}")
-    for i, (label, _) in enumerate(options, 1):
-        marker = "[bold cyan]>[/bold cyan]" if i == default else " "
-        console.print(f"  {marker} [cyan]{i}[/cyan]) {label}")
+def _arrow_select(
+    question: str,
+    options: list[tuple[str, any]],
+    default: int = 0,
+) -> any:
+    """Arrow-key menu. Falls back to numbered input if terminal doesn't support it."""
+    try:
+        from InquirerPy import inquirer
+        choices = [{"name": label, "value": value} for label, value in options]
+        result = inquirer.select(
+            message=question,
+            choices=choices,
+            default=choices[default]["value"],
+            pointer=">",
+            show_cursor=False,
+        ).execute()
+        return result
+    except (ImportError, Exception):
+        # Fallback: simple numbered input
+        console.print(f"  [bold]?[/bold] {question}")
+        for i, (label, _) in enumerate(options, 1):
+            console.print(f"    [cyan]{i}[/cyan]) {label}")
+        while True:
+            raw = Prompt.ask(f"    [dim]({default + 1})[/dim]", default=str(default + 1), console=console).strip()
+            if raw.isdigit() and 1 <= int(raw) <= len(options):
+                return options[int(raw) - 1][1]
+            lower = raw.lower()
+            for label, value in options:
+                if lower in label.lower():
+                    return value
+            console.print(f"    [dim]输入 1-{len(options)}[/dim]")
 
-    while True:
-        raw = Prompt.ask(f"    [dim]({default})[/dim]", default=str(default), console=console).strip()
-        if raw.isdigit():
-            idx = int(raw)
-            if 1 <= idx <= len(options):
-                return options[idx - 1][1]
-        lower = raw.lower()
-        for i, (label, value) in enumerate(options):
-            if lower == label.lower() or lower in label.lower():
-                return value
-        console.print(f"    [dim]输入数字 1-{len(options)} 或关键词[/dim]")
+
+def _resolve_project_dir(raw: str) -> Path:
+    """Smartly resolve a user-typed project directory path.
+
+    Handles: absolute paths, ~, relative names, abbreviations, typos.
+    """
+    from difflib import get_close_matches
+
+    p = Path(raw).expanduser()
+    if p.is_absolute() and p.exists():
+        return p.resolve()
+
+    # Search common parent dirs for exact or fuzzy match
+    search_parents = [
+        Path.home() / "Documents",
+        Path.home() / "Projects",
+        Path.home() / "projects",
+        Path.home() / "repos",
+        Path.home() / "code",
+        Path.home() / "dev",
+        Path.home() / "work",
+        Path.home() / "Work",
+        Path.home(),
+    ]
+
+    query = raw.lower().strip().rstrip("/")
+
+    for parent in search_parents:
+        if not parent.exists():
+            continue
+        # Exact match
+        candidate = parent / raw
+        if candidate.exists():
+            return candidate.resolve()
+        # Case-insensitive + substring match
+        try:
+            subdirs = [d.name for d in parent.iterdir() if d.is_dir() and not d.name.startswith(".")]
+        except PermissionError:
+            continue
+        for name in subdirs:
+            if query == name.lower() or query in name.lower() or name.lower() in query:
+                return (parent / name).resolve()
+        # Prefix match (abbreviations: "bb" → "bitbucket")
+        for name in subdirs:
+            if name.lower().startswith(query):
+                return (parent / name).resolve()
+        # Fuzzy match (handles typos: "bitbukcet" → "bitbucket")
+        matches = get_close_matches(query, [n.lower() for n in subdirs], n=1, cutoff=0.5)
+        if matches:
+            for name in subdirs:
+                if name.lower() == matches[0]:
+                    return (parent / name).resolve()
+
+    # Last resort: treat as-is
+    return p.resolve()
 
 
 def _mask_api_key(key: str | None) -> str:
@@ -93,6 +162,31 @@ def _skill_bar(level: SkillLevel, lang: Language) -> Text:
     text.append(bar_empty, style="dim")
     text.append(f"  {label}", style="bold")
     return text
+
+
+_DISPLAY_NAMES: dict[str, str] = {
+    "aws": "AWS", "gcp": "GCP", "api": "API", "sdk": "SDK",
+    "spa": "SPA", "ui": "UI", "sql": "SQL", "css": "CSS",
+    "html": "HTML", "http": "HTTP", "rest": "REST", "graphql": "GraphQL",
+    "oauth": "OAuth", "jwt": "JWT", "cdn": "CDN", "dns": "DNS",
+    "ci": "CI", "cd": "CD", "orm": "ORM", "mvc": "MVC",
+    "redis": "Redis", "mysql": "MySQL", "postgresql": "PostgreSQL",
+    "mongodb": "MongoDB", "socketio": "Socket.IO", "websocket": "WebSocket",
+    "openai": "OpenAI", "anthropic": "Anthropic", "aws_s3": "AWS S3",
+    "dingtalk": "DingTalk", "paypal": "PayPal", "stripe": "Stripe",
+    "celery": "Celery", "sqlalchemy": "SQLAlchemy", "fastapi": "FastAPI",
+    "google_gemini": "Google Gemini", "google_api": "Google API",
+    "twitter_api": "Twitter API",
+}
+
+
+def _format_display_name(key: str) -> str:
+    """Convert snake_case key to human-readable display name."""
+    if key in _DISPLAY_NAMES:
+        return _DISPLAY_NAMES[key]
+    words = key.replace("-", "_").split("_")
+    parts = [_DISPLAY_NAMES.get(w, w.capitalize()) for w in words]
+    return " ".join(parts)
 
 
 def calibrate(feedback: str, calibration: Calibration) -> Calibration:
@@ -123,23 +217,23 @@ def init() -> None:
     prof = load_profile()
     lang = cfg.output_settings.language
 
-    # ── Step 1: Language first (affects all subsequent prompts) ──
+    # ── Step 1: Language ──
     console.print()
     console.print("  [bold]Welcome to Neocortex / 欢迎使用 Neocortex[/bold]")
     console.print()
 
-    selected_lang = _numbered_select("Language / 语言", [
+    selected_lang = _arrow_select("Language / 语言", [
         ("English", Language.EN),
         ("中文", Language.ZH),
     ])
     lang = selected_lang
 
-    # ── Step 2: Quick intro ──
+    # ── Step 2: Quick questionnaire (arrow-key select) ──
     console.print()
     console.print(f"  [bold]{t('init_welcome', lang)}[/bold]")
     console.print()
 
-    selected_role = _numbered_select(t("init_role", lang), [
+    selected_role = _arrow_select(t("init_role", lang), [
         (t("role_backend", lang), Role.BACKEND),
         (t("role_frontend", lang), Role.FRONTEND),
         (t("role_fullstack", lang), Role.FULLSTACK),
@@ -147,14 +241,14 @@ def init() -> None:
         (t("role_self_taught", lang), Role.SELF_TAUGHT),
     ])
 
-    selected_exp = _numbered_select(t("init_experience", lang), [
+    selected_exp = _arrow_select(t("init_experience", lang), [
         (t("exp_0_1", lang), ExperienceRange.JUNIOR),
         (t("exp_1_3", lang), ExperienceRange.MID),
         (t("exp_3_5", lang), ExperienceRange.SENIOR),
         (t("exp_5_plus", lang), ExperienceRange.EXPERT),
     ])
 
-    selected_goal = _numbered_select(t("init_goal", lang), [
+    selected_goal = _arrow_select(t("init_goal", lang), [
         (t("goal_system_design", lang), LearningGoal.SYSTEM_DESIGN),
         (t("goal_new_framework", lang), LearningGoal.NEW_FRAMEWORK),
         (t("goal_interview", lang), LearningGoal.INTERVIEW),
@@ -162,7 +256,7 @@ def init() -> None:
         (t("goal_side_project", lang), LearningGoal.SIDE_PROJECT),
     ])
 
-    selected_style = _numbered_select(t("init_style", lang), [
+    selected_style = _arrow_select(t("init_style", lang), [
         (t("style_code", lang), LearningStyle.CODE_EXAMPLES),
         (t("style_theory", lang), LearningStyle.THEORY_FIRST),
         (t("style_do_it", lang), LearningStyle.JUST_DO_IT),
@@ -180,7 +274,7 @@ def init() -> None:
     cfg.output_settings.language = selected_lang
     save_config(cfg)
 
-    # ── Step 3: Auto-discover and scan projects ──
+    # ── Step 3: Project scanning ──
     console.print()
 
     if not cfg.provider:
@@ -191,9 +285,20 @@ def init() -> None:
 
     from neocortex.discovery import discover_projects
 
+    # Ask user where their projects are
+    console.print()
     console.print(f"  [bold]{t('init_scanning_title', lang)}[/bold]")
+    project_dir_raw = Prompt.ask(
+        f"  [bold]?[/bold] {t('init_project_dir', lang)}",
+        default="~/Documents",
+        console=console,
+    )
+    project_dir = str(_resolve_project_dir(project_dir_raw))
     with console.status(f"  {t('init_discovering', lang)}"):
-        projects = discover_projects()
+        if project_dir_raw.strip() == "~/Documents":
+            projects = discover_projects()
+        else:
+            projects = discover_projects(roots=[Path(project_dir)])
 
     if not projects:
         console.print(f"  [dim]{t('init_no_projects', lang)}[/dim]")
@@ -202,23 +307,29 @@ def init() -> None:
         console.print()
         return
 
-    console.print(f"  {t('init_found_projects', lang, count=str(len(projects)))}")
-    console.print()
-    for i, p in enumerate(projects[:15], 1):
-        console.print(f"    {i:2d}. [cyan]{p['name']}[/cyan] [dim]({p['type']})[/dim] {p['path']}")
-    if len(projects) > 15:
-        console.print(f"    ... {t('init_more_projects', lang, count=str(len(projects) - 15))}")
-    console.print()
-
-    scan_answer = Prompt.ask(
-        f"  [bold]?[/bold] {t('init_scan_confirm', lang)}",
-        choices=["Y", "n"],
-        default="Y",
-        console=console,
-    )
-
-    if scan_answer.lower() == "n":
+    # Let user pick with checkboxes
+    try:
+        from InquirerPy import inquirer
+        selected_paths = inquirer.checkbox(
+            message=t("init_pick_projects", lang),
+            choices=[{"name": f"{p['name']}  ({p['type']})  {p['path']}", "value": p["path"], "enabled": i < 5} for i, p in enumerate(projects)],
+            cycle=False,
+        ).execute()
+    except (ImportError, Exception):
+        # Fallback: show list and ask how many
+        console.print(f"  {t('init_found_projects', lang, count=str(len(projects)))}")
         console.print()
+        for i, p in enumerate(projects[:15], 1):
+            console.print(f"    {i:2d}. [cyan]{p['name']}[/cyan] [dim]({p['type']})[/dim]")
+        console.print()
+        n = Prompt.ask(f"  [bold]?[/bold] {t('init_how_many', lang)}", default="5", console=console)
+        try:
+            n = min(int(n), len(projects))
+        except ValueError:
+            n = 5
+        selected_paths = [p["path"] for p in projects[:n]]
+
+    if not selected_paths:
         console.print(f"  {t('init_done', lang)}")
         console.print()
         return
@@ -239,35 +350,48 @@ def init() -> None:
         return
 
     scanner = ProjectScanner(cfg.scan_settings.exclude_patterns)
-    scan_paths = [p["path"] for p in projects[:10]]
 
     async def _run_init_scan() -> None:
+        from neocortex.scan_cache import ScanCache
         from neocortex.scanner.analyzer import analyze_project
 
+        cache = ScanCache(get_data_dir() / "scan_cache.json")
         all_skills = None
-        for p_path in scan_paths:
+        for p_path in selected_paths:
             name = Path(p_path).name
-            with console.status(f"  {t('scan_project', lang, name=name)}"):
-                project_info = scanner.scan(p_path)
-                key_files = extract_key_files(
-                    p_path,
-                    max_lines=cfg.scan_settings.max_file_lines,
-                    exclude_patterns=cfg.scan_settings.exclude_patterns,
-                )
-                skills = await analyze_project(project_info, key_files, provider)
+            try:
+                cached = cache.get(p_path)
+                if cached is not None:
+                    console.print(f"  [dim]{t('scan_cached', lang, name=name)}[/dim]")
+                    skills = cached
+                else:
+                    with console.status(f"  {t('scan_project', lang, name=name)}"):
+                        project_info = scanner.scan(p_path)
+                        key_files = extract_key_files(
+                            p_path,
+                            max_lines=cfg.scan_settings.max_file_lines,
+                            exclude_patterns=cfg.scan_settings.exclude_patterns,
+                        )
+                        skills = await analyze_project(project_info, key_files, provider)
+                    cache.put(p_path, skills)
 
-            langs_str = ", ".join(
-                f"{ln} ({lines})" for ln, lines in sorted(project_info.languages.items(), key=lambda x: -x[1])
-            ) or "-"
-            console.print(f"  [dim]  {name}: {langs_str}[/dim]")
+                    langs_str = ", ".join(
+                        f"{ln} ({lines})" for ln, lines in sorted(project_info.languages.items(), key=lambda x: -x[1])
+                    ) or "-"
+                    console.print(f"  [dim]  {name}: {langs_str}[/dim]")
 
-            if all_skills is not None:
-                all_skills = merge_profiles(all_skills, skills)
-            else:
-                all_skills = skills
+                if all_skills is not None:
+                    all_skills = merge_profiles(all_skills, skills)
+                else:
+                    all_skills = skills
+            except KeyboardInterrupt:
+                console.print(f"\n  [yellow]{t('init_scan_interrupted', lang)}[/yellow]")
+                break
 
         if all_skills is not None:
             prof.skills = all_skills
+            from neocortex.config import filter_known_gaps
+            filter_known_gaps(prof)
             save_profile(prof)
             from neocortex.growth import save_snapshot
             notes_count = len(list(get_notes_dir().glob("*.md")))
@@ -401,9 +525,12 @@ def scan(
 
     async def _scan_local_paths(all_skills: Skills | None) -> Skills | None:
         from neocortex.scanner.analyzer import analyze_project
+        from neocortex.scan_cache import ScanCache
 
         if not paths:
             return all_skills
+
+        cache = ScanCache(get_data_dir() / "scan_cache.json")
 
         for p in paths:
             resolved = Path(p).resolve()
@@ -411,23 +538,30 @@ def scan(
                 console.print(f"  [red]{t('scan_not_found', lang, path=str(resolved))}[/red]")
                 continue
 
-            with console.status(f"  {t('scan_project', lang, name=resolved.name)}"):
-                project_info = scanner.scan(str(resolved))
+            cached = cache.get(str(resolved))
+            if cached is not None:
+                console.print(f"  [dim]{t('scan_cached', lang, name=resolved.name)}[/dim]")
+                skills = cached
+            else:
+                with console.status(f"  {t('scan_project', lang, name=resolved.name)}"):
+                    project_info = scanner.scan(str(resolved))
 
-            langs_str = ", ".join(
-                f"{ln} ({lines})"
-                for ln, lines in sorted(project_info.languages.items(), key=lambda x: -x[1])
-            )
-            frameworks_str = ", ".join(project_info.frameworks) if project_info.frameworks else "-"
-            console.print(f"  {t('scan_detected', lang, langs=langs_str or '-', frameworks=frameworks_str)}")
-
-            with console.status(f"  {t('analyzing', lang)}"):
-                key_files = extract_key_files(
-                    str(resolved),
-                    max_lines=cfg.scan_settings.max_file_lines,
-                    exclude_patterns=cfg.scan_settings.exclude_patterns,
+                langs_str = ", ".join(
+                    f"{ln} ({lines})"
+                    for ln, lines in sorted(project_info.languages.items(), key=lambda x: -x[1])
                 )
-                skills = await analyze_project(project_info, key_files, provider)
+                frameworks_str = ", ".join(project_info.frameworks) if project_info.frameworks else "-"
+                console.print(f"  {t('scan_detected', lang, langs=langs_str or '-', frameworks=frameworks_str)}")
+
+                with console.status(f"  {t('analyzing', lang)}"):
+                    key_files = extract_key_files(
+                        str(resolved),
+                        max_lines=cfg.scan_settings.max_file_lines,
+                        exclude_patterns=cfg.scan_settings.exclude_patterns,
+                    )
+                    skills = await analyze_project(project_info, key_files, provider)
+
+                cache.put(str(resolved), skills)
 
             if all_skills is not None:
                 all_skills = merge_profiles(all_skills, skills)
@@ -520,6 +654,10 @@ def scan(
 
         if all_skills is not None:
             prof.skills = all_skills
+
+            from neocortex.config import filter_known_gaps
+            filter_known_gaps(prof)
+
             save_profile(prof)
 
             from neocortex.growth import save_snapshot
@@ -597,22 +735,24 @@ def profile(
             console.print()
             console.print(f"  [bold]{t('profile_domains', lang)}[/bold]")
             for name, skill in skills.domains.items():
+                display = _format_display_name(name)
                 bar = _skill_bar(skill.level, lang)
                 line = Text()
-                line.append(f"  {name:<16}", style="cyan")
+                line.append(f"  {display:<20}", style="cyan")
                 line.append_text(bar)
                 console.print(line)
                 if skill.gaps:
                     for gap in skill.gaps:
-                        console.print(f"                    [dim]gap: {gap}[/dim]")
+                        console.print(f"                      [dim]gap: {gap}[/dim]")
 
         if skills.integrations:
             console.print()
             console.print(f"  [bold]{t('profile_integrations', lang)}[/bold]")
             for name, skill in skills.integrations.items():
+                display = _format_display_name(name)
                 bar = _skill_bar(skill.level, lang)
                 line = Text()
-                line.append(f"  {name:<16}", style="cyan")
+                line.append(f"  {display:<20}", style="cyan")
                 line.append_text(bar)
                 console.print(line)
 
@@ -620,9 +760,10 @@ def profile(
             console.print()
             console.print(f"  [bold]{t('profile_architecture', lang)}[/bold]")
             for name, skill in skills.architecture.items():
+                display = _format_display_name(name)
                 bar = _skill_bar(skill.level, lang)
                 line = Text()
-                line.append(f"  {name:<16}", style="cyan")
+                line.append(f"  {display:<20}", style="cyan")
                 line.append_text(bar)
                 console.print(line)
 
@@ -656,7 +797,7 @@ def read(
         from neocortex.reader.fetcher import ContentFetcher
         from neocortex.reader.teacher import generate_notes, generate_outline
 
-        fetcher = ContentFetcher()
+        fetcher = ContentFetcher(provider=provider)
 
         with console.status(f"  {t('read_fetching', lang)}"):
             doc = await fetcher.fetch(source)
@@ -747,9 +888,73 @@ def read(
             except OSError:
                 pass
 
+        _match_and_update_recommendations(lang, prof, source, doc.title, str(note_path))
+
         _collect_feedback(lang, prof, source, doc.title, focus, note_path)
 
     asyncio.run(_run_read())
+
+
+def _match_and_update_recommendations(
+    lang: Language,
+    prof: Profile,
+    source: str,
+    title: str,
+    note_path: str,
+) -> None:
+    """Match current read against pending recommendations and update status."""
+    from neocortex.config import (
+        load_recommendations,
+        save_profile,
+        save_recommendations,
+        update_gap_status,
+    )
+    from neocortex.tracker import expire_stale_recommendations, match_recommendation
+
+    all_records = load_recommendations()
+    if not all_records:
+        return
+
+    all_records = expire_stale_recommendations(all_records)
+
+    pending = [r for r in all_records if r.status == "pending"]
+    if not pending:
+        save_recommendations(all_records)
+        return
+
+    matched = match_recommendation(source, title, pending)
+
+    if matched is None and pending:
+        top = pending[0]
+        answer = Prompt.ask(
+            f"  [bold]?[/bold] {t('recommend_match_confirm', lang, topic=top.topic)}",
+            choices=["Y", "n"],
+            default="n",
+            console=console,
+        )
+        if answer.lower() == "y":
+            matched = top
+
+    if matched is None:
+        save_recommendations(all_records)
+        return
+
+    from datetime import date as _date
+
+    matched.status = "completed"
+    matched.completed_at = _date.today().isoformat()
+    matched.notes_generated.append(note_path)
+
+    console.print(f"  [green]{t('recommend_match_found', lang, topic=matched.topic)}[/green]")
+
+    for gap_name in matched.related_gaps:
+        new_status = update_gap_status(gap_name, prof)
+        status_label = {"gap": "gap", "learning": "learning", "known": "known ✓"}
+        console.print(f"  [dim]{t('recommend_gap_updated', lang, gap=gap_name, status=status_label.get(new_status, new_status))}[/dim]")
+
+    save_recommendations(all_records)
+    if matched.related_gaps:
+        save_profile(prof)
 
 
 def _collect_feedback(
@@ -876,9 +1081,18 @@ def recommend(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Get personalized learning recommendations based on your profile."""
-    from neocortex.config import load_config, load_profile
+    from uuid import uuid4
+
+    from neocortex.config import (
+        load_config,
+        load_gap_progress,
+        load_profile,
+        load_recommendations,
+        save_recommendations,
+    )
     from neocortex.llm import create_provider
-    from neocortex.recommender import generate_recommendations
+    from neocortex.recommender import generate_recommendations, parse_resource
+    from neocortex.tracker import expire_stale_recommendations
 
     cfg = load_config()
     prof = load_profile()
@@ -894,15 +1108,38 @@ def recommend(
         console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
         raise typer.Exit(1)
 
+    existing_records = load_recommendations()
+    existing_records = expire_stale_recommendations(existing_records)
+
     async def _run() -> list:
         with console.status(f"  {t('recommend_generating', lang)}"):
-            return await generate_recommendations(prof, provider, count, lang)
+            return await generate_recommendations(prof, provider, count, lang, records=existing_records)
 
     recs = asyncio.run(_run())
 
     if not recs:
         console.print(f"  [yellow]{t('recommend_empty', lang)}[/yellow]")
         return
+
+    from neocortex.models import RecommendationRecord
+
+    existing_topics = {r.topic for r in existing_records if r.status == "pending"}
+    new_records = []
+    for rec in recs:
+        if rec.topic in existing_topics:
+            continue
+        record = RecommendationRecord(
+            id=str(uuid4()),
+            topic=rec.topic,
+            resources=[parse_resource(r) for r in rec.resources],
+            related_gaps=rec.related_gaps,
+            created_at=date.today().isoformat(),
+        )
+        new_records.append(record)
+        existing_topics.add(rec.topic)
+
+    all_records = existing_records + new_records
+    save_recommendations(all_records)
 
     if json_output or not sys.stdout.isatty():
         typer.echo(json_lib.dumps(
@@ -911,9 +1148,22 @@ def recommend(
         ))
         return
 
+    gap_progress = load_gap_progress()
+    total_gaps = len(gap_progress)
+    done_gaps = sum(1 for v in gap_progress.values() if v.status in ("learning", "known"))
+
     console.print()
     console.print(f"  [bold]{t('recommend_title', lang)}[/bold]")
     console.print("  " + "\u2501" * 52)
+
+    if total_gaps > 0:
+        console.print(f"  [dim]{t('recommend_progress', lang, done=str(done_gaps), total=str(total_gaps))}[/dim]")
+
+    completed = [r for r in existing_records if r.status == "completed"]
+    if completed:
+        console.print()
+        for rec in completed[-3:]:
+            console.print(f"  [dim]✅ {rec.topic} — {t('recommend_completed', lang)}[/dim]")
 
     priority_icons = {"high": "[red]!!![/red]", "medium": "[yellow]!![/yellow]", "low": "[dim]![/dim]"}
 
@@ -921,6 +1171,9 @@ def recommend(
         icon = priority_icons.get(rec.priority, "[yellow]!![/yellow]")
         console.print()
         console.print(f"  {icon} [bold cyan]{i}. {rec.topic}[/bold cyan]")
+        if rec.related_gaps:
+            gaps_str = ", ".join(rec.related_gaps)
+            console.print(f"     [magenta]{t('recommend_gap_label', lang)}[/magenta] {gaps_str}")
         console.print(f"     {rec.reason}")
         if rec.expected_benefit:
             console.print(f"     [green]{t('recommend_benefit', lang)}[/green] {rec.expected_benefit}")
@@ -999,7 +1252,7 @@ def growth(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Show your skill growth over time."""
-    from neocortex.config import get_data_dir
+    from neocortex.config import get_data_dir, load_gap_progress, load_recommendations
     from neocortex.growth import load_snapshots, compute_diff
 
     lang = _get_lang()
@@ -1055,6 +1308,35 @@ def growth(
             console.print(f"\n  [bold green]{t('growth_gaps_closed', lang)}[/bold green]")
             for g in diff["gaps_closed"]:
                 console.print(f"    ✓ {g}")
+
+    rec_records = load_recommendations()
+    gap_progress = load_gap_progress()
+
+    if rec_records or gap_progress:
+        console.print()
+        console.print(f"  [bold]{t('growth_rec_title', lang)}[/bold]")
+        console.print("  " + "\u2501" * 52)
+
+        if rec_records:
+            completed = sum(1 for r in rec_records if r.status == "completed")
+            total = sum(1 for r in rec_records if r.status in ("pending", "completed"))
+            if total > 0:
+                rate = round(completed / total * 100)
+                console.print(f"  {t('growth_rec_completed', lang)} [bold]{completed}[/bold]")
+                console.print(f"  {t('growth_rec_rate', lang, rate=str(rate))}")
+
+        if gap_progress:
+            learning = [k for k, v in gap_progress.items() if v.status == "learning"]
+            known = [k for k, v in gap_progress.items() if v.status == "known"]
+            if learning:
+                console.print(f"\n  [yellow]{t('growth_gaps_learning', lang)}[/yellow]")
+                for g in learning:
+                    p = gap_progress[g]
+                    console.print(f"    📖 {g} ({p.reads}/3)")
+            if known:
+                console.print(f"\n  [bold green]{t('growth_gaps_known', lang)}[/bold green]")
+                for g in known:
+                    console.print(f"    ✓ {g}")
 
     console.print()
 

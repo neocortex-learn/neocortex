@@ -169,6 +169,34 @@ class Recommendation(BaseModel):
     resources: list[str] = Field(default_factory=list)
     expected_benefit: str = ""
     priority: str = "medium"  # high / medium / low
+    related_gaps: list[str] = Field(default_factory=list)
+
+
+class Resource(BaseModel):
+    """推荐资源"""
+    title: str
+    url: str = ""
+    type: str = "article"  # article / doc / book / video / tutorial
+
+
+class GapProgress(BaseModel):
+    """单个技能 gap 的学习进度"""
+    status: str = "gap"  # gap / learning / known
+    reads: int = 0
+    first_seen: str = ""
+    last_read: str | None = None
+
+
+class RecommendationRecord(BaseModel):
+    """推荐跟踪记录"""
+    id: str
+    topic: str
+    resources: list[Resource] = Field(default_factory=list)
+    related_gaps: list[str] = Field(default_factory=list)
+    created_at: str = ""
+    status: str = "pending"  # pending / completed / skipped
+    completed_at: str | None = None
+    notes_generated: list[str] = Field(default_factory=list)
 
 
 # ── App config ──
@@ -183,9 +211,25 @@ class ProviderType(str, Enum):
 class ScanSettings(BaseModel):
     max_file_lines: int = 100
     exclude_patterns: list[str] = Field(default_factory=lambda: [
-        "node_modules", "venv", ".venv", ".git", "dist", "build",
-        "__pycache__", ".tox", ".mypy_cache", ".pytest_cache",
-        "target", "vendor", ".next", ".nuxt",
+        # Version control
+        ".git",
+        # JavaScript / Node.js
+        "node_modules", ".next", ".nuxt",
+        # Python
+        "venv", ".venv", "env", ".env",
+        "__pycache__", ".tox", ".mypy_cache", ".pytest_cache", ".eggs",
+        # Build output
+        "dist", "build", ".build", "out",
+        # Java / Kotlin / Android
+        "target", ".gradle",
+        # Go
+        "vendor",
+        # iOS / macOS
+        "Pods", "Carthage", "DerivedData",
+        # C/C++
+        "cmake-build-debug", "cmake-build-release",
+        # Vendored dependencies
+        "third_party", "third-party", "external",
     ])
 
 

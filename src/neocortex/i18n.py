@@ -67,12 +67,28 @@ STRINGS: dict[str, dict[str, str]] = {
 
     # ── Init onboarding ──
     "init_scanning_title": {
-        "en": "Let me find your projects...",
-        "zh": "让我找找你的项目...",
+        "en": "Now let's scan your code to understand your skills.",
+        "zh": "接下来扫描你的代码，了解你的技能。",
+    },
+    "init_project_dir": {
+        "en": "Where do you keep your projects?",
+        "zh": "你的项目放在哪个目录？",
     },
     "init_discovering": {
         "en": "Scanning for projects...",
         "zh": "正在搜索项目...",
+    },
+    "init_pick_projects": {
+        "en": "Pick the projects YOU wrote (space to toggle, enter to confirm)",
+        "zh": "选择你自己写的项目（空格切换，回车确认）",
+    },
+    "init_how_many": {
+        "en": "How many to scan? (from top)",
+        "zh": "扫描前几个？",
+    },
+    "init_scan_interrupted": {
+        "en": "Scan interrupted. Saving what we have so far.",
+        "zh": "扫描中断。保存已扫描的结果。",
     },
     "init_no_projects": {
         "en": "No projects found. You can scan manually later: neocortex scan <path>",
@@ -180,6 +196,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Detected: {langs} | {frameworks}",
         "zh": "检测到：{langs} | {frameworks}",
     },
+    "scan_cached": {
+        "en": "{name} (cached, no changes)",
+        "zh": "{name}（已缓存，无变化）",
+    },
     "scan_complete": {
         "en": "Scan complete. Profile updated.",
         "zh": "扫描完成。画像已更新。",
@@ -267,6 +287,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "正在获取内容...",
         "ja": "コンテンツを取得中...",
         "ko": "콘텐츠를 가져오는 중...",
+    },
+    "read_analyzing_image": {
+        "en": "Analyzing image with LLM...",
+        "zh": "正在用 LLM 分析图片...",
+    },
+    "read_parsing_epub": {
+        "en": "Parsing EPUB...",
+        "zh": "正在解析 EPUB...",
     },
     "read_outline_title": {
         "en": "Personalized outline for: {title}",
@@ -528,6 +556,58 @@ STRINGS: dict[str, dict[str, str]] = {
     "index_embedding_skip": {
         "en": "Embeddings skipped (fastembed not installed).",
         "zh": "向量索引已跳过（fastembed 未安装）。",
+    },
+
+    # ── Recommend (closed-loop) ──
+    "recommend_gap_label": {
+        "en": "Filling gap:",
+        "zh": "补盲区：",
+    },
+    "recommend_progress": {
+        "en": "{done}/{total} gaps addressed",
+        "zh": "{done}/{total} 个盲区已跟进",
+    },
+    "recommend_completed": {
+        "en": "completed",
+        "zh": "已完成",
+    },
+    "recommend_skipped": {
+        "en": "skipped",
+        "zh": "已跳过",
+    },
+    "recommend_match_confirm": {
+        "en": "Is this reading related to recommendation \"{topic}\"?",
+        "zh": "本次阅读与推荐「{topic}」相关吗？",
+    },
+    "recommend_match_found": {
+        "en": "Linked to recommendation: {topic}",
+        "zh": "已关联推荐：{topic}",
+    },
+    "recommend_gap_updated": {
+        "en": "Gap \"{gap}\" status: {status}",
+        "zh": "盲区「{gap}」状态：{status}",
+    },
+
+    # ── Growth (recommendation stats) ──
+    "growth_rec_title": {
+        "en": "Learning Progress",
+        "zh": "学习进度",
+    },
+    "growth_rec_completed": {
+        "en": "Recommendations completed:",
+        "zh": "已完成的推荐：",
+    },
+    "growth_rec_rate": {
+        "en": "Completion rate: {rate}%",
+        "zh": "完成率：{rate}%",
+    },
+    "growth_gaps_learning": {
+        "en": "Gaps in progress:",
+        "zh": "学习中的盲区：",
+    },
+    "growth_gaps_known": {
+        "en": "Gaps mastered:",
+        "zh": "已掌握的盲区：",
     },
 
     # ── Plan ──

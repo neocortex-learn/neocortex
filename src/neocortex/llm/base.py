@@ -11,6 +11,10 @@ class LLMProvider(ABC):
         """Send a chat request and return the text response."""
 
     @abstractmethod
+    async def describe_image(self, image_data: bytes, media_type: str, prompt: str) -> str:
+        """Send an image to the LLM and return a text description."""
+
+    @abstractmethod
     def max_context_tokens(self) -> int:
         """Return the model's max context window in tokens."""
 

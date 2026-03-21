@@ -63,6 +63,26 @@ class AnthropicProvider(LLMProvider):
                 return block.text
         raise ValueError("No text content in LLM response")
 
+    async def describe_image(self, image_data: bytes, media_type: str, prompt: str) -> str:
+        import base64
+
+        b64 = base64.b64encode(image_data).decode()
+        response = await self._client.messages.create(
+            model=self._model,
+            max_tokens=4096,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+        )
+        for block in response.content:
+            if isinstance(block, TextBlock):
+                return block.text
+        raise ValueError("No text content in LLM response")
+
     def max_context_tokens(self) -> int:
         return _CONTEXT_SIZES.get(self._model, _DEFAULT_CONTEXT)
 

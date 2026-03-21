@@ -19,9 +19,14 @@ dependencies = [
     "httpx>=0.28.0",
     "readability-lxml>=0.8.0",
     "pymupdf>=1.25.0",
+    "ebooklib>=0.18",
+    "markdownify>=0.14.1",
 
     # TTS
     "edge-tts>=6.1.0",
+
+    # CLI UX
+    "InquirerPy>=0.3.0",
 
     # Utilities
     "tiktoken>=0.8.0",

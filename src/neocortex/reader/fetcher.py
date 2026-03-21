@@ -1,14 +1,42 @@
-"""Content fetching — URL, PDF, Markdown, and plain text."""
+"""Content fetching — URL, PDF, EPUB, image, Markdown, and plain text."""
 
 from __future__ import annotations
 
-import html
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
+from markdownify import markdownify as md
 from readability import Document as ReadabilityDoc
+
+if TYPE_CHECKING:
+    from neocortex.llm.base import LLMProvider
+
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
+
+_MEDIA_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+}
+
+_IMAGE_PROMPT = (
+    "Please carefully examine this image and extract ALL content from it.\n"
+    "If it contains text, transcribe the text verbatim.\n"
+    "If it contains diagrams or architecture drawings, describe the structure, "
+    "components, and relationships in detail.\n"
+    "If it contains code, transcribe the code exactly.\n"
+    "If it contains charts, tables, or data, describe the data thoroughly.\n"
+    "If it contains screenshots of UI, describe the interface elements and their states.\n"
+    "Be thorough, detailed, and preserve the original structure as much as possible."
+)
 
 
 @dataclass
@@ -29,12 +57,20 @@ class Document:
 class ContentFetcher:
     """Fetch and parse content from various sources."""
 
+    def __init__(self, provider: LLMProvider | None = None) -> None:
+        self._provider = provider
+
     async def fetch(self, source: str) -> Document:
         if source.startswith("http://") or source.startswith("https://"):
             return await self._fetch_url(source)
-        if source.endswith(".pdf"):
+        suffix = Path(source).suffix.lower()
+        if suffix == ".pdf":
             return await self._fetch_pdf(source)
-        if source.endswith(".md"):
+        if suffix == ".epub":
+            return self._read_epub(source)
+        if suffix in _IMAGE_EXTENSIONS:
+            return await self._fetch_image(source)
+        if suffix == ".md":
             return self._read_markdown(source)
         return self._read_text(source)
 
@@ -42,18 +78,72 @@ class ContentFetcher:
         async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
-            html = resp.text
+            raw_html = resp.text
 
-        readable = ReadabilityDoc(html)
+        readable = ReadabilityDoc(raw_html)
         title = readable.title()
         summary_html = readable.summary()
 
+        markdown_text = self._html_to_markdown(summary_html)
+
+        # Fallback to Jina Reader if readability extracted very little content
+        if len(markdown_text.strip()) < 100:
+            jina_doc = await self._fetch_url_jina(url)
+            if jina_doc is not None:
+                return jina_doc
+
         sections = self._parse_html_sections(summary_html)
-        plain_text = self._html_to_plain(summary_html)
 
         return Document(
             title=title,
-            content=plain_text,
+            content=markdown_text,
+            source=url,
+            sections=sections,
+        )
+
+    async def _fetch_url_jina(self, url: str) -> Document | None:
+        jina_url = f"https://r.jina.ai/{url}"
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+                resp = await client.get(
+                    jina_url,
+                    headers={"Accept": "text/markdown"},
+                )
+                resp.raise_for_status()
+                text = resp.text
+        except (httpx.HTTPError, httpx.TimeoutException):
+            return None
+
+        if len(text.strip()) < 50:
+            return None
+
+        # Jina Reader may prepend metadata lines (Title:, URL Source:)
+        content = text
+        title = ""
+        title_match = re.match(r"Title:\s*(.+)", text)
+        if title_match:
+            title = title_match.group(1).strip()
+            lines = text.split("\n")
+            content_start = 0
+            for i, line in enumerate(lines):
+                if line.startswith("Title:") or line.startswith("URL Source:") or line.startswith("Markdown Content:"):
+                    content_start = i + 1
+                elif line.strip() == "" and content_start > 0:
+                    content_start = i + 1
+                    break
+            content = "\n".join(lines[content_start:]).strip()
+
+        if not title:
+            heading_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+            title = heading_match.group(1).strip() if heading_match else url
+
+        sections = self._parse_markdown_sections(content)
+        if not sections:
+            sections = [Section(title=title, content=content, level=1)]
+
+        return Document(
+            title=title,
+            content=content,
             source=url,
             sections=sections,
         )
@@ -77,6 +167,73 @@ class ContentFetcher:
             sections = raw_sections
         else:
             sections = [Section(title=title, content=full_text, level=1)]
+
+        return Document(
+            title=title,
+            content=full_text,
+            source=path,
+            sections=sections,
+        )
+
+    async def _fetch_image(self, path: str) -> Document:
+        if self._provider is None:
+            raise ValueError("LLM provider required for image reading. Configure a provider first.")
+
+        file_path = Path(path)
+        if not file_path.exists():
+            raise ValueError(f"File not found: {path}")
+
+        image_data = file_path.read_bytes()
+        suffix = file_path.suffix.lower()
+        media_type = _MEDIA_TYPES.get(suffix, "image/png")
+
+        content = await self._provider.describe_image(image_data, media_type, _IMAGE_PROMPT)
+        title = file_path.stem
+
+        return Document(
+            title=title,
+            content=content,
+            source=path,
+            sections=[Section(title=title, content=content, level=1)],
+        )
+
+    def _read_epub(self, path: str) -> Document:
+        from ebooklib import epub
+        from ebooklib import ITEM_DOCUMENT
+
+        file_path = Path(path)
+        if not file_path.exists():
+            raise ValueError(f"File not found: {path}")
+
+        book = epub.read_epub(path)
+        meta_title = book.get_metadata("DC", "title")
+        title = meta_title[0][0] if meta_title else file_path.stem
+
+        sections: list[Section] = []
+        full_text_parts: list[str] = []
+
+        for item in book.get_items_of_type(ITEM_DOCUMENT):
+            item_content = item.get_content().decode("utf-8", errors="replace")
+            plain_text = self._html_to_markdown(item_content)
+            if not plain_text.strip():
+                continue
+
+            chapter_title = ""
+            heading_match = re.search(
+                r"<h[1-3][^>]*>(.*?)</h[1-3]>", item_content,
+                re.IGNORECASE | re.DOTALL,
+            )
+            if heading_match:
+                chapter_title = re.sub(r"<[^>]+>", "", heading_match.group(1)).strip()
+
+            if not chapter_title:
+                name = getattr(item, "file_name", "") or ""
+                chapter_title = Path(name).stem if name else ""
+
+            sections.append(Section(title=chapter_title, content=plain_text.strip(), level=1))
+            full_text_parts.append(plain_text.strip())
+
+        full_text = "\n\n".join(full_text_parts)
 
         return Document(
             title=title,
@@ -134,7 +291,7 @@ class ContentFetcher:
 
         matches = list(heading_re.finditer(html))
         if not matches:
-            plain = self._html_to_plain(html)
+            plain = self._html_to_markdown(html)
             if plain.strip():
                 return [Section(title="", content=plain.strip(), level=1)]
             return []
@@ -142,7 +299,7 @@ class ContentFetcher:
         sections: list[Section] = []
 
         preamble = html[: matches[0].start()]
-        preamble_text = self._html_to_plain(preamble).strip()
+        preamble_text = self._html_to_markdown(preamble).strip()
         if preamble_text:
             sections.append(Section(title="", content=preamble_text, level=1))
 
@@ -152,18 +309,13 @@ class ContentFetcher:
             start = match.end()
             end = matches[i + 1].start() if i + 1 < len(matches) else len(html)
             body_html = html[start:end]
-            body_text = self._html_to_plain(body_html).strip()
+            body_text = self._html_to_markdown(body_html).strip()
             sections.append(Section(title=heading_text, content=body_text, level=level))
 
         return sections
 
-    def _html_to_plain(self, raw_html: str) -> str:
-        text = re.sub(r"<br\s*/?>", "\n", raw_html, flags=re.IGNORECASE)
-        text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
-        text = re.sub(r"</div>", "\n", text, flags=re.IGNORECASE)
-        text = re.sub(r"</li>", "\n", text, flags=re.IGNORECASE)
-        text = re.sub(r"<[^>]+>", "", text)
-        text = html.unescape(text)
+    def _html_to_markdown(self, raw_html: str) -> str:
+        text = md(raw_html, heading_style="ATX", strip=["img", "script", "style"])
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
 

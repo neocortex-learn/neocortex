@@ -12,7 +12,9 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from neocortex.models import AppConfig, Profile
+from typing import Any
+
+from neocortex.models import AppConfig, GapProgress, Profile, RecommendationRecord
 
 _ENC_PREFIX = "enc:"
 _SALT = b"neocortex-api-key-salt"
@@ -121,3 +123,103 @@ def save_profile(profile: Profile) -> None:
     path = _profile_path()
     data = profile.model_dump(mode="json")
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _load_json(filename: str, default: Any = None) -> Any:
+    """Generic JSON file loader from data dir."""
+    path = get_data_dir() / filename
+    if not path.exists():
+        return default if default is not None else {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, TypeError):
+        return default if default is not None else {}
+
+
+def _save_json(filename: str, data: Any) -> None:
+    """Generic JSON file writer to data dir."""
+    path = get_data_dir() / filename
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_recommendations(status: str | None = None) -> list[RecommendationRecord]:
+    """Load recommendation records, optionally filtered by status."""
+    raw = _load_json("recommendations.json", default=[])
+    if not isinstance(raw, list):
+        return []
+    records = []
+    for item in raw:
+        try:
+            rec = RecommendationRecord.model_validate(item)
+            if status is None or rec.status == status:
+                records.append(rec)
+        except Exception:
+            continue
+    return records
+
+
+def save_recommendations(records: list[RecommendationRecord]) -> None:
+    """Save all recommendation records."""
+    _save_json("recommendations.json", [r.model_dump(mode="json") for r in records])
+
+
+def load_gap_progress() -> dict[str, GapProgress]:
+    """Load gap progress tracking data."""
+    raw = _load_json("gap_progress.json", default={})
+    if not isinstance(raw, dict):
+        return {}
+    result = {}
+    for key, val in raw.items():
+        try:
+            result[key] = GapProgress.model_validate(val)
+        except Exception:
+            continue
+    return result
+
+
+def save_gap_progress(progress: dict[str, GapProgress]) -> None:
+    """Save gap progress tracking data."""
+    _save_json("gap_progress.json", {k: v.model_dump(mode="json") for k, v in progress.items()})
+
+
+def update_gap_status(gap_name: str, profile: Profile) -> str:
+    """Update gap status after reading related content. Returns new status."""
+    from datetime import date as _date
+    progress = load_gap_progress()
+    entry = progress.get(gap_name)
+    if entry is None:
+        entry = GapProgress(status="gap", first_seen=_date.today().isoformat())
+        progress[gap_name] = entry
+
+    if entry.status == "known":
+        return "known"
+
+    entry.reads += 1
+    entry.last_read = _date.today().isoformat()
+
+    if entry.status == "gap":
+        entry.status = "learning"
+    elif entry.status == "learning" and entry.reads >= 3:
+        entry.status = "known"
+        for domain in profile.skills.domains.values():
+            if gap_name in domain.gaps:
+                domain.gaps.remove(gap_name)
+        for integration in profile.skills.integrations.values():
+            if gap_name in integration.gaps:
+                integration.gaps.remove(gap_name)
+
+    progress[gap_name] = entry
+    save_gap_progress(progress)
+    return entry.status
+
+
+def filter_known_gaps(profile: Profile) -> None:
+    """Remove gaps already marked as known from profile. Called after scan."""
+    progress = load_gap_progress()
+    known_gaps = {k for k, v in progress.items() if v.status == "known"}
+    if not known_gaps:
+        return
+    for domain in profile.skills.domains.values():
+        domain.gaps = [g for g in domain.gaps if g not in known_gaps]
+    for integration in profile.skills.integrations.values():
+        integration.gaps = [g for g in integration.gaps if g not in known_gaps]

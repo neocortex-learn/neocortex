@@ -33,6 +33,21 @@ def _merge_unique(a: list[str], b: list[str]) -> list[str]:
     return result
 
 
+def _normalize_dict_keys(d: dict) -> dict:
+    """Normalize dictionary keys to lowercase, merging duplicates by taking higher level."""
+    result: dict = {}
+    for key, value in d.items():
+        normalized = key.strip().lower()
+        if normalized in result:
+            existing = result[normalized]
+            if hasattr(existing, "level") and hasattr(value, "level"):
+                if LEVEL_ORDER.get(value.level, 0) > LEVEL_ORDER.get(existing.level, 0):
+                    result[normalized] = value
+        else:
+            result[normalized] = value
+    return result
+
+
 def merge_profiles(existing: Skills, new: Skills) -> Skills:
     """Merge two skill profiles.
 
@@ -43,9 +58,18 @@ def merge_profiles(existing: Skills, new: Skills) -> Skills:
     - gaps: union (different projects expose different gaps, keep all)
     """
     languages = _merge_languages(existing.languages, new.languages)
-    domains = _merge_domains(existing.domains, new.domains)
-    integrations = _merge_integrations(existing.integrations, new.integrations)
-    architecture = _merge_architecture(existing.architecture, new.architecture)
+    domains = _merge_domains(
+        _normalize_dict_keys(existing.domains),
+        _normalize_dict_keys(new.domains),
+    )
+    integrations = _merge_integrations(
+        _normalize_dict_keys(existing.integrations),
+        _normalize_dict_keys(new.integrations),
+    )
+    architecture = _merge_architecture(
+        _normalize_dict_keys(existing.architecture),
+        _normalize_dict_keys(new.architecture),
+    )
 
     return Skills(
         languages=languages,

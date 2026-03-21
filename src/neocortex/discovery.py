@@ -29,12 +29,17 @@ _SKIP_NAMES = {
 }
 
 
-def discover_projects(max_depth: int = 3, max_results: int = 30) -> list[dict]:
-    """Scan common directories for projects. Returns [{path, name, type}]."""
+def discover_projects(
+    max_depth: int = 3,
+    max_results: int = 50,
+    roots: list[Path] | None = None,
+) -> list[dict]:
+    """Scan directories for projects. Returns [{path, name, type}]."""
     found: list[dict] = []
     seen: set[str] = set()
 
-    for root in _SEARCH_ROOTS:
+    search_roots = roots if roots else _SEARCH_ROOTS
+    for root in search_roots:
         if not root.exists():
             continue
         _scan_dir(root, 0, max_depth, found, seen, max_results)

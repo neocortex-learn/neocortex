@@ -88,6 +88,27 @@ class OpenAICompatProvider(LLMProvider):
         text = _THINK_RE.sub("", text).strip()
         return text
 
+    async def describe_image(self, image_data: bytes, media_type: str, prompt: str) -> str:
+        import base64
+
+        b64 = base64.b64encode(image_data).decode()
+        data_url = f"data:{media_type};base64,{b64}"
+        response = await self._client.chat.completions.create(
+            model=self._model,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+        )
+        if not response.choices:
+            raise ValueError("LLM returned empty response")
+        text = response.choices[0].message.content or ""
+        text = _THINK_RE.sub("", text).strip()
+        return text
+
     def max_context_tokens(self) -> int:
         return _infer_context_size(self._model)
 
