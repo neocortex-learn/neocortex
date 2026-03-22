@@ -320,6 +320,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Visual note saved: {path}",
         "zh": "可视化笔记已保存：{path}",
     },
+    "read_rendering_diagrams": {
+        "en": "Rendering diagrams to SVG...",
+        "zh": "正在渲染图表为 SVG...",
+    },
+    "read_svg_saved": {
+        "en": "{count} diagrams rendered as SVG images",
+        "zh": "{count} 个图表已渲染为 SVG 图片",
+    },
     "read_marker_skip": {"en": "skip", "zh": "跳过"},
     "read_marker_brief": {"en": "brief overview", "zh": "简要概览"},
     "read_marker_deep": {"en": "deep dive", "zh": "深入学习"},

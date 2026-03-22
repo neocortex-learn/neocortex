@@ -273,3 +273,54 @@ def generate_html_note(md_content: str, title: str, source: str, lang: str = "en
 def has_mermaid_diagrams(md_content: str) -> bool:
     """Check if Markdown content contains Mermaid code blocks."""
     return bool(_MERMAID_BLOCK_RE.search(md_content))
+
+
+def render_mermaid_to_svg(md_content: str, output_dir: Path, prefix: str = "diagram") -> str:
+    """Render all Mermaid code blocks to SVG files, replace with image references.
+
+    Requires `mmdc` (mermaid-cli) to be installed: npm install -g @mermaid-js/mermaid-cli
+    Returns the Markdown content with Mermaid blocks replaced by ![](path) image refs.
+    If mmdc is not available, returns the original content unchanged.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    if not shutil.which("mmdc"):
+        return md_content
+
+    diagrams_dir = output_dir / "diagrams"
+    diagrams_dir.mkdir(parents=True, exist_ok=True)
+
+    matches = list(_MERMAID_BLOCK_RE.finditer(md_content))
+    if not matches:
+        return md_content
+
+    result = md_content
+    total = len(matches)
+    for i, match in enumerate(reversed(matches)):
+        seq = total - i  # number in document order
+        mermaid_code = match.group(1).strip()
+        svg_name = f"{prefix}-{seq}.svg"
+        svg_path = diagrams_dir / svg_name
+
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".mmd", delete=False, encoding="utf-8") as tmp:
+                tmp.write(mermaid_code)
+                tmp_path = tmp.name
+
+            subprocess.run(
+                ["mmdc", "-i", tmp_path, "-o", str(svg_path), "-t", "dark", "-b", "transparent"],
+                capture_output=True,
+                timeout=30,
+            )
+            Path(tmp_path).unlink(missing_ok=True)
+        except (subprocess.TimeoutExpired, OSError):
+            Path(tmp_path).unlink(missing_ok=True)
+            continue
+
+        if svg_path.exists() and svg_path.stat().st_size > 0:
+            img_ref = f"![{prefix}-{seq}](diagrams/{svg_name})"
+            result = result[:match.start()] + img_ref + result[match.end():]
+
+    return result

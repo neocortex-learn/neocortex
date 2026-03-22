@@ -926,10 +926,19 @@ def read(
         console.print()
         console.print(f"  [green]{t('read_saved', lang, path=str(note_path))}[/green]")
 
-        # Generate HTML companion with rendered Mermaid diagrams
-        from neocortex.reader.visual import generate_html_note, has_mermaid_diagrams
+        # Render Mermaid diagrams to SVG and generate HTML companion
+        from neocortex.reader.visual import generate_html_note, has_mermaid_diagrams, render_mermaid_to_svg
 
         if has_mermaid_diagrams(full_content):
+            # SVG pre-rendering: replace Mermaid blocks with inline images
+            with console.status(f"  {t('read_rendering_diagrams', lang)}"):
+                rendered = render_mermaid_to_svg(full_content, notes_dir, safe_title)
+            if rendered != full_content:
+                note_path.write_text(rendered, encoding="utf-8")
+                svg_count = rendered.count("](diagrams/")
+                console.print(f"  [green]{t('read_svg_saved', lang, count=str(svg_count))}[/green]")
+
+            # HTML companion for full interactive view
             html_content = generate_html_note(full_content, doc.title, source, lang.value)
             html_path = note_path.with_suffix(".html")
             html_path.write_text(html_content, encoding="utf-8")

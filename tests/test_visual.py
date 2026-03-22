@@ -1,11 +1,17 @@
-"""Tests for visual note renderer — HTML generation from Markdown + Mermaid."""
+"""Tests for visual note renderer — HTML generation, Mermaid rendering, SVG pre-rendering."""
 
 from __future__ import annotations
+
+import shutil
+from pathlib import Path
+
+import pytest
 
 from neocortex.reader.visual import (
     generate_html_note,
     has_mermaid_diagrams,
     markdown_to_html_body,
+    render_mermaid_to_svg,
 )
 
 
@@ -238,3 +244,54 @@ stateDiagram-v2
 
         # Self-contained
         assert "mermaid.min.js" in html
+
+
+# ── SVG pre-rendering ──
+
+
+_HAS_MMDC = shutil.which("mmdc") is not None
+
+
+@pytest.mark.skipif(not _HAS_MMDC, reason="mmdc (mermaid-cli) not installed")
+class TestRenderMermaidToSvg:
+    def test_renders_single_diagram(self, tmp_path: Path):
+        md = "# Test\n\n```mermaid\nflowchart LR\n  A --> B\n```\n"
+        result = render_mermaid_to_svg(md, tmp_path, "test")
+        assert "](diagrams/" in result
+        assert "```mermaid" not in result
+        svgs = list((tmp_path / "diagrams").glob("*.svg"))
+        assert len(svgs) == 1
+        assert svgs[0].stat().st_size > 0
+
+    def test_renders_multiple_diagrams(self, tmp_path: Path):
+        md = "```mermaid\nflowchart LR\n  A --> B\n```\ntext\n```mermaid\nsequenceDiagram\n  A->>B: hi\n```\n"
+        result = render_mermaid_to_svg(md, tmp_path, "multi")
+        assert result.count("](diagrams/") == 2
+        svgs = list((tmp_path / "diagrams").glob("*.svg"))
+        assert len(svgs) == 2
+
+    def test_preserves_non_mermaid_content(self, tmp_path: Path):
+        md = "# Title\n\nParagraph.\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nMore text."
+        result = render_mermaid_to_svg(md, tmp_path, "test")
+        assert "# Title" in result
+        assert "Paragraph." in result
+        assert "More text." in result
+
+    def test_no_mermaid_returns_unchanged(self, tmp_path: Path):
+        md = "# No diagrams\n\nJust text."
+        result = render_mermaid_to_svg(md, tmp_path, "test")
+        assert result == md
+
+    def test_creates_diagrams_directory(self, tmp_path: Path):
+        md = "```mermaid\nflowchart LR\n  A --> B\n```\n"
+        render_mermaid_to_svg(md, tmp_path, "test")
+        assert (tmp_path / "diagrams").is_dir()
+
+
+class TestRenderWithoutMmdc:
+    def test_returns_unchanged_without_mmdc(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr("shutil.which", lambda _: None)
+        md = "```mermaid\nflowchart LR\n  A --> B\n```\n"
+        result = render_mermaid_to_svg(md, tmp_path, "test")
+        assert result == md
+        assert not (tmp_path / "diagrams").exists()
