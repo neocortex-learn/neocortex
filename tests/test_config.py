@@ -113,17 +113,27 @@ class TestDirectories:
         assert d.is_dir()
 
     def test_get_notes_dir_creates_directory(self, tmp_path, monkeypatch):
-        data_dir = tmp_path / "neo_data"
-        data_dir.mkdir()
-
-        def _fake_data_dir():
-            return data_dir
-
-        monkeypatch.setattr("neocortex.config.get_data_dir", _fake_data_dir)
+        # With no config file, get_notes_dir falls back to ~/Documents/Neocortex
+        monkeypatch.setattr("neocortex.config._config_path", lambda: tmp_path / "nonexistent.json")
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         notes = get_notes_dir()
         assert notes.exists()
         assert notes.is_dir()
-        assert notes == data_dir / "notes"
+        assert notes == tmp_path / "Documents" / "Neocortex"
+
+    def test_get_notes_dir_uses_config(self, tmp_path, monkeypatch):
+        # When config has a custom notes_dir, use it
+        import json
+        custom_dir = tmp_path / "my_notes"
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({
+            "output_settings": {"notes_dir": str(custom_dir)}
+        }), encoding="utf-8")
+        monkeypatch.setattr("neocortex.config._config_path", lambda: config_file)
+        notes = get_notes_dir()
+        assert notes.exists()
+        assert notes.is_dir()
+        assert notes == custom_dir
 
 
 def _ensure_dir(p):

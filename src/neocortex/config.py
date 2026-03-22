@@ -65,7 +65,19 @@ def get_data_dir() -> Path:
 
 
 def get_notes_dir() -> Path:
-    notes_dir = get_data_dir() / "notes"
+    """Get the notes directory. Uses config setting, defaults to ~/Documents/Neocortex."""
+    cfg_path = _config_path()
+    if cfg_path.exists():
+        try:
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            custom = data.get("output_settings", {}).get("notes_dir")
+            if custom and custom != "~/.neocortex/notes":
+                notes_dir = Path(custom).expanduser()
+                notes_dir.mkdir(parents=True, exist_ok=True)
+                return notes_dir
+        except (json.JSONDecodeError, OSError):
+            pass
+    notes_dir = Path.home() / "Documents" / "Neocortex"
     notes_dir.mkdir(parents=True, exist_ok=True)
     return notes_dir
 

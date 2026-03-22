@@ -239,7 +239,7 @@ class ScanSettings(BaseModel):
 
 class OutputSettings(BaseModel):
     auto_open: bool = True
-    notes_dir: str = "~/.neocortex/notes"
+    notes_dir: str = "~/Documents/Neocortex"
     language: Language = Language.EN
 
 

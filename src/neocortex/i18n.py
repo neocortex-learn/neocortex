@@ -531,6 +531,26 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "No notes matching: {query}",
         "zh": "没有匹配的笔记：{query}",
     },
+    "notes_migrate_found": {
+        "en": "Found {count} notes in old location ({old}). New location: {new}",
+        "zh": "在旧位置（{old}）发现 {count} 篇笔记。新位置：{new}",
+    },
+    "notes_migrate_confirm": {
+        "en": "Move notes to new location?",
+        "zh": "是否迁移笔记到新位置？",
+    },
+    "notes_migrate_done": {
+        "en": "Migrated {count} notes.",
+        "zh": "已迁移 {count} 篇笔记。",
+    },
+    "notes_opened": {
+        "en": "Opened: {path}",
+        "zh": "已打开：{path}",
+    },
+    "notes_dir_info": {
+        "en": "Notes directory: {path}",
+        "zh": "笔记目录：{path}",
+    },
 
     # ── Index / Search ──
     "index_building": {

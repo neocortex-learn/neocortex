@@ -55,6 +55,44 @@ def smart_output(data: dict, human_format_fn, json_flag: bool = False) -> None:
         human_format_fn(data)
 
 
+def _maybe_migrate_notes() -> None:
+    """Check for notes in old location (~/.neocortex/notes/) and offer to migrate."""
+    from neocortex.config import get_data_dir, get_notes_dir
+
+    old_dir = get_data_dir() / "notes"
+    new_dir = get_notes_dir()
+
+    if not old_dir.exists() or old_dir == new_dir:
+        return
+
+    old_notes = list(old_dir.glob("*.md"))
+    if not old_notes:
+        return
+
+    lang = _get_lang()
+    console.print()
+    console.print(f"  [yellow]{t('notes_migrate_found', lang, count=str(len(old_notes)), old=str(old_dir), new=str(new_dir))}[/yellow]")
+
+    answer = Prompt.ask(
+        f"  [bold]?[/bold] {t('notes_migrate_confirm', lang)}",
+        choices=["y", "n", "Y", "N"],
+        default="y",
+        console=console,
+    )
+    if answer.lower() != "y":
+        return
+
+    import shutil
+    moved = 0
+    for f in old_notes:
+        dest = new_dir / f.name
+        if not dest.exists():
+            shutil.move(str(f), str(dest))
+            moved += 1
+
+    console.print(f"  [green]{t('notes_migrate_done', lang, count=str(moved))}[/green]")
+
+
 def _arrow_select(
     question: str,
     options: list[tuple[str, any]],
@@ -786,6 +824,7 @@ def read(
     cfg = load_config()
     lang = cfg.output_settings.language
     prof = load_profile()
+    _maybe_migrate_notes()
 
     try:
         provider = create_provider(cfg)
@@ -829,8 +868,8 @@ def read(
         console.print()
         confirm = Prompt.ask(
             f"  [bold]?[/bold] {t('read_outline_confirm', lang)}",
-            choices=["Y", "n"],
-            default="Y",
+            choices=["y", "n", "Y", "N"],
+            default="y",
             console=console,
         )
         if confirm.lower() == "n":
@@ -856,12 +895,33 @@ def read(
             counter += 1
             filename = f"{safe_title}-{today}-{counter}.md"
             note_path = notes_dir / filename
-        note_path.write_text(notes_content, encoding="utf-8")
+        # Build frontmatter
+        frontmatter_lines = [
+            "---",
+            f"title: \"{doc.title.replace(chr(34), chr(39))}\"",
+            f"source: \"{source.replace(chr(34), chr(39))}\"",
+            f"date: {today}",
+        ]
+        # Add tags from outline markers
+        deep_topics = [item.title for item in outline.items if item.marker == "deep"]
+        if deep_topics:
+            frontmatter_lines.append("tags:")
+            for topic in deep_topics[:5]:
+                safe_tag = topic.strip().replace(" ", "-").lower()[:30]
+                if safe_tag:
+                    frontmatter_lines.append(f"  - {safe_tag}")
+        if focus:
+            frontmatter_lines.append(f"focus: \"{focus}\"")
+        frontmatter_lines.append("---")
+        frontmatter_lines.append("")
+
+        full_content = "\n".join(frontmatter_lines) + notes_content
+        note_path.write_text(full_content, encoding="utf-8")
 
         from neocortex.search import NoteIndex
 
         note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
-        note_index.index_note(note_path.name, doc.title, notes_content)
+        note_index.index_note(note_path.name, doc.title, full_content)
 
         console.print()
         console.print(f"  [green]{t('read_saved', lang, path=str(note_path))}[/green]")
@@ -1488,11 +1548,13 @@ def index() -> None:
 @app.command()
 def notes(
     search: str = typer.Option(None, help="Search notes"),
+    open_note: bool = typer.Option(False, "--open", help="Open matched note in editor"),
 ) -> None:
     """List or search your knowledge base."""
     from neocortex.config import get_data_dir, get_notes_dir
 
     lang = _get_lang()
+    _maybe_migrate_notes()
     notes_dir = get_notes_dir()
 
     md_files = sorted(notes_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
@@ -1524,6 +1586,12 @@ def notes(
 
             console.print(table)
             console.print()
+
+            if open_note and fts_results:
+                target = notes_dir / fts_results[0]["filename"]
+                if target.exists():
+                    _open_file(target, lang)
+
             return
 
         query = search.lower()
@@ -1547,6 +1615,7 @@ def notes(
     console.print()
     console.print(f"  [bold]{t('notes_title', lang)}[/bold]")
     console.print("  " + "\u2501" * 52)
+    console.print(f"  [dim]{t('notes_dir_info', lang, path=str(notes_dir))}[/dim]")
     console.print()
 
     table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
@@ -1562,6 +1631,21 @@ def notes(
 
     console.print(table)
     console.print()
+
+    if open_note and md_files:
+        _open_file(md_files[0], lang)
+
+
+def _open_file(path: Path, lang: Language) -> None:
+    """Open a file with the system default application."""
+    import platform
+    import subprocess
+    opener = "open" if platform.system() == "Darwin" else "xdg-open"
+    try:
+        subprocess.Popen([opener, str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        console.print(f"  [green]{t('notes_opened', lang, path=path.name)}[/green]")
+    except OSError:
+        console.print(f"  [dim]{str(path)}[/dim]")
 
 
 def _fts_search(query: str) -> list[dict] | None:

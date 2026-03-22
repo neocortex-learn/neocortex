@@ -66,6 +66,14 @@ src/neocortex/
 ### Token 优化（参考 learn-claude-code 的 Skill 按需加载思路）
 `_build_context()` 按域分组展示 gap（减少重复 domain/level 标签），阅读历史只传标题不传完整路径，降低每次 LLM 调用的 token 消耗。
 
+### 知识管理（参考 Readwise/Obsidian）
+笔记存储三层分离：
+- **应用数据**（`~/.neocortex/`）：config、profile、数据库、缓存。用户不需要碰。
+- **用户笔记**（`~/Documents/Neocortex/`，可配置）：纯 Markdown 文件，Finder 直接可见。
+  通过 `neocortex config --notes-dir <path>` 可指向 Obsidian vault 或任意目录。
+- **Frontmatter 元数据**：每篇笔记头部包含 source、date、tags、related_gaps 等 YAML 字段，
+  兼容 Obsidian 图谱视图和其他知识管理工具。
+
 ## 注意事项
 - Commit message 用中文
 - 不要在 commit message 中加 Co-Authored-By
@@ -77,3 +85,5 @@ src/neocortex/
 
 ## 设计参考
 - [learn-claude-code](https://github.com/shareAI-lab/learn-claude-code) — 渐进式学习路径设计、Skill 按需加载、任务依赖图
+- [Obsidian](https://obsidian.md) — 本地 Markdown vault 模型、用户拥有文件
+- [Readwise Reader](https://readwise.io/read) — 阅读→高亮→复习闭环、间隔复习算法
