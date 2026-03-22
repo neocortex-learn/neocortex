@@ -66,6 +66,13 @@ src/neocortex/
 ### Token 优化（参考 learn-claude-code 的 Skill 按需加载思路）
 `_build_context()` 按域分组展示 gap（减少重复 domain/level 标签），阅读历史只传标题不传完整路径，降低每次 LLM 调用的 token 消耗。
 
+### 可视化笔记（Mermaid 图表）
+笔记不再是纯文字墙，LLM 在生成笔记时自然嵌入 Mermaid 图表：
+- 每篇笔记开头自动生成 **mindmap** 展示主题结构（从 outline 的 deep/brief 项构建）
+- 流程用 flowchart，多方交互用 sequenceDiagram，结构关系用 classDiagram，状态变化用 stateDiagram
+- 图表紧跟相关文字（空间邻近原则），不集中放在末尾
+- 用户需要用支持 Mermaid 渲染的 Markdown 工具查看（Obsidian、Typora、VS Code 等）
+
 ### 知识管理（参考 Readwise/Obsidian）
 笔记存储三层分离：
 - **应用数据**（`~/.neocortex/`）：config、profile、数据库、缓存。用户不需要碰。

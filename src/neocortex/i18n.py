@@ -316,6 +316,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "ja": "ノートを保存しました：{path}",
         "ko": "노트가 저장되었습니다: {path}",
     },
+    "read_html_saved": {
+        "en": "Visual note saved: {path}",
+        "zh": "可视化笔记已保存：{path}",
+    },
     "read_marker_skip": {"en": "skip", "zh": "跳过"},
     "read_marker_brief": {"en": "brief overview", "zh": "简要概览"},
     "read_marker_deep": {"en": "deep dive", "zh": "深入学习"},

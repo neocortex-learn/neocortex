@@ -926,6 +926,15 @@ def read(
         console.print()
         console.print(f"  [green]{t('read_saved', lang, path=str(note_path))}[/green]")
 
+        # Generate HTML companion with rendered Mermaid diagrams
+        from neocortex.reader.visual import generate_html_note, has_mermaid_diagrams
+
+        if has_mermaid_diagrams(full_content):
+            html_content = generate_html_note(full_content, doc.title, source, lang.value)
+            html_path = note_path.with_suffix(".html")
+            html_path.write_text(html_content, encoding="utf-8")
+            console.print(f"  [green]{t('read_html_saved', lang, path=str(html_path))}[/green]")
+
         if audio:
             from neocortex.tts import prepare_text_for_speech, text_to_speech
 

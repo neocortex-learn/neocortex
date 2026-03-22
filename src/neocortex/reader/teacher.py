@@ -204,8 +204,19 @@ Generate personalized study notes for this section. Requirements:
 3. Expand on the reader's knowledge gaps (the "gaps" in their profile)
 4. If this is a deep-dive section, include Action Items: specific, actionable improvements for the reader's own projects
 5. Keep difficulty at the reader's current level +1 to +2 — stretch but don't overwhelm
+6. Include Mermaid diagrams to make concepts visual and intuitive:
+   - Use ```mermaid code blocks (the reader's Markdown tool renders them)
+   - Use `mindmap` for topic overviews showing concept relationships
+   - Use `flowchart` for processes, decision trees, data pipelines
+   - Use `sequenceDiagram` for multi-party interactions, request flows, protocols
+   - Use `classDiagram` for structural relationships, type hierarchies
+   - Use `stateDiagram-v2` for state machines, lifecycles, status transitions
+   - Place each diagram RIGHT AFTER its related text explanation (not in a separate section)
+   - Every diagram must serve a purpose — don't add decorative diagrams
+   - For deep-dive sections, aim for at least 1-2 diagrams
+   - For brief sections, a diagram is optional but welcome if it clarifies the concept
 
-Output format: Markdown with clear heading hierarchy. Suitable for future review.
+Output format: Markdown with clear heading hierarchy and Mermaid diagrams. Suitable for future review.
 
 {lang_inst}"""
 
@@ -234,6 +245,27 @@ async def generate_notes(
         header = f"# {doc.title}\n\n> 来源: {doc.source}\n"
     else:
         header = f"# {doc.title}\n\n> Source: {doc.source}\n"
+
+    # Generate topic overview mindmap from outline
+    deep_items = [i for i in outline.items if i.marker == "deep" and i.title]
+    brief_items = [i for i in outline.items if i.marker == "brief" and i.title]
+    if deep_items or brief_items:
+        mindmap_lines = ["```mermaid", "mindmap", f"  root(({doc.title[:40]}))"]
+        if deep_items:
+            label = "重点学习" if lang == Language.ZH else "Deep Dive"
+            mindmap_lines.append(f"    {label}")
+            for item in deep_items[:6]:
+                safe = item.title.replace("(", "").replace(")", "")[:30]
+                mindmap_lines.append(f"      {safe}")
+        if brief_items:
+            label = "快速回顾" if lang == Language.ZH else "Review"
+            mindmap_lines.append(f"    {label}")
+            for item in brief_items[:6]:
+                safe = item.title.replace("(", "").replace(")", "")[:30]
+                mindmap_lines.append(f"      {safe}")
+        mindmap_lines.append("```")
+        header += "\n" + "\n".join(mindmap_lines) + "\n"
+
     note_parts.append(header)
 
     for chunk in chunks:
