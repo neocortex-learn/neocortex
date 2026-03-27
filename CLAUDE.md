@@ -29,7 +29,12 @@ neocortex --help          # 查看 CLI 帮助
 ## 目录结构
 ```
 src/neocortex/
-├── cli.py          # CLI 入口，所有命令
+├── cli.py          # CLI 入口，共享工具，init/config 命令
+├── cmd_scan.py     # scan + profile 命令
+├── cmd_read.py     # read + 匹配 + 反馈
+├── cmd_learn.py    # recommend + plan + growth + converge + opportunities
+├── cmd_knowledge.py # notes + card + index + ask + chat
+├── cmd_import.py   # import 命令
 ├── config.py       # 配置、画像、推荐记录、gap 进度读写
 ├── models.py       # 所有 Pydantic 数据模型
 ├── i18n.py         # 中英文国际化

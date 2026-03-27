@@ -2,10 +2,8 @@
 
 ## 架构改进
 
-### cli.py 拆分
-- **优先级**: Medium
-- **问题**: cli.py 已达 1900+ 行，扫描/阅读/推荐/卡片全在一个文件
-- **方向**: 按命令组拆分为独立模块（scan_cmd.py, read_cmd.py, recommend_cmd.py 等）
+### ~~cli.py 拆分~~ ✅
+已拆分为 cli.py + cmd_scan.py + cmd_read.py + cmd_learn.py + cmd_knowledge.py + cmd_import.py
 
 ### 搜索性能优化
 - **优先级**: Medium
