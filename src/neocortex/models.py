@@ -211,6 +211,21 @@ class RecommendationRecord(BaseModel):
     notes_generated: list[str] = Field(default_factory=list)
 
 
+# ── Opportunities ──
+
+class Opportunity(BaseModel):
+    """A matched opportunity (job, OSS issue, project)."""
+    type: str = "oss"  # oss / job
+    title: str
+    url: str = ""
+    source: str = ""
+    skills_matched: list[str] = Field(default_factory=list)
+    skills_missing: list[str] = Field(default_factory=list)
+    match_score: float = 0.0
+    difficulty: str = "any"
+    fetched_at: str = ""
+
+
 # ── App config ──
 
 class ProviderType(str, Enum):

@@ -418,6 +418,32 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "pip install playwright && playwright install chromium",
     },
 
+    # ── Converge ──
+    "converge_title": {
+        "en": "Knowledge Convergence",
+        "zh": "知识收敛",
+    },
+    "converge_scope": {
+        "en": "{count} notes from last {days} days ({cadence})",
+        "zh": "最近 {days} 天的 {count} 篇笔记（{cadence}）",
+    },
+    "converge_generating": {
+        "en": "Synthesizing your learning...",
+        "zh": "正在综合你的学习...",
+    },
+    "converge_saved": {
+        "en": "Report saved: {path}",
+        "zh": "报告已保存：{path}",
+    },
+    "converge_no_notes": {
+        "en": "No notes found in this period. Read something first!",
+        "zh": "这段时间没有笔记。先读点东西吧！",
+    },
+    "converge_reminder": {
+        "en": "You have {count} unreviewed notes. Run `neocortex converge` to synthesize.",
+        "zh": "你有 {count} 篇未复习的笔记。运行 `neocortex converge` 来综合学习。",
+    },
+
     # ── Recommend ──
     "recommend_generating": {
         "en": "Generating learning recommendations...",
@@ -702,6 +728,28 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "学习计划已保存：{path}",
         "ja": "学習プランを保存しました：{path}",
         "ko": "학습 계획이 저장되었습니다: {path}",
+    },
+
+    # ── Opportunities ──
+    "opp_title": {
+        "en": "Opportunities For You",
+        "zh": "为你匹配的机会",
+    },
+    "opp_searching": {
+        "en": "Searching for matching opportunities...",
+        "zh": "正在搜索匹配的机会...",
+    },
+    "opp_empty": {
+        "en": "No matching opportunities found. Try scanning more projects first.",
+        "zh": "未找到匹配的机会。试试先扫描更多项目。",
+    },
+    "opp_missing": {
+        "en": "to learn",
+        "zh": "待学习",
+    },
+    "opp_jobs_coming": {
+        "en": "Job matching coming soon. For now, try --type=oss",
+        "zh": "岗位匹配即将推出。目前请使用 --type=oss",
     },
 }
 

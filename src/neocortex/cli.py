@@ -1613,6 +1613,116 @@ def index() -> None:
 
 
 @app.command()
+def converge(
+    weekly: bool = typer.Option(False, "--weekly", help="Force weekly scope"),
+    monthly: bool = typer.Option(False, "--monthly", help="Force monthly scope"),
+    days: int = typer.Option(None, help="Custom number of days to cover"),
+) -> None:
+    """Synthesize your recent learning into higher-level understanding."""
+    from neocortex.config import get_notes_dir, load_config, load_profile
+    from neocortex.converger import detect_cadence, gather_recent_notes, generate_convergence_report
+    from neocortex.llm import create_provider
+
+    cfg = load_config()
+    prof = load_profile()
+    lang = _get_lang()
+
+    try:
+        provider = create_provider(cfg)
+    except ValueError as exc:
+        console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
+        raise typer.Exit(1)
+
+    notes_dir = get_notes_dir()
+    scope_days = days or (30 if monthly else 7 if weekly else 7)
+    notes = gather_recent_notes(notes_dir, scope_days)
+
+    if not notes:
+        console.print(f"  [yellow]{t('converge_no_notes', lang)}[/yellow]")
+        return
+
+    cadence = "monthly" if monthly else "weekly" if weekly else detect_cadence(notes)
+
+    console.print()
+    console.print(f"  [bold]{t('converge_title', lang)}[/bold]")
+    console.print(f"  [dim]{t('converge_scope', lang, count=str(len(notes)), days=str(scope_days), cadence=cadence)}[/dim]")
+
+    async def _run() -> str:
+        with console.status(f"  {t('converge_generating', lang)}"):
+            return await generate_convergence_report(notes, cadence, prof, provider, lang)
+
+    report = asyncio.run(_run())
+
+    console.print()
+    from rich.markdown import Markdown
+    console.print(Markdown(report))
+
+    today = date.today().isoformat()
+    report_filename = f"convergence-{cadence}-{today}.md"
+    report_path = notes_dir / report_filename
+    header = f"# {t('converge_title', lang)} ({cadence})\n\n> {today} | {len(notes)} notes\n\n"
+    report_path.write_text(header + report, encoding="utf-8")
+    console.print()
+    console.print(f"  [green]{t('converge_saved', lang, path=str(report_path))}[/green]")
+
+    from neocortex.reader.visual import generate_html_note, has_mermaid_diagrams
+    if has_mermaid_diagrams(report):
+        html = generate_html_note(header + report, f"Convergence ({cadence})", "neocortex converge", lang.value)
+        html_path = report_path.with_suffix(".html")
+        html_path.write_text(html, encoding="utf-8")
+
+
+@app.command()
+def opportunities(
+    opp_type: str = typer.Option("oss", "--type", help="Type: oss or job"),
+    fetch: bool = typer.Option(True, help="Fetch fresh data from APIs"),
+    limit: int = typer.Option(10, help="Max results"),
+) -> None:
+    """Find open source and job opportunities matching your skills."""
+    from neocortex.config import load_config, load_profile
+
+    cfg = load_config()
+    prof = load_profile()
+    lang = _get_lang()
+
+    if not prof.skills.languages:
+        console.print(f"  {t('profile_empty', lang)}")
+        raise typer.Exit(1)
+
+    if opp_type == "oss":
+        from neocortex.matcher.github import find_oss_opportunities
+
+        console.print()
+        console.print(f"  [bold]{t('opp_title', lang)}[/bold]")
+        console.print("  " + "━" * 52)
+
+        async def _run() -> list:
+            with console.status(f"  {t('opp_searching', lang)}"):
+                return await find_oss_opportunities(prof, limit)
+
+        opps = asyncio.run(_run())
+
+        if not opps:
+            console.print(f"  [yellow]{t('opp_empty', lang)}[/yellow]")
+            return
+
+        for i, opp in enumerate(opps, 1):
+            score_pct = f"{opp.match_score:.0%}"
+            score_color = "green" if opp.match_score >= 0.6 else "yellow" if opp.match_score >= 0.3 else "dim"
+            console.print()
+            console.print(f"  [{score_color}]{score_pct}[/{score_color}] [bold cyan]{i}. {opp.title}[/bold cyan]")
+            console.print(f"       [dim]{opp.url}[/dim]")
+            if opp.skills_matched:
+                console.print(f"       [green]✓ {', '.join(opp.skills_matched)}[/green]")
+            if opp.skills_missing:
+                console.print(f"       [yellow]△ {t('opp_missing', lang)}: {', '.join(opp.skills_missing)}[/yellow]")
+
+        console.print()
+    else:
+        console.print(f"  [dim]{t('opp_jobs_coming', lang)}[/dim]")
+
+
+@app.command()
 def card(
     note_path: str = typer.Argument(None, help="Path to note file (default: latest note)"),
     theme: str = typer.Option("dark", help="Theme: dark or light"),
