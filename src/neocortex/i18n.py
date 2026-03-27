@@ -400,6 +400,24 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "{skill} 置信度：{conf}",
     },
 
+    # ── Card ──
+    "card_generating": {
+        "en": "Generating visual card...",
+        "zh": "正在生成视觉卡片...",
+    },
+    "card_saved": {
+        "en": "Card saved: {path}",
+        "zh": "卡片已保存：{path}",
+    },
+    "card_html_only": {
+        "en": "Card HTML saved: {path} (install Playwright for PNG)",
+        "zh": "卡片 HTML 已保存：{path}（安装 Playwright 可生成 PNG）",
+    },
+    "card_install_playwright": {
+        "en": "pip install playwright && playwright install chromium",
+        "zh": "pip install playwright && playwright install chromium",
+    },
+
     # ── Recommend ──
     "recommend_generating": {
         "en": "Generating learning recommendations...",

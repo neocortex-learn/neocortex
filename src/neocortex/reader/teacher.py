@@ -198,23 +198,30 @@ The reader is reading the following content (section: {chunk.position}):
 {focus_instruction}
 {question_instruction}
 
-Generate personalized study notes for this section. Requirements:
+Generate personalized study notes for this section.
+
+Content requirements:
 1. Skip concepts the reader already masters — don't waste space on them
 2. For areas the reader has experience in, use analogies from their own projects
 3. Expand on the reader's knowledge gaps (the "gaps" in their profile)
 4. If this is a deep-dive section, include Action Items: specific, actionable improvements for the reader's own projects
 5. Keep difficulty at the reader's current level +1 to +2 — stretch but don't overwhelm
-6. Include Mermaid diagrams to make concepts visual and intuitive:
-   - Use ```mermaid code blocks (the reader's Markdown tool renders them)
-   - Use `mindmap` for topic overviews showing concept relationships
-   - Use `flowchart` for processes, decision trees, data pipelines
-   - Use `sequenceDiagram` for multi-party interactions, request flows, protocols
-   - Use `classDiagram` for structural relationships, type hierarchies
-   - Use `stateDiagram-v2` for state machines, lifecycles, status transitions
-   - Place each diagram RIGHT AFTER its related text explanation (not in a separate section)
-   - Every diagram must serve a purpose — don't add decorative diagrams
-   - For deep-dive sections, aim for at least 1-2 diagrams
-   - For brief sections, a diagram is optional but welcome if it clarifies the concept
+
+Writing principles (non-negotiable):
+- Colloquial test: would you explain it this way to a friend? If not, rewrite
+- Zero jargon first: explain in plain language, THEN mention the technical term
+- Show reasoning: simulate the process of figuring it out, not the result of having figured it out. "Since A is B, could C also be D?" — walk the reader through the logic
+- Transform, don't define: to explain the relationship between A and B, morph A into B step by step. "Turn LSTM into ResNet" is 10x better than "LSTM and ResNet are dual"
+- Land on actionable: end with "this means you can ___", not "this makes us rethink ___"
+- One idea per sentence. Short words over long words. Cut filler
+- Be honest: if the content has flaws, say so. If something is unclear, say so
+
+Visual diagrams (Mermaid):
+- Use ```mermaid code blocks (the reader's Markdown tool renders them)
+- mindmap for topic overviews, flowchart for processes, sequenceDiagram for interactions, classDiagram for structures, stateDiagram-v2 for lifecycles
+- Place each diagram RIGHT AFTER its related text (spatial contiguity)
+- Every diagram must serve a purpose — no decorative diagrams
+- Deep-dive sections: aim for 1-2 diagrams. Brief sections: optional
 
 Output format: Markdown with clear heading hierarchy and Mermaid diagrams. Suitable for future review.
 
@@ -230,6 +237,7 @@ async def generate_notes(
     provider: LLMProvider,
     focus: str | None = None,
     question: str | None = None,
+    deep: bool = False,
 ) -> str:
     max_ctx = provider.max_context_tokens()
     reserved_for_prompt = 2000
@@ -282,7 +290,59 @@ async def generate_notes(
             response = await provider.chat(messages)
             note_parts.append(response.strip())
 
+    if deep:
+        anatomy_prompt = _build_anatomy_prompt(doc, profile)
+        messages = [{"role": "user", "content": anatomy_prompt}]
+        response = await provider.chat(messages)
+        note_parts.append(response.strip())
+
     return "\n\n---\n\n".join(note_parts)
+
+
+def _build_anatomy_prompt(doc: Document, profile: Profile) -> str:
+    """Build a prompt for deep concept anatomy (8 dimensions)."""
+    lang_inst = _language_instruction(profile)
+    profile_json = _profile_summary(profile)
+
+    return f"""\
+You are a concept anatomist who helps a reader deeply understand the core ideas in what they just read.
+
+Reader profile:
+{profile_json}
+
+The reader just read: "{doc.title}" (source: {doc.source})
+
+Perform a deep concept anatomy on the most important concept from this content.
+Cut it open from 8 angles, then compress it into an insight.
+
+## Steps:
+
+### 1. Anchor
+- What is the most common definition? What are the common misconceptions?
+- What are the core components hidden inside this concept?
+
+### 2. Eight Cuts (2-3 sentences each, only the essentials)
+1. **History**: Where did it first emerge → how did it evolve → what turning point made it what it is today
+2. **Dialectics**: What is its opposite → what higher understanding emerges from the collision
+3. **Phenomenology**: Drop all assumptions, return to the thing itself → use one everyday scenario to reconstruct it
+4. **Language**: Etymology (Chinese/English/Greek/Latin) → draw the semantic web of related concepts → what metaphor is hidden in this word
+5. **Formalization**: Write a formula or formal expression → where does the formula break down
+6. **Existential**: How did this concept change how people live
+7. **Aesthetics**: What is beautiful about it? Use one concrete image to present it
+8. **Meta-reflection**: What metaphor are we using to understand it? What does this metaphor hide? What if we switched metaphors
+
+### 3. Introspection
+1. Become this concept. See the world in first person. 3-5 sentences.
+2. Which of the eight cuts point to the same deep structure? Extract it.
+
+### 4. Compression
+1. **Formula**: `Concept = ...`
+2. **One sentence**: The deepest understanding in the simplest words
+3. **Structure diagram**: Pure ASCII diagram showing the concept's skeleton
+
+Output format: Markdown with ## headings for each step.
+
+{lang_inst}"""
 
 
 def _build_question_section(

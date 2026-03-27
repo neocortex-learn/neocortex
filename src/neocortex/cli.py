@@ -816,6 +816,7 @@ def read(
     focus: str = typer.Option(None, help="Focus topic"),
     question: str = typer.Option(None, help="Question to answer"),
     audio: bool = typer.Option(False, "--audio", help="Generate audio version"),
+    deep: bool = typer.Option(False, "--deep", help="Deep concept anatomy mode (8 dimensions)"),
 ) -> None:
     """Read a URL/file and generate personalized notes."""
     from neocortex.config import get_data_dir, get_notes_dir, load_config, load_profile, save_profile
@@ -880,6 +881,7 @@ def read(
                 doc, outline, prof, provider,
                 focus=focus,
                 question=question,
+                deep=deep,
             )
 
         notes_dir = get_notes_dir()
@@ -1608,6 +1610,61 @@ def index() -> None:
         console.print(f"  [green]{t('index_embedding_done', lang)}[/green]")
     else:
         console.print(f"  [dim]{t('index_embedding_skip', lang)}[/dim]")
+
+
+@app.command()
+def card(
+    note_path: str = typer.Argument(None, help="Path to note file (default: latest note)"),
+    theme: str = typer.Option("dark", help="Theme: dark or light"),
+) -> None:
+    """Generate a visual card (PNG) from a note."""
+    from neocortex.config import get_notes_dir
+    from neocortex.reader.card import generate_card_html, render_card_to_png
+
+    lang = _get_lang()
+    notes_dir = get_notes_dir()
+
+    if note_path:
+        target = Path(note_path)
+    else:
+        md_files = sorted(notes_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
+        if not md_files:
+            console.print(f"  {t('notes_empty', lang)}")
+            return
+        target = md_files[0]
+
+    if not target.exists():
+        console.print(f"  [red]{t('error', lang)}: File not found: {target}[/red]")
+        raise typer.Exit(1)
+
+    content = target.read_text(encoding="utf-8")
+
+    # Extract title from frontmatter or first heading
+    import re as _re
+    title_match = _re.search(r'^title:\s*"?(.+?)"?\s*$', content, _re.MULTILINE)
+    if not title_match:
+        title_match = _re.search(r"^#\s+(.+)$", content, _re.MULTILINE)
+    title = title_match.group(1).strip() if title_match else target.stem
+
+    source_match = _re.search(r'^source:\s*"?(.+?)"?\s*$', content, _re.MULTILINE)
+    source = source_match.group(1).strip() if source_match else ""
+
+    today = date.today().isoformat()
+
+    with console.status(f"  {t('card_generating', lang)}"):
+        html = generate_card_html(content, title, source, today, lang.value, theme)
+        html_path = target.with_suffix(".card.html")
+        html_path.write_text(html, encoding="utf-8")
+
+        png_path = target.with_suffix(".card.png")
+        success = asyncio.run(render_card_to_png(html_path, png_path))
+
+    if success:
+        console.print(f"  [green]{t('card_saved', lang, path=str(png_path))}[/green]")
+        _open_file(png_path, lang)
+    else:
+        console.print(f"  [yellow]{t('card_html_only', lang, path=str(html_path))}[/yellow]")
+        console.print(f"  [dim]{t('card_install_playwright', lang)}[/dim]")
 
 
 @app.command()
