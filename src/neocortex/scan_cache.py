@@ -51,20 +51,21 @@ def _get_project_hash(project_path: str) -> str:
         f = p / name
         if f.exists():
             mtimes.append(f"{name}:{f.stat().st_mtime}")
-    # Also hash a sample of source files (up to 50) for non-git projects
+    # Also hash source files (up to 200, sorted for determinism) for non-git projects
+    _SKIP_DIRS = {"node_modules", "__pycache__", "venv", ".venv", "dist", "build", ".git", ".tox"}
     source_files = []
     try:
         for f in p.rglob("*"):
             if f.is_file() and f.suffix in source_extensions and not any(
-                part.startswith(".") or part in ("node_modules", "__pycache__", "venv", ".venv", "dist", "build")
+                part.startswith(".") or part in _SKIP_DIRS
                 for part in f.parts
             ):
                 source_files.append(f)
-                if len(source_files) >= 50:
+                if len(source_files) >= 200:
                     break
     except PermissionError:
         pass
-    for f in sorted(source_files):
+    for f in sorted(source_files, key=lambda x: str(x.relative_to(p))):
         mtimes.append(f"{f.relative_to(p)}:{f.stat().st_mtime}")
 
     if not mtimes:

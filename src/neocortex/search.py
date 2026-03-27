@@ -192,7 +192,10 @@ class NoteIndex:
         model = self._get_embedding_model()
         if model is None:
             return []
-        query_embedding = list(model.embed([query]))[0]
+        query_vec = list(model.embed([query]))[0]
+        query_norm = math.sqrt(sum(x * x for x in query_vec))
+        if query_norm == 0:
+            return []
 
         with self._connect() as conn:
             rows = conn.execute("SELECT filename, embedding FROM note_embeddings").fetchall()
@@ -201,8 +204,16 @@ class NoteIndex:
         for filename, blob in rows:
             dim = len(blob) // 4
             stored = struct.unpack(f"{dim}f", blob)
-            sim = _cosine_similarity(query_embedding, stored)
-            results.append({"filename": filename, "score": sim})
+            # Fast dot product + norm (skip full cosine for non-candidates)
+            dot = sum(x * y for x, y in zip(query_vec, stored))
+            if dot <= 0:
+                continue
+            stored_norm = math.sqrt(sum(x * x for x in stored))
+            if stored_norm == 0:
+                continue
+            sim = dot / (query_norm * stored_norm)
+            if sim > 0.3:  # Only keep relevant results
+                results.append({"filename": filename, "score": sim})
 
         results.sort(key=lambda x: -x["score"])
         return results[:limit]

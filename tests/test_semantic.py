@@ -163,7 +163,7 @@ class TestIndexNoteEmbeddingRoundtrip:
 
     def test_search_finds_indexed_note(self, note_index):
         embedding_a = [1.0, 0.0, 0.0]
-        embedding_b = [0.0, 1.0, 0.0]
+        embedding_b = [0.5, 0.8, 0.0]  # Still somewhat relevant (cosine > 0.3)
         query_embedding = [0.9, 0.1, 0.0]
 
         call_count = {"n": 0}

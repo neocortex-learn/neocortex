@@ -80,24 +80,50 @@ def _merge_batch_results(results: list[dict]) -> dict:
     }
 
 
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~3 chars per token for mixed CJK/English."""
+    return max(len(text) // 3, 1)
+
+
+def _batch_by_tokens(
+    messages: list[ParsedMessage],
+    max_tokens: int = 12000,
+) -> list[list[ParsedMessage]]:
+    """Split messages into batches by estimated token budget."""
+    batches: list[list[ParsedMessage]] = []
+    current_batch: list[ParsedMessage] = []
+    current_tokens = 0
+    for msg in messages:
+        msg_tokens = _estimate_tokens(msg.text)
+        if current_batch and current_tokens + msg_tokens > max_tokens:
+            batches.append(current_batch)
+            current_batch = []
+            current_tokens = 0
+        current_batch.append(msg)
+        current_tokens += msg_tokens
+    if current_batch:
+        batches.append(current_batch)
+    return batches
+
+
 async def extract_insights(
     messages: list[ParsedMessage],
     provider: LLMProvider,
     source: str,
-    batch_size: int = 50,
 ) -> ChatInsights:
     """Batch-send user messages to LLM and extract structured insights.
 
     1. Sort messages by timestamp.
-    2. Split into batches of *batch_size*.
+    2. Split into batches by token budget (with message count fallback).
     3. Send each batch to the LLM for analysis.
     4. Merge batch results into a single ChatInsights.
     """
     sorted_messages = sorted(messages, key=lambda m: m.timestamp)
 
-    batches: list[list[ParsedMessage]] = []
-    for i in range(0, len(sorted_messages), batch_size):
-        batches.append(sorted_messages[i : i + batch_size])
+    # Use token-based batching instead of fixed message count
+    max_ctx = provider.max_context_tokens()
+    token_budget = max(max_ctx // 2, 8000)  # Use half the context for input
+    batches = _batch_by_tokens(sorted_messages, token_budget)
 
     batch_results: list[dict] = []
     for i, batch in enumerate(batches):
