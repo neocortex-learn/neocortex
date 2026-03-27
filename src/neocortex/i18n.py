@@ -386,6 +386,20 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "已从画像中清除聊天洞察。",
     },
 
+    # ── Probe ──
+    "probe_intro": {
+        "en": "Quick check — let me verify your {skill} level before recommending:",
+        "zh": "快速确认——推荐前先校准一下你的 {skill} 水平：",
+    },
+    "probe_skipped": {
+        "en": "Skipped.",
+        "zh": "已跳过。",
+    },
+    "probe_confidence": {
+        "en": "{skill} confidence: {conf}",
+        "zh": "{skill} 置信度：{conf}",
+    },
+
     # ── Recommend ──
     "recommend_generating": {
         "en": "Generating learning recommendations...",

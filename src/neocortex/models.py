@@ -20,6 +20,8 @@ class SkillLevel(str, Enum):
 
 class LanguageSkill(BaseModel):
     level: SkillLevel = SkillLevel.BEGINNER
+    confidence: float = 0.3
+    last_verified: str | None = None
     lines: int = 0
     frameworks: list[str] = Field(default_factory=list)
     patterns: list[str] = Field(default_factory=list)
@@ -28,18 +30,24 @@ class LanguageSkill(BaseModel):
 
 class DomainSkill(BaseModel):
     level: SkillLevel = SkillLevel.BEGINNER
+    confidence: float = 0.3
+    last_verified: str | None = None
     evidence: list[str] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
 
 
 class IntegrationSkill(BaseModel):
     level: SkillLevel = SkillLevel.BEGINNER
+    confidence: float = 0.3
+    last_verified: str | None = None
     providers: list[str] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
 
 
 class ArchitectureSkill(BaseModel):
     level: SkillLevel = SkillLevel.BEGINNER
+    confidence: float = 0.3
+    last_verified: str | None = None
     patterns: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
 

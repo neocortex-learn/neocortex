@@ -42,11 +42,20 @@ src/neocortex/
 ├── search.py       # SQLite FTS5 搜索
 ├── llm/            # LLM 适配层（含 describe_image）
 ├── scanner/        # 项目扫描（含 gap 同义词规范化）
-├── reader/         # 内容阅读 + 笔记生成（URL/PDF/EPUB/图片）
+├── reader/         # 内容阅读 + 笔记生成（URL/PDF/EPUB/图片/微信公众号）
 └── importer/       # 聊天记录导入
 ```
 
 ## 核心机制
+
+### 技能评估（Socratic Probe）
+Code scan 只是冷启动（confidence: low），真实技能水平通过日常使用渐进校准：
+- `recommend`/`read` 时：LLM 基于用户自己的代码问 1-2 个问题验证该领域水平
+- `ask`/`chat` 时：被动分析问题质量（Bloom 层级），更新 confidence
+- `read` 后：难度反馈（一键），调整校准
+- 长期不练的技能：confidence 衰减
+- 每个技能 = level + confidence（0-1）+ last_verified + verification_method
+- `prober.py` 负责生成和评估验证问题
 
 ### 闭环学习
 推荐 → 阅读 → 自动匹配推荐 → 更新 gap 状态 → 下次推荐更精准。
@@ -94,3 +103,10 @@ src/neocortex/
 - [learn-claude-code](https://github.com/shareAI-lab/learn-claude-code) — 渐进式学习路径设计、Skill 按需加载、任务依赖图
 - [Obsidian](https://obsidian.md) — 本地 Markdown vault 模型、用户拥有文件
 - [Readwise Reader](https://readwise.io/read) — 阅读→高亮→复习闭环、间隔复习算法
+- [Gumloop 创始人访谈](https://mp.weixin.qq.com/s/anlBeR3jI3e4SYgPK0DWIg) — "AI 加持而非替代"、"只自动化你理解的东西"、"少数人用 AI 学习底层原理会更快变卓越"——验证了 Neocortex 的方向
+
+## 外部工具依赖（可选）
+- `wechat-article-to-markdown` — 微信公众号文章抓取，`neocortex read` 自动检测微信 URL 并调用
+  安装：`uv tool install wechat-article-to-markdown`
+- `mmdc`（mermaid-cli）— Mermaid 图表渲染为 SVG 图片
+  安装：`npm install -g @mermaid-js/mermaid-cli`

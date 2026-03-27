@@ -61,6 +61,8 @@ class ContentFetcher:
         self._provider = provider
 
     async def fetch(self, source: str) -> Document:
+        if "mp.weixin.qq.com" in source:
+            return await self._fetch_wechat(source)
         if source.startswith("http://") or source.startswith("https://"):
             return await self._fetch_url(source)
         suffix = Path(source).suffix.lower()
@@ -173,6 +175,61 @@ class ContentFetcher:
             source=url,
             sections=sections,
         )
+
+    async def _fetch_wechat(self, url: str) -> Document:
+        """Fetch WeChat article using wechat-article-to-markdown tool."""
+        import shutil
+        import subprocess
+        import tempfile
+
+        if not shutil.which("wechat-article-to-markdown"):
+            raise ValueError(
+                "WeChat article fetching requires wechat-article-to-markdown. "
+                "Install: uv tool install wechat-article-to-markdown"
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(
+                ["wechat-article-to-markdown", url, "--output", tmpdir],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+            # Find the output markdown file
+            md_files = list(Path(tmpdir).rglob("*.md"))
+            if not md_files:
+                # Fallback to normal URL fetch
+                return await self._fetch_url(url)
+
+            md_path = md_files[0]
+            content = md_path.read_text(encoding="utf-8")
+
+            # Extract title from first heading
+            title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+            title = title_match.group(1).strip() if title_match else url
+
+            # Copy images to notes dir if they exist
+            img_dir = md_path.parent / "images"
+            if img_dir.exists():
+                from neocortex.config import get_notes_dir
+                dest_img_dir = get_notes_dir() / "images"
+                dest_img_dir.mkdir(parents=True, exist_ok=True)
+                for img in img_dir.iterdir():
+                    dest = dest_img_dir / img.name
+                    if not dest.exists():
+                        shutil.copy2(str(img), str(dest))
+
+            sections = self._parse_markdown_sections(content)
+            if not sections:
+                sections = [Section(title=title, content=content, level=1)]
+
+            return Document(
+                title=title,
+                content=content,
+                source=url,
+                sections=sections,
+            )
 
     async def _fetch_pdf(self, path: str) -> Document:
         import fitz

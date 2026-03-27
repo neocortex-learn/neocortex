@@ -1189,6 +1189,53 @@ def recommend(
         console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
         raise typer.Exit(1)
 
+    # Probe low-confidence skills before recommending
+    from neocortex.config import save_profile
+    from neocortex.prober import generate_probe, evaluate_response, get_low_confidence_skills, update_skill_confidence
+
+    low_conf = get_low_confidence_skills(prof, threshold=0.5)
+    if low_conf and not json_output and sys.stdout.isatty():
+        # Pick the most relevant low-confidence skill (first = lowest confidence)
+        target = low_conf[0]
+        console.print()
+        console.print(f"  [bold]{t('probe_intro', lang, skill=target['name'])}[/bold]")
+
+        async def _run_probe() -> dict:
+            return await generate_probe(
+                target["name"], target["type"], target["level"], prof, provider, lang,
+            )
+
+        probe = asyncio.run(_run_probe())
+
+        if probe.get("questions"):
+            if probe.get("context"):
+                console.print(f"  [dim]{probe['context']}[/dim]")
+            console.print()
+
+            for q in probe["questions"]:
+                console.print(f"  [bold]?[/bold] {q}")
+                answer = Prompt.ask("   ", default="skip", console=console)
+
+                if answer.lower() == "skip":
+                    console.print(f"  [dim]{t('probe_skipped', lang)}[/dim]")
+                    continue
+
+                async def _run_eval() -> dict:
+                    return await evaluate_response(
+                        target["name"], q, answer, target["level"], provider, lang,
+                    )
+
+                result = asyncio.run(_run_eval())
+                delta = result.get("confidence_delta", 0.0)
+                new_conf = update_skill_confidence(prof, target["name"], target["type"], delta)
+
+                if result.get("feedback"):
+                    console.print(f"  [dim]{result['feedback']}[/dim]")
+                console.print(f"  [dim]{t('probe_confidence', lang, skill=target['name'], conf=f'{new_conf:.0%}')}[/dim]")
+
+            save_profile(prof)
+            console.print()
+
     existing_records = load_recommendations()
     existing_records = expire_stale_recommendations(existing_records)
 
