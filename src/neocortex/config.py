@@ -115,13 +115,24 @@ def load_config() -> AppConfig:
 
 
 def save_config(config: AppConfig) -> None:
+    import tempfile
     data = config.model_dump(mode="json")
     if data.get("api_key") and not data["api_key"].startswith(_ENC_PREFIX):
         data["api_key"] = _encrypt(data["api_key"])
     if data.get("github_token") and not data["github_token"].startswith(_ENC_PREFIX):
         data["github_token"] = _encrypt(data["github_token"])
     path = _config_path()
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def load_profile() -> Profile:
@@ -133,9 +144,20 @@ def load_profile() -> Profile:
 
 
 def save_profile(profile: Profile) -> None:
+    import tempfile
     path = _profile_path()
     data = profile.model_dump(mode="json")
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def _load_json(filename: str, default: Any = None) -> Any:

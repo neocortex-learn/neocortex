@@ -31,10 +31,19 @@ def save_snapshot(profile: Profile, data_dir: Path, notes_count: int = 0) -> Non
     else:
         snapshots.append(snapshot)
 
-    snapshots_file.write_text(
-        json.dumps([s.model_dump(mode="json") for s in snapshots], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    import os
+    import tempfile
+    fd, tmp_path = tempfile.mkstemp(dir=str(snapshots_file.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump([s.model_dump(mode="json") for s in snapshots], f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, str(snapshots_file))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def load_snapshots(data_dir: Path) -> list[ProfileSnapshot]:

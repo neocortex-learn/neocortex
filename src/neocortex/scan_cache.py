@@ -91,10 +91,19 @@ class ScanCache:
             return {}
 
     def _save(self) -> None:
-        self._path.write_text(
-            json.dumps(self._data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        import os
+        import tempfile
+        fd, tmp_path = tempfile.mkstemp(dir=str(self._path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, str(self._path))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def get(self, project_path: str) -> Skills | None:
         """Return cached Skills if project hasn't changed, else None."""

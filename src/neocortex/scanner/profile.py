@@ -175,8 +175,12 @@ def _merge_languages(
     all_keys = set(a) | set(b)
     for key in all_keys:
         if key in a and key in b:
+            lv_a = a[key].last_verified
+            lv_b = b[key].last_verified
             result[key] = LanguageSkill(
                 level=_higher_level(a[key].level, b[key].level),
+                confidence=max(a[key].confidence, b[key].confidence),
+                last_verified=max(lv_a, lv_b) if lv_a and lv_b else (lv_a or lv_b),
                 lines=a[key].lines + b[key].lines,
                 frameworks=_merge_unique(a[key].frameworks, b[key].frameworks),
                 patterns=_merge_unique(a[key].patterns, b[key].patterns),
@@ -202,8 +206,12 @@ def _merge_domains(
     for key in all_keys:
         if key in a and key in b:
             merged_gaps = _merge_unique(a[key].gaps, b[key].gaps)
+            lv_a = a[key].last_verified
+            lv_b = b[key].last_verified
             result[key] = DomainSkill(
                 level=_higher_level(a[key].level, b[key].level),
+                confidence=max(a[key].confidence, b[key].confidence),
+                last_verified=max(lv_a, lv_b) if lv_a and lv_b else (lv_a or lv_b),
                 evidence=_merge_unique(a[key].evidence, b[key].evidence),
                 gaps=_normalize_gaps(merged_gaps),
             )
@@ -222,8 +230,12 @@ def _merge_integrations(
     for key in all_keys:
         if key in a and key in b:
             merged_gaps = _merge_unique(a[key].gaps, b[key].gaps)
+            lv_a = a[key].last_verified
+            lv_b = b[key].last_verified
             result[key] = IntegrationSkill(
                 level=_higher_level(a[key].level, b[key].level),
+                confidence=max(a[key].confidence, b[key].confidence),
+                last_verified=max(lv_a, lv_b) if lv_a and lv_b else (lv_a or lv_b),
                 providers=_merge_unique(a[key].providers, b[key].providers),
                 gaps=_normalize_gaps(merged_gaps),
             )
@@ -241,8 +253,12 @@ def _merge_architecture(
     all_keys = set(a) | set(b)
     for key in all_keys:
         if key in a and key in b:
+            lv_a = a[key].last_verified
+            lv_b = b[key].last_verified
             result[key] = ArchitectureSkill(
                 level=_higher_level(a[key].level, b[key].level),
+                confidence=max(a[key].confidence, b[key].confidence),
+                last_verified=max(lv_a, lv_b) if lv_a and lv_b else (lv_a or lv_b),
                 patterns=_merge_unique(a[key].patterns, b[key].patterns),
                 evidence=_merge_unique(a[key].evidence, b[key].evidence),
             )

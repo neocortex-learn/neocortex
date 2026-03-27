@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -113,7 +114,8 @@ async def clone_repo(clone_url: str, token: str | None = None) -> Path:
     If *token* is provided, it is passed via GIT_ASKPASS so that
     credentials never appear in process arguments or error output.
 
-    Returns the Path to the cloned directory.
+    Returns the Path to the cloned directory.  If the clone fails the
+    temporary directory is cleaned up before the exception propagates.
     """
     import os
     import stat
@@ -123,7 +125,7 @@ async def clone_repo(clone_url: str, token: str | None = None) -> Path:
     env = os.environ.copy()
     if token:
         askpass_script = tmp_dir / "_askpass.sh"
-        askpass_script.write_text(f"#!/bin/sh\necho {token}\n")
+        askpass_script.write_text(f"#!/bin/sh\necho {shlex.quote(token)}\n")
         askpass_script.chmod(stat.S_IRWXU)
         env["GIT_ASKPASS"] = str(askpass_script)
         env["GIT_TERMINAL_PROMPT"] = "0"
@@ -143,12 +145,25 @@ async def clone_repo(clone_url: str, token: str | None = None) -> Path:
             env=env,
         )
 
-    await asyncio.to_thread(_do_clone)
+    try:
+        await asyncio.to_thread(_do_clone)
+    except Exception:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
     return tmp_dir / "repo"
 
 
 def cleanup_repo(path: Path) -> None:
     """Remove a previously cloned temporary repository directory."""
+    import os
+
     parent = path.parent if path.name == "repo" else path
-    if parent.exists() and str(parent).startswith(tempfile.gettempdir()):
-        shutil.rmtree(parent, ignore_errors=True)
+    try:
+        real_parent = os.path.realpath(parent)
+        real_tmp = os.path.realpath(tempfile.gettempdir())
+        if not real_parent.startswith(real_tmp + os.sep):
+            return
+        if os.path.exists(real_parent):
+            shutil.rmtree(real_parent, ignore_errors=True)
+    except Exception:
+        pass

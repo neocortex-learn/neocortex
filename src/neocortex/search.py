@@ -86,7 +86,9 @@ class NoteIndex:
         with self._connect() as conn:
             conn.execute("DELETE FROM notes_fts")
             conn.execute("DELETE FROM note_embeddings")
-            for md_file in sorted(notes_dir.glob("*.md")):
+            for md_file in sorted(notes_dir.rglob("*.md")):
+                if "diagrams" in md_file.parts:
+                    continue
                 try:
                     content = md_file.read_text(encoding="utf-8")
                 except (UnicodeDecodeError, OSError):
@@ -104,7 +106,9 @@ class NoteIndex:
                 count += 1
         model = self._get_embedding_model()
         if model is not None:
-            for md_file in sorted(notes_dir.glob("*.md")):
+            for md_file in sorted(notes_dir.rglob("*.md")):
+                if "diagrams" in md_file.parts:
+                    continue
                 try:
                     content = md_file.read_text(encoding="utf-8")
                 except (UnicodeDecodeError, OSError):
@@ -122,7 +126,9 @@ class NoteIndex:
         with self._connect() as conn:
             conn.execute("DELETE FROM notes_fts")
             conn.execute("DELETE FROM note_embeddings")
-            for md_file in sorted(notes_dir.glob("*.md")):
+            for md_file in sorted(notes_dir.rglob("*.md")):
+                if "diagrams" in md_file.parts:
+                    continue
                 try:
                     content = md_file.read_text(encoding="utf-8")
                 except (UnicodeDecodeError, OSError):
@@ -144,7 +150,7 @@ class NoteIndex:
 
         model = self._get_embedding_model()
         if model is not None:
-            md_files = sorted(notes_dir.glob("*.md"))
+            md_files = sorted(f for f in notes_dir.rglob("*.md") if "diagrams" not in f.parts)
             total = len(md_files)
             for i, md_file in enumerate(md_files):
                 try:

@@ -920,11 +920,6 @@ def read(
         full_content = "\n".join(frontmatter_lines) + notes_content
         note_path.write_text(full_content, encoding="utf-8")
 
-        from neocortex.search import NoteIndex
-
-        note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
-        note_index.index_note(note_path.name, doc.title, full_content)
-
         console.print()
         console.print(f"  [green]{t('read_saved', lang, path=str(note_path))}[/green]")
 
@@ -945,6 +940,12 @@ def read(
             html_path = note_path.with_suffix(".html")
             html_path.write_text(html_content, encoding="utf-8")
             console.print(f"  [green]{t('read_html_saved', lang, path=str(html_path))}[/green]")
+
+        # Index the final content on disk (after all rendering/SVG overwrites)
+        from neocortex.search import NoteIndex
+        final_content = note_path.read_text(encoding="utf-8")
+        note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
+        note_index.index_note(note_path.name, doc.title, final_content)
 
         if audio:
             from neocortex.tts import prepare_text_for_speech, text_to_speech
@@ -1240,6 +1241,7 @@ def recommend(
 
     existing_records = load_recommendations()
     existing_records = expire_stale_recommendations(existing_records)
+    save_recommendations(existing_records)
 
     async def _run() -> list:
         with console.status(f"  {t('recommend_generating', lang)}"):
@@ -1293,6 +1295,7 @@ def recommend(
         console.print(f"  [dim]{t('recommend_progress', lang, done=str(done_gaps), total=str(total_gaps))}[/dim]")
 
     completed = [r for r in existing_records if r.status == "completed"]
+    completed_topics = {r.topic for r in existing_records if r.status == "completed"}
     if completed:
         console.print()
         for rec in completed[-3:]:
@@ -1308,7 +1311,14 @@ def recommend(
         else:
             connector = "  \u251c\u2500"
 
+        is_locked = rec.depends_on and not all(d in completed_topics for d in rec.depends_on)
         step_num = rec.step if hasattr(rec, 'step') and rec.step else i
+        if is_locked:
+            console.print()
+            console.print(f"{connector} [dim]\U0001f512 Step {step_num}: {rec.topic}[/dim]")
+            deps_str = ", ".join(rec.depends_on)
+            console.print(f"  \u2502  [dim]{t('recommend_locked', lang)} ({deps_str})[/dim]")
+            continue
         console.print()
         console.print(f"{connector} [bold cyan]Step {step_num}: {rec.topic}[/bold cyan]")
         if rec.depends_on:
@@ -1737,7 +1747,10 @@ def card(
     if note_path:
         target = Path(note_path)
     else:
-        md_files = sorted(notes_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
+        md_files = sorted(
+            (f for f in notes_dir.rglob("*.md") if "diagrams" not in f.parts),
+            key=lambda f: f.stat().st_mtime, reverse=True,
+        )
         if not md_files:
             console.print(f"  {t('notes_empty', lang)}")
             return
@@ -1789,7 +1802,10 @@ def notes(
     _maybe_migrate_notes()
     notes_dir = get_notes_dir()
 
-    md_files = sorted(notes_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
+    md_files = sorted(
+        (f for f in notes_dir.rglob("*.md") if "diagrams" not in f.parts),
+        key=lambda f: f.stat().st_mtime, reverse=True,
+    )
 
     if not md_files:
         console.print(f"  {t('notes_empty', lang)}")

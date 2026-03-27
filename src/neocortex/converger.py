@@ -14,7 +14,9 @@ def gather_recent_notes(notes_dir: Path, days: int = 7) -> list[dict]:
     """Gather notes from the last N days. Returns [{filename, title, date, content_preview}]."""
     cutoff = (date.today() - timedelta(days=days)).isoformat()
     notes = []
-    for f in sorted(notes_dir.glob("*.md"), key=lambda x: x.stat().st_mtime, reverse=True):
+    for f in sorted(notes_dir.rglob("*.md"), key=lambda x: x.stat().st_mtime, reverse=True):
+        if "diagrams" in f.parts:
+            continue
         mtime = date.fromtimestamp(f.stat().st_mtime).isoformat()
         if mtime < cutoff:
             continue

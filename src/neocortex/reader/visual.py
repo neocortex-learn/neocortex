@@ -220,7 +220,7 @@ def markdown_to_html_body(md_text: str) -> str:
 
 
 def _esc(text: str) -> str:
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
 def _inline(text: str) -> str:
