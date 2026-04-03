@@ -21,6 +21,59 @@ def _extract_gaps(profile: Profile) -> list[dict]:
     return gaps
 
 
+def _get_concept_coverage() -> list[tuple[str, int]]:
+    """Get concept names and their evidence counts from the knowledge base."""
+    try:
+        from neocortex.compiler import collect_all_concepts
+        from neocortex.config import get_notes_dir
+
+        notes_dir = get_notes_dir()
+        concepts_dir = notes_dir / "concepts"
+        concepts = collect_all_concepts(concepts_dir)
+        ranked = sorted(concepts, key=lambda c: c.evidence_count, reverse=True)
+        return [(c.name, c.evidence_count) for c in ranked[:15]]
+    except Exception:
+        return []
+
+
+def _get_review_performance() -> dict:
+    """Get flashcard review performance summary."""
+    empty: dict = {"total": 0, "reviewed": 0, "struggling": [], "strong": []}
+    try:
+        from neocortex.config import get_notes_dir, load_flashcards
+
+        notes_dir = get_notes_dir()
+        cards = load_flashcards(notes_dir)
+    except Exception:
+        return empty
+
+    if not cards:
+        return empty
+
+    reviewed = [c for c in cards if c.review_count > 0]
+
+    concept_eases: dict[str, list[float]] = {}
+    for c in reviewed:
+        if c.concept:
+            concept_eases.setdefault(c.concept, []).append(c.ease_factor)
+
+    struggling: list[str] = []
+    strong: list[str] = []
+    for concept, eases in sorted(concept_eases.items()):
+        avg = sum(eases) / len(eases)
+        if avg < 2.0:
+            struggling.append(concept)
+        elif avg > 2.8:
+            strong.append(concept)
+
+    return {
+        "total": len(cards),
+        "reviewed": len(reviewed),
+        "struggling": struggling,
+        "strong": strong,
+    }
+
+
 def _build_context(
     profile: Profile,
     records: list[RecommendationRecord] | None = None,
@@ -57,6 +110,23 @@ def _build_context(
         lines = [f"- {tr.title}" for tr in topics_read]
         sections.append("## Recently read\n" + "\n".join(lines))
 
+    coverage = _get_concept_coverage()
+    if coverage:
+        lines = []
+        for name, count in coverage:
+            stars = "★★★" if count >= 3 else "★★☆" if count >= 1 else "★☆☆"
+            lines.append(f"- {name}: {count} notes ({stars})")
+        sections.append("## Knowledge base coverage\n" + "\n".join(lines))
+
+    perf = _get_review_performance()
+    if perf["total"] > 0:
+        lines = [f"- {perf['total']} flashcards total, {perf['reviewed']} reviewed"]
+        if perf["struggling"]:
+            lines.append(f"- Struggling: {', '.join(perf['struggling'])}")
+        if perf["strong"]:
+            lines.append(f"- Strong: {', '.join(perf['strong'])}")
+        sections.append("## Review performance\n" + "\n".join(lines))
+
     return "\n\n".join(sections)
 
 
@@ -70,6 +140,7 @@ _PROMPT_ZH = """你是一个资深技术导师。根据以下开发者画像，�
 3. 结合学习目标（learning_goal）
 4. 考虑已完成和已读内容——不要推荐已经在学的
 5. 难度匹配——基于当前水平推荐 +1~+2 级别的内容
+6. 参考知识库覆盖和复习表现——已有笔记覆盖的概念权重降低，复习中挣扎的概念优先强化
 
 对每一步，提供：
 - step: 学习顺序编号（从 1 开始）
@@ -93,6 +164,7 @@ Principles:
 3. Align with learning_goal
 4. Consider completed and recently read content — don't repeat
 5. Difficulty match — recommend +1~+2 levels above current
+6. Consider knowledge base coverage and review performance — deprioritize well-covered concepts, reinforce struggling ones
 
 For each step, provide:
 - step: learning order number (starting from 1)

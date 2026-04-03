@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from neocortex.models import (
     Calibration,
+    ConceptEntry,
+    Flashcard,
     Language,
     Persona,
     Profile,
     Recommendation,
 )
-from neocortex.recommender import _parse_recommendations, generate_recommendations
+from neocortex.recommender import (
+    _build_context,
+    _get_concept_coverage,
+    _get_review_performance,
+    _parse_recommendations,
+    generate_recommendations,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -332,3 +341,144 @@ class TestRecommendationModel:
         data = rec.model_dump(mode="json")
         rec2 = Recommendation(**data)
         assert rec == rec2
+
+
+# ===========================================================================
+# 4. _get_concept_coverage tests
+# ===========================================================================
+
+
+class TestGetConceptCoverage:
+    def test_with_concepts(self):
+        concepts = [
+            ConceptEntry(name="CQRS", evidence_count=1),
+            ConceptEntry(name="Event Sourcing", evidence_count=3),
+            ConceptEntry(name="DDD", evidence_count=2),
+        ]
+        with patch("neocortex.config.get_notes_dir", return_value=Path("/fake")), \
+             patch("neocortex.compiler.collect_all_concepts", return_value=concepts):
+            result = _get_concept_coverage()
+        assert len(result) == 3
+        assert result[0] == ("Event Sourcing", 3)
+        assert result[1] == ("DDD", 2)
+        assert result[2] == ("CQRS", 1)
+
+    def test_empty_concepts(self):
+        with patch("neocortex.config.get_notes_dir", return_value=Path("/fake")), \
+             patch("neocortex.compiler.collect_all_concepts", return_value=[]):
+            result = _get_concept_coverage()
+        assert result == []
+
+    def test_directory_not_exists(self):
+        with patch("neocortex.config.get_notes_dir", side_effect=Exception("no dir")):
+            result = _get_concept_coverage()
+        assert result == []
+
+    def test_max_15_concepts(self):
+        concepts = [ConceptEntry(name=f"C{i}", evidence_count=i) for i in range(20)]
+        with patch("neocortex.config.get_notes_dir", return_value=Path("/fake")), \
+             patch("neocortex.compiler.collect_all_concepts", return_value=concepts):
+            result = _get_concept_coverage()
+        assert len(result) == 15
+
+
+# ===========================================================================
+# 5. _get_review_performance tests
+# ===========================================================================
+
+
+class TestGetReviewPerformance:
+    def test_no_flashcards(self):
+        with patch("neocortex.config.get_notes_dir", return_value=Path("/fake")), \
+             patch("neocortex.config.load_flashcards", return_value=[]):
+            result = _get_review_performance()
+        assert result == {"total": 0, "reviewed": 0, "struggling": [], "strong": []}
+
+    def test_with_flashcards(self):
+        cards = [
+            Flashcard(id="1", source_note="a.md", question="Q1", answer="A1",
+                      concept="CQRS", review_count=3, ease_factor=1.5),
+            Flashcard(id="2", source_note="a.md", question="Q2", answer="A2",
+                      concept="CQRS", review_count=2, ease_factor=1.8),
+            Flashcard(id="3", source_note="b.md", question="Q3", answer="A3",
+                      concept="DDD", review_count=5, ease_factor=3.0),
+            Flashcard(id="4", source_note="c.md", question="Q4", answer="A4",
+                      concept="REST", review_count=0, ease_factor=2.5),
+        ]
+        with patch("neocortex.config.get_notes_dir", return_value=Path("/fake")), \
+             patch("neocortex.config.load_flashcards", return_value=cards):
+            result = _get_review_performance()
+        assert result["total"] == 4
+        assert result["reviewed"] == 3
+        assert "CQRS" in result["struggling"]
+        assert "DDD" in result["strong"]
+
+    def test_exception_returns_empty(self):
+        with patch("neocortex.config.get_notes_dir", side_effect=Exception("fail")):
+            result = _get_review_performance()
+        assert result == {"total": 0, "reviewed": 0, "struggling": [], "strong": []}
+
+    def test_cards_without_concept_ignored_in_grouping(self):
+        cards = [
+            Flashcard(id="1", source_note="a.md", question="Q", answer="A",
+                      concept="", review_count=2, ease_factor=1.0),
+        ]
+        with patch("neocortex.config.get_notes_dir", return_value=Path("/fake")), \
+             patch("neocortex.config.load_flashcards", return_value=cards):
+            result = _get_review_performance()
+        assert result["total"] == 1
+        assert result["reviewed"] == 1
+        assert result["struggling"] == []
+        assert result["strong"] == []
+
+
+# ===========================================================================
+# 6. _build_context — new sections
+# ===========================================================================
+
+
+class TestBuildContextNewSections:
+    def test_includes_knowledge_base_coverage(self):
+        coverage = [("Event Sourcing", 3), ("CQRS", 1)]
+        perf = {"total": 0, "reviewed": 0, "struggling": [], "strong": []}
+        profile = _make_profile()
+        with patch("neocortex.recommender._get_concept_coverage", return_value=coverage), \
+             patch("neocortex.recommender._get_review_performance", return_value=perf):
+            ctx = _build_context(profile)
+        assert "## Knowledge base coverage" in ctx
+        assert "Event Sourcing: 3 notes (★★★)" in ctx
+        assert "CQRS: 1 notes (★★☆)" in ctx
+
+    def test_includes_review_performance(self):
+        coverage: list = []
+        perf = {"total": 10, "reviewed": 5, "struggling": ["CQRS"], "strong": ["DDD"]}
+        profile = _make_profile()
+        with patch("neocortex.recommender._get_concept_coverage", return_value=coverage), \
+             patch("neocortex.recommender._get_review_performance", return_value=perf):
+            ctx = _build_context(profile)
+        assert "## Review performance" in ctx
+        assert "10 flashcards total, 5 reviewed" in ctx
+        assert "Struggling: CQRS" in ctx
+        assert "Strong: DDD" in ctx
+
+    def test_no_sections_when_empty(self):
+        coverage: list = []
+        perf = {"total": 0, "reviewed": 0, "struggling": [], "strong": []}
+        profile = _make_profile()
+        with patch("neocortex.recommender._get_concept_coverage", return_value=coverage), \
+             patch("neocortex.recommender._get_review_performance", return_value=perf):
+            ctx = _build_context(profile)
+        assert "Knowledge base coverage" not in ctx
+        assert "Review performance" not in ctx
+
+    def test_review_performance_without_struggling_or_strong(self):
+        coverage: list = []
+        perf = {"total": 5, "reviewed": 3, "struggling": [], "strong": []}
+        profile = _make_profile()
+        with patch("neocortex.recommender._get_concept_coverage", return_value=coverage), \
+             patch("neocortex.recommender._get_review_performance", return_value=perf):
+            ctx = _build_context(profile)
+        assert "## Review performance" in ctx
+        assert "5 flashcards total, 3 reviewed" in ctx
+        assert "Struggling" not in ctx
+        assert "Strong" not in ctx

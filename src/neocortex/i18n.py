@@ -904,6 +904,25 @@ STRINGS: dict[str, dict[str, str]] = {
     "digest_period": {"en": "Period: last {days} days", "zh": "周期：最近 {days} 天"},
     "exercise_generating": {"en": "Generating exercises...", "zh": "正在生成练习..."},
     "exercise_created": {"en": "Exercises saved: {path}", "zh": "练习已保存：{path}"},
+
+    # ── Feed ──
+    "feed_title": {"en": "RSS Feeds", "zh": "RSS 订阅"},
+    "feed_empty": {
+        "en": "No feeds configured. Add one with: neocortex feed --add <url>",
+        "zh": "未配置 RSS 源。使用 neocortex feed --add <url> 添加",
+    },
+    "feed_added": {"en": "Feed added: {name} ({url})", "zh": "已添加订阅：{name}（{url}）"},
+    "feed_removed": {"en": "Feed removed: {url}", "zh": "已移除订阅：{url}"},
+    "feed_not_found": {"en": "Feed not found: {url}", "zh": "未找到订阅：{url}"},
+    "feed_invalid": {"en": "Invalid RSS feed: {url}", "zh": "无效的 RSS 源：{url}"},
+    "feed_fetching": {"en": "Fetching feeds...", "zh": "正在拉取订阅..."},
+    "feed_filtering": {"en": "Filtering by your skill gaps...", "zh": "正在按技能盲区筛选..."},
+    "feed_no_new": {"en": "No new articles found.", "zh": "没有新文章。"},
+    "feed_results": {
+        "en": "{count} articles match your learning gaps:",
+        "zh": "{count} 篇文章与你的学习盲区相关：",
+    },
+    "feed_read_hint": {"en": "Read with: neocortex read <url>", "zh": "阅读：neocortex read <url>"},
 }
 
 

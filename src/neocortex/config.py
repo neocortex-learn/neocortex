@@ -304,6 +304,32 @@ def get_due_flashcards(notes_dir: Path) -> list[Flashcard]:
     return [c for c in all_cards if not c.next_review or c.next_review <= today]
 
 
+def load_feeds() -> list[dict]:
+    """Load feed configurations from feeds.json. Returns [{url, name}]."""
+    raw = _load_json("feeds.json", default=[])
+    if not isinstance(raw, list):
+        return []
+    return [f for f in raw if isinstance(f, dict) and "url" in f]
+
+
+def save_feeds(feeds: list[dict]) -> None:
+    """Save feed configurations to feeds.json."""
+    _save_json("feeds.json", feeds)
+
+
+def load_feed_history() -> dict[str, str]:
+    """Load feed history (url -> last_seen_id) from feed_history.json."""
+    raw = _load_json("feed_history.json", default={})
+    if not isinstance(raw, dict):
+        return {}
+    return raw
+
+
+def save_feed_history(history: dict[str, str]) -> None:
+    """Save feed history."""
+    _save_json("feed_history.json", history)
+
+
 def filter_known_gaps(profile: Profile) -> None:
     """Remove gaps already marked as known from profile. Called after scan."""
     progress = load_gap_progress()

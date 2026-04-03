@@ -554,3 +554,4 @@ import neocortex.cmd_import  # noqa: F401, E402
 import neocortex.cmd_compile  # noqa: F401, E402
 import neocortex.cmd_lint  # noqa: F401, E402
 import neocortex.cmd_visualize  # noqa: F401, E402
+import neocortex.cmd_feed  # noqa: F401, E402
