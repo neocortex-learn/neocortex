@@ -648,6 +648,84 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "向量索引已跳过（fastembed 未安装）。",
     },
 
+    # ── Flashcard / Review ──
+    "flashcard_generating": {
+        "en": "Generating flashcards...",
+        "zh": "正在生成闪卡...",
+    },
+    "flashcard_created": {
+        "en": "{count} flashcards created",
+        "zh": "已生成 {count} 张闪卡",
+    },
+    "review_title": {
+        "en": "Spaced Review",
+        "zh": "间隔复习",
+    },
+    "review_empty": {
+        "en": "No cards due for review today!",
+        "zh": "今天没有到期的闪卡！",
+    },
+    "review_next": {
+        "en": "Next review: {date}",
+        "zh": "下次复习：{date}",
+    },
+    "review_total": {
+        "en": "{total} cards total, {due} due today",
+        "zh": "共 {total} 张闪卡，今日到期 {due} 张",
+    },
+    "review_question": {
+        "en": "Question",
+        "zh": "问题",
+    },
+    "review_answer": {
+        "en": "Answer",
+        "zh": "答案",
+    },
+    "review_source": {
+        "en": "Source",
+        "zh": "来源",
+    },
+    "review_reveal": {
+        "en": "Press Enter to reveal answer...",
+        "zh": "按回车查看答案...",
+    },
+    "review_rate": {
+        "en": "Rate",
+        "zh": "评分",
+    },
+    "review_rate_1": {
+        "en": "Forgot",
+        "zh": "完全不会",
+    },
+    "review_rate_2": {
+        "en": "Hard",
+        "zh": "想不起来",
+    },
+    "review_rate_3": {
+        "en": "Okay",
+        "zh": "勉强记得",
+    },
+    "review_rate_4": {
+        "en": "Good",
+        "zh": "记得",
+    },
+    "review_rate_5": {
+        "en": "Easy",
+        "zh": "轻松",
+    },
+    "review_done": {
+        "en": "Session complete!",
+        "zh": "复习完成！",
+    },
+    "review_stats": {
+        "en": "Reviewed: {reviewed} | Correct: {correct} | Tomorrow: {tomorrow}",
+        "zh": "已复习：{reviewed} | 正确：{correct} | 明日到期：{tomorrow}",
+    },
+    "review_progress": {
+        "en": "Card {current}/{total}",
+        "zh": "第 {current}/{total} 张",
+    },
+
     # ── Recommend (closed-loop) ──
     "recommend_path_title": {
         "en": "Learning Path",
@@ -751,6 +829,81 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Job matching coming soon. For now, try --type=oss",
         "zh": "岗位匹配即将推出。目前请使用 --type=oss",
     },
+
+    # ── Insights ──
+    "insight_save_prompt": {
+        "en": "Save to knowledge base?",
+        "zh": "保存到知识库？",
+    },
+    "insight_save_chat": {
+        "en": "Save this conversation to knowledge base?",
+        "zh": "保存本次对话到知识库？",
+    },
+    "insight_saved": {
+        "en": "Insight saved: {path}",
+        "zh": "洞察已保存：{path}",
+    },
+
+    # ── Compile ──
+    "compile_updating": {
+        "en": "Updating knowledge graph...",
+        "zh": "正在更新知识图谱...",
+    },
+    "compile_done": {
+        "en": "{created} concepts created, {updated} updated",
+        "zh": "新建 {created} 个概念，更新 {updated} 个",
+    },
+    "compile_title": {
+        "en": "Knowledge Base Compilation",
+        "zh": "知识库编译",
+    },
+    "compile_scanning": {
+        "en": "Scanning notes...",
+        "zh": "正在扫描笔记...",
+    },
+    "compile_progress": {
+        "en": "Compiling {current}/{total}...",
+        "zh": "正在编译 {current}/{total}...",
+    },
+    "compile_result": {
+        "en": "Done: {notes} notes → {concepts} concepts, {links} wikilinks",
+        "zh": "完成：{notes} 篇笔记 → {concepts} 个概念，{links} 个链接",
+    },
+    "compile_no_notes": {
+        "en": "No notes found to compile.",
+        "zh": "没有找到可编译的笔记。",
+    },
+    "compile_cached": {
+        "en": "Using cache, {skipped} notes unchanged",
+        "zh": "使用缓存，{skipped} 篇笔记未变化",
+    },
+
+    # ── Lint ──
+    "lint_title": {"en": "Knowledge Base Health Report", "zh": "知识库健康检查"},
+    "lint_score": {"en": "Score: {score}/100", "zh": "健康分：{score}/100"},
+    "lint_no_issues": {"en": "All checks passed!", "zh": "所有检查通过！"},
+    "lint_checking": {"en": "Running health checks...", "zh": "正在运行健康检查..."},
+    "lint_fixed": {"en": "Fixed {count} issues", "zh": "已修复 {count} 个问题"},
+    "lint_broken_links": {"en": "Broken Links", "zh": "断裂链接"},
+    "lint_orphan_notes": {"en": "Orphan Notes", "zh": "孤岛笔记"},
+    "lint_stale_concepts": {"en": "Stale Concepts", "zh": "陈旧概念"},
+    "lint_coverage_gaps": {"en": "Coverage Gaps", "zh": "覆盖盲区"},
+    "lint_duplicate_concepts": {"en": "Duplicate Concepts", "zh": "重复概念"},
+    "lint_suggested": {"en": "Suggested Explorations", "zh": "建议探索"},
+    "lint_passed": {"en": "Passed", "zh": "通过"},
+
+    # ── Visualize ──
+    "map_title": {"en": "Concept Map", "zh": "概念图"},
+    "map_generating": {"en": "Generating concept map...", "zh": "正在生成概念图..."},
+    "map_saved": {"en": "Concept map saved: {path}", "zh": "概念图已保存：{path}"},
+    "map_no_concepts": {"en": "No concepts found. Run 'neocortex compile' first.", "zh": "未找到概念。请先运行 'neocortex compile'。"},
+    "map_filtered": {"en": "Filtered: {filter}", "zh": "筛选：{filter}"},
+    "digest_title": {"en": "Learning Digest", "zh": "学习周报"},
+    "digest_generating": {"en": "Generating digest...", "zh": "正在生成周报..."},
+    "digest_saved": {"en": "Digest saved: {path}", "zh": "周报已保存：{path}"},
+    "digest_period": {"en": "Period: last {days} days", "zh": "周期：最近 {days} 天"},
+    "exercise_generating": {"en": "Generating exercises...", "zh": "正在生成练习..."},
+    "exercise_created": {"en": "Exercises saved: {path}", "zh": "练习已保存：{path}"},
 }
 
 

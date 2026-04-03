@@ -33,9 +33,15 @@ src/neocortex/
 ├── cmd_scan.py     # scan + profile 命令
 ├── cmd_read.py     # read + 匹配 + 反馈
 ├── cmd_learn.py    # recommend + plan + growth + converge + opportunities
-├── cmd_knowledge.py # notes + card + index + ask + chat
+├── cmd_knowledge.py # notes + card + index + ask + chat + review
 ├── cmd_import.py   # import 命令
-├── config.py       # 配置、画像、推荐记录、gap 进度读写
+├── cmd_compile.py  # compile 命令（概念编译）
+├── cmd_lint.py     # lint 命令（知识库健康检查）
+├── cmd_visualize.py # map + digest 命令（概念图、学习周报）
+├── compiler.py     # 概念编译引擎（提取、生成、wikilink、索引、语义链接）
+├── reviewer.py     # SM-2 间隔复习调度引擎
+├── linter.py       # 知识库健康检查（孤岛、断链、覆盖盲区等 6 项）
+├── config.py       # 配置、画像、推荐记录、gap 进度、闪卡读写
 ├── models.py       # 所有 Pydantic 数据模型
 ├── i18n.py         # 中英文国际化
 ├── recommender.py  # 学习路径推荐（结构化上下文 + gap 关联）

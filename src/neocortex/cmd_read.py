@@ -158,6 +158,54 @@ def read(
         note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
         note_index.index_note(note_path.name, doc.title, final_content)
 
+        # Generate flashcards for spaced repetition
+        import uuid as _uuid
+        from neocortex.reader.teacher import generate_flashcards
+        from neocortex.config import save_flashcards
+        from neocortex.models import Flashcard
+
+        try:
+            with console.status(f"  {t('flashcard_generating', lang)}"):
+                raw_cards = await generate_flashcards(doc, outline, notes_content, prof, provider)
+            if raw_cards:
+                cards = [Flashcard(
+                    id=str(_uuid.uuid4())[:8],
+                    source_note=note_path.name,
+                    question=c["question"],
+                    answer=c["answer"],
+                    concept=c.get("concept", ""),
+                    difficulty=c.get("difficulty", "medium"),
+                    next_review=date.today().isoformat(),
+                ) for c in raw_cards]
+                save_flashcards(notes_dir, note_path.stem, cards)
+                console.print(f"  [green]{t('flashcard_created', lang, count=str(len(cards)))}[/green]")
+        except Exception:
+            pass
+
+        try:
+            from neocortex.reader.teacher import generate_exercises
+            with console.status(f"  {t('exercise_generating', lang)}"):
+                exercises_content = await generate_exercises(doc, outline, notes_content, prof, provider)
+            if exercises_content and exercises_content.strip():
+                exercises_path = note_path.with_suffix(".exercises.md")
+                ex_content = (
+                    f"---\ntype: exercise\nsource: \"{doc.title}\"\ndate: {date.today().isoformat()}\n---\n\n"
+                    f"# Exercises: {doc.title}\n\n{exercises_content}"
+                )
+                exercises_path.write_text(ex_content, encoding="utf-8")
+                console.print(f"  [green]{t('exercise_created', lang, path=exercises_path.name)}[/green]")
+        except Exception:
+            pass
+
+        try:
+            from neocortex.compiler import compile_note
+            with console.status(f"  {t('compile_updating', lang)}"):
+                compile_result = await compile_note(note_path, notes_dir, prof, provider, lang)
+            if compile_result.concepts_created + compile_result.concepts_updated > 0:
+                console.print(f"  [green]{t('compile_done', lang, created=str(compile_result.concepts_created), updated=str(compile_result.concepts_updated))}[/green]")
+        except Exception:
+            pass
+
         if audio:
             from neocortex.tts import prepare_text_for_speech, text_to_speech
 

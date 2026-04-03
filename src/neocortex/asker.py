@@ -3,14 +3,48 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+from datetime import date
+from pathlib import Path
 
 from neocortex.llm.base import LLMProvider
 from neocortex.models import Language, Profile
 
 _CHARS_PER_TOKEN_ESTIMATE = 3
+_KNOWLEDGE_CONTEXT_LIMIT = 2000
 
 
-def _build_system_prompt(profile: Profile, language: Language) -> str:
+def _load_knowledge_context(language: Language) -> str:
+    """Load INDEX.md as context for Q&A."""
+    from neocortex.config import get_notes_dir
+
+    notes_dir = get_notes_dir()
+    index_path = notes_dir / "INDEX.md"
+
+    if not index_path.exists():
+        return ""
+
+    try:
+        content = index_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+    if not content.strip():
+        return ""
+
+    if len(content) > _KNOWLEDGE_CONTEXT_LIMIT:
+        content = content[:_KNOWLEDGE_CONTEXT_LIMIT]
+
+    label = "用户的知识库索引" if language == Language.ZH else "User's knowledge base index"
+    return f"\n\n{label}:\n{content}"
+
+
+def _build_system_prompt(
+    profile: Profile,
+    language: Language,
+    knowledge_context: str = "",
+) -> str:
     profile_json = json.dumps(profile.model_dump(mode="json"), ensure_ascii=False, indent=2)
 
     lang_inst = "请用中文回答。" if language == Language.ZH else "Answer in English."
@@ -19,7 +53,7 @@ def _build_system_prompt(profile: Profile, language: Language) -> str:
     exp = profile.persona.experience_years.value if profile.persona.experience_years else ""
     exp_desc = f"（{exp}年经验）" if exp else ""
 
-    return f"""你是一个技术顾问。你面前是一位{role}{exp_desc}，不是初学者。
+    prompt = f"""你是一个技术顾问。你面前是一位{role}{exp_desc}，不是初学者。
 
 用户技能画像：
 {profile_json}
@@ -34,6 +68,90 @@ def _build_system_prompt(profile: Profile, language: Language) -> str:
 
 {lang_inst}"""
 
+    if knowledge_context:
+        prompt += knowledge_context
+
+    return prompt
+
+
+def _make_slug(text: str) -> str:
+    """Turn a question/title into a filesystem-safe slug."""
+    safe = "".join(c if c.isalnum() or c in "-_ " else "" for c in text)
+    safe = safe.strip().replace(" ", "-").lower()[:60]
+    return safe or "insight"
+
+
+def save_insight(question: str, answer: str, language: Language) -> Path:
+    """Save a Q&A exchange as an insight file in insights/ directory."""
+    from neocortex.config import get_notes_dir
+
+    notes_dir = get_notes_dir()
+    insights_dir = notes_dir / "insights"
+    insights_dir.mkdir(parents=True, exist_ok=True)
+
+    slug = _make_slug(question)
+    today = date.today().isoformat()
+    filename = f"{slug}-{today}.md"
+    note_path = insights_dir / filename
+
+    counter = 1
+    while note_path.exists():
+        counter += 1
+        filename = f"{slug}-{today}-{counter}.md"
+        note_path = insights_dir / filename
+
+    safe_question = question.replace('"', "'")
+
+    content = f"""---
+type: insight
+question: "{safe_question}"
+date: {today}
+source: ask
+---
+
+# {question}
+
+{answer}
+"""
+
+    fd, tmp_path = tempfile.mkstemp(dir=str(insights_dir), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_path, str(note_path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+    return note_path
+
+
+def save_chat_insights(
+    history: list[dict[str, str]],
+    language: Language,
+) -> list[Path]:
+    """Save Q&A pairs from a chat session as individual insight files."""
+    paths: list[Path] = []
+    pairs: list[tuple[str, str]] = []
+
+    for msg in history:
+        if msg["role"] == "user":
+            pairs.append((msg["content"], ""))
+        elif msg["role"] == "assistant" and pairs and not pairs[-1][1]:
+            q, _ = pairs[-1]
+            pairs[-1] = (q, msg["content"])
+
+    for question, answer in pairs:
+        if not answer:
+            continue
+        path = save_insight(question, answer, language)
+        paths.append(path)
+
+    return paths
+
 
 async def ask_question(
     question: str,
@@ -41,7 +159,8 @@ async def ask_question(
     provider: LLMProvider,
     language: Language = Language.EN,
 ) -> str:
-    system_prompt = _build_system_prompt(profile, language)
+    knowledge_context = _load_knowledge_context(language)
+    system_prompt = _build_system_prompt(profile, language, knowledge_context)
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -62,9 +181,10 @@ class ChatSession:
     ) -> None:
         self._provider = provider
         self._language = language
+        knowledge_context = _load_knowledge_context(language)
         self._system_message: dict[str, str] = {
             "role": "system",
-            "content": _build_system_prompt(profile, language),
+            "content": _build_system_prompt(profile, language, knowledge_context),
         }
         self._history: list[dict[str, str]] = [self._system_message]
         self._max_context = provider.max_context_tokens()

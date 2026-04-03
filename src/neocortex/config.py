@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from typing import Any
 
-from neocortex.models import AppConfig, GapProgress, Profile, RecommendationRecord
+from neocortex.models import AppConfig, Flashcard, GapProgress, Profile, RecommendationRecord
 
 _ENC_PREFIX = "enc:"
 _SALT = b"neocortex-api-key-salt"
@@ -259,6 +259,49 @@ def update_gap_status(gap_name: str, profile: Profile) -> str:
     progress[gap_name] = entry
     save_gap_progress(progress)
     return entry.status
+
+
+def load_flashcards(notes_dir: Path) -> list[Flashcard]:
+    fc_dir = notes_dir / ".flashcards"
+    if not fc_dir.exists():
+        return []
+    cards: list[Flashcard] = []
+    for f in fc_dir.glob("*.json"):
+        try:
+            raw = json.loads(f.read_text(encoding="utf-8"))
+            if not isinstance(raw, list):
+                continue
+            for item in raw:
+                cards.append(Flashcard.model_validate(item))
+        except (json.JSONDecodeError, OSError, Exception):
+            continue
+    return cards
+
+
+def save_flashcards(notes_dir: Path, note_stem: str, cards: list[Flashcard]) -> None:
+    import tempfile
+    fc_dir = notes_dir / ".flashcards"
+    fc_dir.mkdir(parents=True, exist_ok=True)
+    path = fc_dir / f"{note_stem}.json"
+    data = [c.model_dump(mode="json") for c in cards]
+    fd, tmp_path = tempfile.mkstemp(dir=str(fc_dir), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def get_due_flashcards(notes_dir: Path) -> list[Flashcard]:
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    all_cards = load_flashcards(notes_dir)
+    return [c for c in all_cards if not c.next_review or c.next_review <= today]
 
 
 def filter_known_gaps(profile: Profile) -> None:

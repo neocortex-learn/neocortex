@@ -299,6 +299,139 @@ async def generate_notes(
     return "\n\n---\n\n".join(note_parts)
 
 
+async def generate_flashcards(
+    doc: Document,
+    outline: Outline,
+    notes_content: str,
+    profile: Profile,
+    provider: LLMProvider,
+) -> list[dict]:
+    """Extract flashcards from generated notes."""
+    lang_inst = _language_instruction(profile)
+    profile_json = _profile_summary(profile)
+
+    focus_sections: list[str] = []
+    for item in outline.items:
+        if item.marker in ("deep", "brief"):
+            focus_sections.append(f"- {item.title} ({item.marker})")
+    sections_str = "\n".join(focus_sections) if focus_sections else "(all sections)"
+
+    prompt = f"""\
+You are a flashcard generator for spaced repetition learning.
+
+Reader profile:
+{profile_json}
+
+The reader just studied the following sections:
+{sections_str}
+
+Notes content (excerpt):
+{notes_content[:6000]}
+
+Generate 5-10 flashcards from the notes above.
+
+Rules:
+- Only cover content from "deep" and "brief" sections
+- No pure memorization questions — ask "why", "how to choose", "what happens if"
+- Each card tests exactly one concept (minimum knowledge principle)
+- Match difficulty to the reader's level
+- question: clear, specific question
+- answer: concise but complete answer (2-4 sentences)
+- concept: the concept name being tested
+- difficulty: "easy", "medium", or "hard"
+
+Output valid JSON array:
+[
+  {{"question": "...", "answer": "...", "concept": "...", "difficulty": "..."}}
+]
+
+{lang_inst}"""
+
+    messages = [{"role": "user", "content": prompt}]
+    response = await provider.chat(messages, json_mode=True)
+
+    try:
+        data = json.loads(response)
+    except json.JSONDecodeError:
+        start = response.find("[")
+        end = response.rfind("]") + 1
+        if start >= 0 and end > start:
+            try:
+                data = json.loads(response[start:end])
+            except json.JSONDecodeError:
+                return []
+        else:
+            return []
+
+    if not isinstance(data, list):
+        return []
+
+    cards: list[dict] = []
+    for item in data:
+        if isinstance(item, dict) and "question" in item and "answer" in item:
+            cards.append({
+                "question": item["question"],
+                "answer": item["answer"],
+                "concept": item.get("concept", ""),
+                "difficulty": item.get("difficulty", "medium"),
+            })
+    return cards
+
+
+async def generate_exercises(
+    doc: Document,
+    outline: Outline,
+    notes_content: str,
+    profile: Profile,
+    provider: LLMProvider,
+) -> str:
+    """Generate 2-3 practice exercises based on the reading."""
+    lang_inst = _language_instruction(profile)
+    profile_json = _profile_summary(profile)
+
+    deep_sections: list[str] = []
+    for item in outline.items:
+        if item.marker in ("deep", "brief"):
+            deep_sections.append(f"- {item.title} ({item.marker})")
+    sections_str = "\n".join(deep_sections) if deep_sections else "(all sections)"
+
+    projects_context = ""
+    for lang_name, skill in profile.skills.languages.items():
+        if skill.projects:
+            projects_context += f"- {lang_name}: {', '.join(skill.projects[:3])}\n"
+
+    prompt = f"""\
+You are a practice exercise designer for developers.
+
+Reader profile:
+{profile_json}
+
+The reader just studied "{doc.title}" with these focus sections:
+{sections_str}
+
+Notes excerpt:
+{notes_content[:4000]}
+
+Reader's projects:
+{projects_context if projects_context else "(no project data)"}
+
+Generate 2-3 practice exercises that help the reader APPLY what they learned to their own work.
+
+Rules:
+- NOT algorithm puzzles or trivia. Each exercise asks the reader to do something in their own codebase or project
+- Reference the reader's actual tech stack and projects when possible
+- Each exercise has: a title (## heading), a description (what to do and why), and a hint (practical starting point)
+- Difficulty should match the reader's level
+- Exercises should build on each other when possible (easy → medium → stretch)
+
+Output pure Markdown. No JSON, no fences.
+
+{lang_inst}"""
+
+    messages = [{"role": "user", "content": prompt}]
+    return await provider.chat(messages)
+
+
 def _build_anatomy_prompt(doc: Document, profile: Profile) -> str:
     """Build a prompt for deep concept anatomy (8 dimensions)."""
     lang_inst = _language_instruction(profile)

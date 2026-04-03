@@ -198,9 +198,10 @@ def index() -> None:
 @app.command()
 def ask(
     question: str = typer.Argument(..., help="Your question"),
+    save: bool = typer.Option(False, "--save", help="Save answer to knowledge base"),
 ) -> None:
     """Ask a question with your skill profile as context."""
-    from neocortex.config import load_config, load_profile
+    from neocortex.config import get_notes_dir, load_config, load_profile
     from neocortex.llm import create_provider
     from neocortex.asker import ask_question
 
@@ -228,6 +229,38 @@ def ask(
     from rich.markdown import Markdown
     console.print(Markdown(answer))
     console.print()
+
+    should_save = save
+    if not should_save:
+        save_answer = Prompt.ask(
+            f"  [bold]?[/bold] {t('insight_save_prompt', lang)}",
+            choices=["y", "n"],
+            default="n",
+            console=console,
+        )
+        should_save = save_answer.lower() == "y"
+
+    if should_save:
+        from neocortex.asker import save_insight
+
+        insight_path = save_insight(question, answer, lang)
+        console.print(f"  [green]{t('insight_saved', lang, path=str(insight_path))}[/green]")
+
+        async def _compile_insight() -> None:
+            try:
+                from neocortex.compiler import compile_note
+                notes_dir = get_notes_dir()
+                with console.status(f"  {t('compile_updating', lang)}"):
+                    result = await compile_note(insight_path, notes_dir, prof, provider, lang)
+                if result.concepts_created + result.concepts_updated > 0:
+                    console.print(f"  [green]{t('compile_done', lang, created=str(result.concepts_created), updated=str(result.concepts_updated))}[/green]")
+            except Exception:
+                pass
+
+        try:
+            asyncio.run(_compile_insight())
+        except Exception:
+            pass
 
 
 @app.command()
@@ -297,6 +330,132 @@ def chat() -> None:
         console.print()
         console.print(Markdown(answer))
         console.print()
+
+    non_system = [m for m in session.history if m["role"] != "system"]
+    if len(non_system) >= 2:
+        save_answer = Prompt.ask(
+            f"  [bold]?[/bold] {t('insight_save_chat', lang)}",
+            choices=["y", "n"],
+            default="n",
+            console=console,
+        )
+        if save_answer.lower() == "y":
+            from neocortex.asker import save_chat_insights
+
+            paths = save_chat_insights(non_system, lang)
+            for p in paths:
+                console.print(f"  [green]{t('insight_saved', lang, path=str(p))}[/green]")
+
+
+@app.command()
+def review(
+    count: int = typer.Option(20, help="Max cards per session"),
+) -> None:
+    """Review flashcards with spaced repetition (SM-2)."""
+    from datetime import timedelta
+
+    from rich.panel import Panel
+    from rich.markdown import Markdown
+
+    from neocortex.config import get_notes_dir, load_flashcards, save_flashcards
+    from neocortex.models import Flashcard, ReviewStats
+    from neocortex.reviewer import get_review_session, sm2_update
+
+    lang = _get_lang()
+    notes_dir = get_notes_dir()
+
+    all_cards = load_flashcards(notes_dir)
+    session_cards = get_review_session(all_cards, max_cards=count)
+
+    console.print()
+    console.print(f"  [bold]{t('review_title', lang)}[/bold]")
+    console.print("  " + "\u2501" * 52)
+    console.print()
+
+    if not session_cards:
+        total = len(all_cards)
+        console.print(f"  {t('review_empty', lang)}")
+        if all_cards:
+            console.print(f"  {t('review_total', lang, total=str(total), due='0')}")
+            next_dates = sorted(c.next_review for c in all_cards if c.next_review)
+            if next_dates:
+                console.print(f"  {t('review_next', lang, date=next_dates[0])}")
+        console.print()
+        return
+
+    stats = ReviewStats(date=date.today().isoformat())
+    total_session = len(session_cards)
+
+    cards_by_note: dict[str, list[Flashcard]] = {}
+    for c in all_cards:
+        stem = Path(c.source_note).stem
+        cards_by_note.setdefault(stem, []).append(c)
+
+    for i, card in enumerate(session_cards, 1):
+        console.print(f"  [dim]{t('review_progress', lang, current=str(i), total=str(total_session))}[/dim]")
+        console.print()
+
+        console.print(Panel(
+            f"[bold]{card.question}[/bold]",
+            title=f"[cyan]{t('review_question', lang)}[/cyan]",
+            subtitle=f"[dim]{t('review_source', lang)}: {card.source_note}[/dim]",
+            border_style="cyan",
+            padding=(1, 2),
+        ))
+
+        try:
+            Prompt.ask(f"  [dim]{t('review_reveal', lang)}[/dim]", default="", console=console)
+        except KeyboardInterrupt:
+            console.print()
+            break
+
+        console.print(Panel(
+            Markdown(card.answer),
+            title=f"[green]{t('review_answer', lang)}[/green]",
+            border_style="green",
+            padding=(1, 2),
+        ))
+
+        rate_prompt = (
+            f"  [bold]?[/bold] {t('review_rate', lang)}:  "
+            f"[1] {t('review_rate_1', lang)}  "
+            f"[2] {t('review_rate_2', lang)}  "
+            f"[3] {t('review_rate_3', lang)}  "
+            f"[4] {t('review_rate_4', lang)}  "
+            f"[5] {t('review_rate_5', lang)}"
+        )
+        try:
+            answer = Prompt.ask(rate_prompt, choices=["1", "2", "3", "4", "5"], default="3", console=console)
+        except KeyboardInterrupt:
+            console.print()
+            break
+
+        quality_map = {"1": 0, "2": 1, "3": 3, "4": 4, "5": 5}
+        quality = quality_map[answer]
+
+        sm2_update(card, quality)
+
+        stats.cards_reviewed += 1
+        if quality >= 3:
+            stats.correct += 1
+        else:
+            stats.incorrect += 1
+
+        note_stem = Path(card.source_note).stem
+        if note_stem in cards_by_note:
+            save_flashcards(notes_dir, note_stem, cards_by_note[note_stem])
+
+        console.print()
+
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow_due = sum(
+        1 for c in all_cards
+        if c.next_review and c.next_review <= tomorrow
+    )
+
+    console.print(f"  [bold green]{t('review_done', lang)}[/bold green]")
+    console.print(f"  {t('review_stats', lang, reviewed=str(stats.cards_reviewed), correct=str(stats.correct), tomorrow=str(tomorrow_due))}")
+    console.print()
 
 
 def _fts_search(query: str) -> list[dict] | None:

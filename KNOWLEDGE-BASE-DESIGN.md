@@ -1,0 +1,1072 @@
+# Neocortex 知识库进化设计
+
+> 受 Andrej Karpathy "LLM Knowledge Bases" 启发，将 Neocortex 从「笔记工具」升级为「个人知识库」。
+>
+> Karpathy 的原话：*"I think there is a strong product to be made here, not just a hack of scripts."*
+> Neocortex 已经有了闭环学习、技能校准、个性化笔记——这些 Karpathy 的脚本完全没有。
+> 补上「概念编译」这一层，就是他说的那个产品。
+
+---
+
+## 1. 现状与差距
+
+### Neocortex 已有
+
+| 能力 | 对应模块 | 状态 |
+|---|---|---|
+| 内容摄取（URL/PDF/EPUB/微信） | `reader/fetcher.py` | ✅ |
+| 个性化笔记生成 | `reader/teacher.py` | ✅ |
+| Obsidian 兼容输出 | `cmd_read.py` (frontmatter + Mermaid) | ✅ |
+| 全文搜索 + 向量检索 | `search.py` (FTS5 + fastembed) | ✅ |
+| 个性化问答 | `asker.py` (ask/chat) | ✅ |
+| 闭环追踪 | `tracker.py` + `config.py` | ✅ |
+| 学习路径推荐 | `recommender.py` | ✅ |
+| 认知收敛 | `converger.py` | ✅ |
+| 视觉卡片 | `reader/card.py` | ✅ |
+| 技能校准 | `prober.py` + calibration | ✅ |
+
+### Karpathy 工作流中我们缺的
+
+| 缺失能力 | 影响 | 优先级 |
+|---|---|---|
+| **概念编译层** — 跨笔记聚合为互联的概念 wiki | 笔记是孤岛，没有知识网络 | P0 |
+| **知识索引** — LLM 自维护的语义目录 | 问答只能靠 FTS5，没有全局知识地图 | P0 |
+| **问答沉淀** — ask/chat 输出回流知识库 | 探索产出即丢失，不积累 | P1 |
+| **知识健康检查** — 矛盾检测、覆盖分析、连接发现 | 知识库质量无人维护 | P1 |
+| **丰富输出** — slides、概念图可视化 | 输出形式单一 | P2 |
+
+---
+
+## 2. 设计目标
+
+1. **知识 > 笔记**：单篇笔记是原材料，概念条目才是知识资产
+2. **增量编译**：每次 `read` 后自动更新受影响的概念，不需要手动触发全量编译
+3. **零手工维护**：INDEX.md、概念条目、双向链接全由 LLM 写和维护，用户只需阅读
+4. **与已有系统深度集成**：概念 = gap 的知识化身，编译结果直接驱动推荐和校准
+5. **Obsidian 原生**：所有产出都是纯 Markdown + wikilinks，Obsidian 图谱视图直接可用
+6. **渐进增强**：不改变现有工作流，新功能是叠加而非替换
+
+---
+
+## 3. 架构概览
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                      用户工作流                           │
+│  read → compile → ask/chat → lint → recommend → read    │
+│         ↑ 自动      ↑ 沉淀     ↑ 健康                    │
+└──────┬──────────────┬─────────┬──────────────────────────┘
+       │              │         │
+┌──────▼──────┐ ┌─────▼───┐ ┌──▼───────────┐
+│   编译引擎   │ │ 沉淀引擎 │ │   健检引擎    │
+│ compiler.py │ │ (扩展    │ │  linter.py   │
+│             │ │  asker)  │ │              │
+└──────┬──────┘ └─────┬───┘ └──────────────┘
+       │              │
+┌──────▼──────────────▼──────────────────────┐
+│              知识库（笔记目录）                │
+│  *.md          笔记（现有）                   │
+│  concepts/     概念条目（新增）                │
+│  insights/     问答沉淀（新增）                │
+│  INDEX.md      语义目录（新增）                │
+└────────────────────────────────────────────┘
+       │
+┌──────▼──────────────────┐
+│   已有系统               │
+│  gap_progress.json      │ ← 概念证据驱动 gap 状态迁移
+│  recommendations.json   │ ← 概念覆盖率影响推荐
+│  neocortex.sqlite       │ ← 概念条目也进 FTS5 索引
+│  profile.json           │ ← 概念掌握度更新 skills
+└─────────────────────────┘
+```
+
+### 目录结构变化
+
+```
+~/Documents/Neocortex/          （笔记目录，现有 + 新增）
+├── INDEX.md                    # 新增：LLM 自维护的知识地图
+├── *.md                        # 现有：阅读笔记（不动）
+├── concepts/                   # 新增：概念条目
+│   ├── event-sourcing.md
+│   ├── cqrs.md
+│   └── ...
+└── insights/                   # 新增：问答沉淀
+    ├── 2026-04-03-crdt-vs-ot.md
+    └── ...
+```
+
+---
+
+## 4. 详细设计
+
+### 4.1 概念编译层（`compiler.py`，新增命令 `neocortex compile`）
+
+**核心思路**：扫描所有笔记，提取概念，为每个概念生成一个 wiki 条目，建立双向链接。
+
+#### 4.1.1 概念提取
+
+从每篇笔记中提取概念列表。一次 LLM 调用处理一篇笔记：
+
+```
+输入：笔记内容（前 3000 字）+ frontmatter tags
+输出：[{name, definition_brief, relationship_to: [other_concepts]}]
+```
+
+概念名称经过 `normalize_gap_name()` 规范化（复用现有 gap 同义词系统），确保 "Event Sourcing"、"event sourcing"、"ES" 都归一为同一个概念。
+
+#### 4.1.2 概念条目格式
+
+```markdown
+---
+type: concept
+name: Event Sourcing
+aliases: [event-sourcing, ES, 事件溯源]
+related_concepts: [CQRS, Domain Events, Event Store]
+skill_level: proficient
+confidence: 0.6
+evidence_count: 5
+last_updated: 2026-04-03
+---
+
+# Event Sourcing
+
+## 一句话理解
+不存最终状态，只存每一步变化——就像 git log 比 working tree 更有价值。
+
+## 核心要点
+- [从多篇笔记聚合的关键知识点]
+- [跨笔记出现的共识和分歧]
+
+## 来源笔记
+- [[event-sourcing-explained-2026-03-15]] — 基础介绍，Martin Fowler 的定义
+- [[building-event-stores-2026-03-20]] — 实现细节，PostgreSQL 方案
+- [[microservices-patterns-2026-03-25]] — 在微服务中的应用
+
+## 关联概念
+- [[CQRS]] — 常配合使用，读写分离
+- [[Domain Events]] — 事件溯源的基本单元
+- [[Saga Pattern]] — 跨服务事务补偿
+
+## 开放问题
+- Event Store 的快照策略？多久打一次？
+- 与传统 CRUD 的渐进迁移路径？
+
+## 从你的项目看
+- 你在 neocortex 项目中用了类似思路：profile 变更不是覆盖写入，而是通过 gap_progress 追踪状态变迁
+```
+
+#### 4.1.3 编译模式
+
+**增量编译**（每次 `read` 后自动触发）：
+
+```
+新笔记写入
+  → 提取该笔记涉及的概念（1 次 LLM 调用）
+  → 对每个概念：
+     ├─ 已有条目 → 追加来源笔记、更新要点（1 次 LLM 调用 / 概念）
+     └─ 新概念 → 创建条目（1 次 LLM 调用）
+  → 更新 INDEX.md 中对应的条目行
+  → 在笔记中插入 [[wikilinks]]
+```
+
+**全量编译**（`neocortex compile`，手动触发）：
+
+```
+扫描所有笔记 + insights
+  → 批量提取概念（可合并多篇笔记到一次调用）
+  → 重新生成所有概念条目
+  → 发现跨概念关系
+  → 重建 INDEX.md
+  → 全量插入 wikilinks
+```
+
+**编译缓存**：在 `~/.neocortex/compile_cache.json` 存储每篇笔记的 content hash。增量编译时只处理 hash 变化的笔记。全量编译忽略缓存。
+
+#### 4.1.4 Wikilink 插入策略
+
+在笔记正文中，将概念名称（及其别名）替换为 `[[概念名称]]` 格式。规则：
+
+- 只替换首次出现（避免满篇链接）
+- 不替换代码块、frontmatter、标题中的文本
+- 使用概念的 `aliases` 列表做匹配
+- 插入后笔记仍然是合法 Markdown（Obsidian 渲染 wikilinks，普通编辑器显示为 `[[text]]`）
+
+#### 4.1.5 与 gap 系统集成
+
+概念条目和 gap 是同一事物的两面：
+
+```
+gap（画像中的盲区） ←→ concept（知识库中的条目）
+```
+
+映射规则：
+- 概念的 `evidence_count`（来源笔记数）驱动 gap 状态迁移：
+  - 0 篇笔记 → gap
+  - 1-2 篇笔记 → learning
+  - 3+ 篇笔记且通过 Socratic probe → known
+- 概念的 `skill_level` 和 `confidence` 同步到 profile 对应的 skill
+- 新发现的概念如果不在 gap 列表中 → 新增为 gap（状态为 "learning"，因为已有一篇笔记）
+
+这让现有的闭环（recommend → read → track gap）多了一条通路：概念积累自动推进 gap 状态，不再完全依赖 tracker 的手动匹配。
+
+---
+
+### 4.2 知识索引（`INDEX.md`）
+
+LLM 自维护的知识地图。这是 Karpathy 发现的关键洞察：**不需要复杂 RAG，LLM 维护的索引文件 + 每篇文档的简要摘要就够了**。
+
+#### 4.2.1 INDEX.md 格式
+
+```markdown
+# Knowledge Base
+
+> 42 notes | 15 concepts | 8 insights | Last updated: 2026-04-03
+
+## Concept Map
+
+### 分布式系统
+- [[Event Sourcing]] ★★★ — 5 notes — 不存状态存变化
+- [[CQRS]] ★★☆ — 2 notes — 读写模型分离
+- [[Saga Pattern]] ☆☆☆ — 0 notes — 跨服务事务（待探索）
+
+### 前端工程
+- [[React Server Components]] ★☆☆ — 1 note — 服务端渲染组件
+- [[Streaming SSR]] ☆☆☆ — 0 notes — 流式服务端渲染（待探索）
+
+### AI/ML
+- [[RAG]] ★★☆ — 3 notes — 检索增强生成
+- [[Fine-tuning]] ★☆☆ — 1 note — 模型微调
+
+## Recent Activity
+- 2026-04-03: 阅读「Event Sourcing in Practice」→ 更新 [[Event Sourcing]]、新建 [[Event Store]]
+- 2026-04-02: 问答「CRDT vs OT 的取舍」→ 保存为 insight
+- 2026-04-01: 阅读「React 19 新特性」→ 新建 [[React Server Components]]
+
+## Coverage Summary
+- 15 concepts total: 4 mastered, 6 learning, 5 gaps
+- 3 domains active: 分布式系统 (7), 前端 (5), AI/ML (3)
+- Strongest cluster: 分布式系统 — 形成了 Event Sourcing → CQRS → Saga 的知识链
+- Weakest gap: Streaming SSR — 出现在 3 篇笔记中但没有专门学习
+```
+
+#### 4.2.2 更新策略
+
+- 增量编译时：只更新受影响的概念行 + Recent Activity
+- 全量编译时：重新生成整个文件
+- INDEX.md 的星级（★）反映 gap 状态：★★★ = known, ★★☆ = learning, ★☆☆ = 有笔记但未掌握, ☆☆☆ = gap
+
+#### 4.2.3 用于增强问答
+
+现有 `ask`/`chat` 的问答只用了 profile 做上下文。增强后：
+
+```
+用户提问
+  → 读 INDEX.md，定位相关概念
+  → 读取相关概念条目（每个条目很短，1-2KB）
+  → 如果需要更多细节，读取概念链接的具体笔记
+  → 带着完整知识上下文生成回答
+```
+
+这就是 Karpathy 说的 "LLM 在 ~100 篇文章规模下不需要 RAG"——INDEX.md 就是导航图，概念条目是摘要层，具体笔记是原始层。三层结构让 LLM 高效定位信息。
+
+---
+
+### 4.3 问答沉淀
+
+**目标**：`ask`/`chat` 的有价值回答不再消失在终端里，而是沉淀为知识库的一部分。
+
+#### 4.3.1 `ask` 命令扩展
+
+```python
+# 现有行为：打印回答后结束
+# 新增行为：
+#   1. 打印回答
+#   2. 提示 "Save to knowledge base? [y/n/auto]"
+#   3. 如果 yes → 保存为 insights/*.md
+#   4. 触发增量编译
+```
+
+新增 `--save` flag 跳过确认直接保存。新增配置项 `auto_save_insights: bool = False`，开启后自动保存所有问答。
+
+#### 4.3.2 `chat` 命令扩展
+
+Chat session 结束时：
+
+```python
+# 现有行为：直接退出
+# 新增行为：
+#   1. 统计对话中有价值的问答对（排除闲聊）
+#   2. 如果有价值内容 > 0，提示 "Save N insights? [y/n]"
+#   3. 保存为 insights/*.md（一个对话一个文件，或每个问答对一个文件）
+#   4. 触发增量编译
+```
+
+#### 4.3.3 Insight 文件格式
+
+```markdown
+---
+type: insight
+question: "CRDT 和 OT 在协同编辑中怎么选？"
+date: 2026-04-03
+source: ask
+related_concepts: [CRDT, OT, Collaborative Editing]
+tags:
+  - distributed-systems
+  - real-time-collaboration
+---
+
+# CRDT 和 OT 在协同编辑中怎么选？
+
+[LLM 生成的回答内容]
+
+## 关键结论
+- [从回答中提取的核心要点]
+```
+
+Insight 参与概念编译（和普通笔记一样），但在 INDEX.md 中标记来源为 "探索" 而非 "阅读"。
+
+---
+
+### 4.4 知识健康检查（`linter.py`，新增命令 `neocortex lint`）
+
+**目标**：让 LLM 对整个知识库做质检，发现问题、补全缺失、挖掘关联。
+
+#### 4.4.1 检查项
+
+| 检查类型 | 说明 | 实现方式 |
+|---|---|---|
+| **矛盾检测** | 同一概念在不同笔记中的冲突说法 | LLM 对比同概念下的多篇笔记摘要 |
+| **孤岛笔记** | 没有关联到任何概念的笔记 | 扫描笔记，检查是否有 wikilinks 或 tags 匹配概念 |
+| **陈旧概念** | 概念条目的来源笔记已更新但条目未同步 | 比较笔记 mtime 和概念 last_updated |
+| **缺失连接** | 两个概念频繁共现于同一笔记但未建立关联 | 统计概念共现矩阵，找高共现但未 link 的对 |
+| **覆盖盲区** | 用户有 gap 但没有任何笔记覆盖该领域 | 交叉比对 profile.gaps 和概念条目 |
+| **深度不足** | 概念有多篇笔记但都是浅层（outline 全是 brief） | 检查笔记的 outline marker 分布 |
+| **断裂链接** | wikilinks 指向不存在的文件 | 扫描所有 `[[...]]`，检查目标文件存在性 |
+| **重复概念** | 同一概念以不同名字出现 | 复用 `_GAP_SYNONYMS` + LLM 语义去重 |
+| **建议探索** | 基于已有概念发现值得探索的交叉领域 | LLM 分析概念图谱，提出"你学了 X 和 Y，它们的交集 Z 值得看看" |
+
+#### 4.4.2 输出格式
+
+```
+$ neocortex lint
+
+  Knowledge Base Health Report
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Score: 72/100
+
+  ❌ Contradictions (2)
+     • Event Sourcing: 笔记 A 说 "快照每 100 事件打一次"，笔记 B 说 "快照在查询时按需生成"
+       → 建议：阅读 Greg Young 的原始论文确认
+
+  ⚠️ Orphan Notes (3)
+     • python-tips-2026-03-10.md — 无关联概念
+     • ...
+
+  ⚠️ Coverage Gaps (4)
+     • Streaming SSR — 出现在 3 篇笔记中但没有专门条目
+     • WebSocket — profile 中标为 gap，知识库中零覆盖
+
+  💡 Suggested Explorations (2)
+     • 你学了 Event Sourcing 和 CQRS，但没探索过 Projection Rebuilding
+     • CRDT 和 Saga Pattern 都涉及最终一致性，值得对比研究
+
+  ✅ Healthy (8)
+     • 15 concepts all have sources
+     • No broken wikilinks
+     • ...
+```
+
+#### 4.4.3 自动修复
+
+`lint` 默认只报告。加 `--fix` flag 自动修复可修的问题：
+
+- 断裂链接 → 删除或创建空概念条目
+- 陈旧概念 → 触发增量重编译
+- 孤岛笔记 → 尝试提取概念并建立链接
+- 重复概念 → 合并（需用户确认）
+
+矛盾检测和建议探索只报告，不自动修复——这些需要用户判断。
+
+#### 4.4.4 与 converge 的关系
+
+现有 `converge` 命令关注的是"这段时间我学了什么，有什么交叉和盲区"——是**时间维度**的总结。
+
+新增 `lint` 关注的是"我的整个知识库健康吗"——是**空间维度**的质检。
+
+两者互补，不替代。长远来看，`lint` 的发现可以作为 `converge` 报告的输入，让收敛报告更准确。
+
+---
+
+### 4.5 增强输出格式
+
+#### 4.5.1 概念图可视化（`neocortex map`）
+
+生成知识库的概念关系图（Mermaid 格式），输出为 Markdown 文件：
+
+```mermaid
+graph LR
+    ES[Event Sourcing ★★★] --> CQRS[CQRS ★★☆]
+    ES --> DE[Domain Events ★★☆]
+    CQRS --> Saga[Saga Pattern ☆☆☆]
+    ES --> Proj[Projections ☆☆☆]
+
+    style ES fill:#2d5016,color:#fff
+    style CQRS fill:#8b6914,color:#fff
+    style Saga fill:#555,color:#fff
+    style Proj fill:#555,color:#fff
+```
+
+支持参数：
+- `neocortex map` — 全局概念图
+- `neocortex map --domain "分布式系统"` — 按领域筛选
+- `neocortex map --around "Event Sourcing"` — 某概念的关联网络
+
+输出为 `~/Documents/Neocortex/maps/concept-map-YYYY-MM-DD.md`，Obsidian 可直接渲染。
+
+#### 4.5.2 学习周报（`neocortex digest`）
+
+在现有 `converge` 的基础上增加结构化输出：
+
+```markdown
+# 学习周报 2026-W14
+
+## 本周数据
+- 阅读：5 篇文章
+- 新概念：3 个（Event Store, Projection, Snapshot）
+- 概念升级：Event Sourcing gap → learning → known ✓
+- 问答探索：2 次
+- 知识库健康：72/100 → 78/100
+
+## 知识网络变化
+[Mermaid diff 图：本周新增的概念和连接高亮]
+
+## 本周洞察
+[从 converge 引擎生成]
+
+## 下周建议
+[从 lint 的 suggested explorations + recommender 生成]
+```
+
+#### 4.5.3 Slides 导出（`neocortex slides`，P2）
+
+将概念条目或笔记转为 Marp 格式的 slides：
+
+```markdown
+---
+marp: true
+theme: default
+---
+
+# Event Sourcing
+
+不存最终状态，只存每一步变化
+
+---
+
+## 核心原理
+
+- 每个状态变更 = 一个不可变事件
+- 当前状态 = 所有事件的累积
+- 类比：git log > working tree
+
+---
+
+## 从你的项目看
+
+Neocortex 的 gap_progress 就是简化版 Event Sourcing：
+- 每次 read 是一个事件
+- gap → learning → known 是状态重建
+
+---
+```
+
+Obsidian 的 Marp 插件可直接渲染和演示。
+
+---
+
+## 5. 与现有系统的集成
+
+### 5.1 `read` 命令（`cmd_read.py`）
+
+**改动点**：在笔记保存和索引之后，增加编译步骤。
+
+```python
+# 现有流程（不变）：
+#   fetch → outline → generate_notes → save → index → match_recommendation → feedback
+
+# 新增步骤（在 index 之后）：
+#   → compile_note(note_path)  # 提取概念、更新/创建条目、更新 INDEX.md
+```
+
+用户无感知，编译在后台完成。如果编译失败（LLM 错误等），不影响现有流程，只是这篇笔记的概念未被提取。下次 `neocortex compile` 全量编译时会补上。
+
+### 5.2 `ask`/`chat` 命令（`cmd_knowledge.py`）
+
+**改动点**：
+
+1. **问答增强**：在构建 system prompt 时，加载 INDEX.md + 相关概念条目作为上下文
+2. **沉淀**：回答后提供保存选项
+3. **保存后触发增量编译**
+
+```python
+# 现有 ask 流程：
+#   load_profile → create_provider → ask_question(question, profile) → print
+
+# 增强后：
+#   load_profile → create_provider
+#   → load INDEX.md + 相关概念（新增）
+#   → ask_question(question, profile, knowledge_context)  # 签名变化
+#   → print
+#   → prompt save? → save_insight() → compile_note()  # 新增
+```
+
+### 5.3 `recommend` 命令（`cmd_learn.py`）
+
+**改动点**：推荐上下文增加知识库状态。
+
+```python
+# 现有 _build_context() 包含：persona, gaps, completed, recently_read
+# 新增：concept_coverage — 每个概念的掌握度和笔记数量
+```
+
+这让推荐器知道"用户虽然还没完成推荐，但已经自己读了相关文章"，避免重复推荐。
+
+### 5.4 `converge` 命令（`cmd_learn.py`）
+
+**改动点**：收敛报告的输入增加概念图谱信息。
+
+```python
+# 现有输入：recent notes
+# 新增输入：concepts 目录下的条目、INDEX.md 的 coverage summary
+```
+
+这让收敛报告能说"你在分布式系统领域形成了 3 个概念的知识链"，而不只是"你读了 5 篇文章"。
+
+### 5.5 `index` 命令
+
+**改动点**：索引范围扩展到 `concepts/` 和 `insights/` 目录。
+
+现有的 `notes_dir.rglob("*.md")` 已经能覆盖子目录，只需确认 `concepts/` 和 `insights/` 下的文件不会被 `"diagrams" not in f.parts` 过滤掉（不会，因为目录名不是 "diagrams"）。
+
+### 5.6 `notes` 命令
+
+**改动点**：列表展示区分笔记/概念/洞察。
+
+```
+  File                                    Type      Date        Size
+  event-sourcing-explained-2026-03-15.md  note      2026-03-15  4.2 KB
+  concepts/event-sourcing.md              concept   2026-04-03  2.1 KB
+  insights/crdt-vs-ot-2026-04-03.md       insight   2026-04-03  1.5 KB
+```
+
+---
+
+## 6. 新增模块设计
+
+### 6.1 `compiler.py` — 编译引擎
+
+```python
+# 公开接口：
+async def compile_note(note_path: Path, provider: LLMProvider, notes_dir: Path) -> list[str]
+    """增量编译一篇笔记。返回受影响的概念名称列表。"""
+
+async def compile_all(notes_dir: Path, provider: LLMProvider, on_progress=None) -> CompileResult
+    """全量编译。返回统计信息。"""
+
+async def extract_concepts(content: str, provider: LLMProvider) -> list[ConceptRef]
+    """从文本中提取概念列表。"""
+
+async def generate_concept_entry(name: str, sources: list[SourceNote], provider: LLMProvider, profile: Profile) -> str
+    """生成或更新一个概念条目的 Markdown 内容。"""
+
+def update_index(notes_dir: Path, concepts: list[ConceptInfo], profile: Profile) -> None
+    """重新生成 INDEX.md。"""
+
+def insert_wikilinks(content: str, concepts: list[str]) -> str
+    """在文本中插入 [[wikilinks]]。"""
+```
+
+### 6.2 `linter.py` — 健康检查引擎
+
+```python
+# 公开接口：
+async def lint_knowledge_base(notes_dir: Path, profile: Profile, provider: LLMProvider) -> LintReport
+    """运行所有检查，返回报告。"""
+
+async def fix_issues(report: LintReport, notes_dir: Path, provider: LLMProvider) -> list[str]
+    """自动修复可修的问题。返回修复描述列表。"""
+
+# 检查项注册：
+CHECKS: list[LintCheck] = [
+    check_contradictions,
+    check_orphan_notes,
+    check_stale_concepts,
+    check_missing_connections,
+    check_coverage_gaps,
+    check_depth,
+    check_broken_links,
+    check_duplicate_concepts,
+    check_suggested_explorations,
+]
+```
+
+### 6.3 数据模型新增（`models.py`）
+
+```python
+class ConceptRef(BaseModel):
+    """从笔记中提取的概念引用。"""
+    name: str
+    definition_brief: str = ""
+    related_to: list[str] = Field(default_factory=list)
+
+class ConceptEntry(BaseModel):
+    """概念条目的元数据（frontmatter 解析）。"""
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    related_concepts: list[str] = Field(default_factory=list)
+    skill_level: SkillLevel = SkillLevel.BEGINNER
+    confidence: float = 0.3
+    evidence_count: int = 0
+    last_updated: str = ""
+    source_notes: list[str] = Field(default_factory=list)
+
+class LintIssue(BaseModel):
+    """一个健康检查问题。"""
+    type: str  # contradiction, orphan, stale, missing_link, coverage_gap, ...
+    severity: str = "warning"  # error, warning, info
+    message: str
+    details: str = ""
+    auto_fixable: bool = False
+
+class LintReport(BaseModel):
+    """完整的健康检查报告。"""
+    score: int = 0  # 0-100
+    issues: list[LintIssue] = Field(default_factory=list)
+    stats: dict[str, int] = Field(default_factory=dict)  # notes_count, concepts_count, etc.
+
+class CompileResult(BaseModel):
+    """编译结果统计。"""
+    notes_processed: int = 0
+    concepts_created: int = 0
+    concepts_updated: int = 0
+    wikilinks_inserted: int = 0
+    index_updated: bool = False
+```
+
+### 6.4 新增 CLI 命令
+
+```python
+@app.command()
+def compile(full: bool = typer.Option(False, "--full", help="Full recompilation")) -> None:
+    """Compile notes into a linked concept wiki."""
+
+@app.command()
+def lint(fix: bool = typer.Option(False, "--fix", help="Auto-fix issues")) -> None:
+    """Run health checks on your knowledge base."""
+
+@app.command()
+def map(
+    domain: str = typer.Option(None, help="Filter by domain"),
+    around: str = typer.Option(None, help="Show neighborhood of a concept"),
+) -> None:
+    """Generate a visual concept map."""
+
+@app.command()
+def digest(days: int = typer.Option(7, help="Period in days")) -> None:
+    """Generate a learning digest for the period."""
+```
+
+---
+
+## 7. LLM 调用优化
+
+概念编译会增加 LLM 调用量，需要控制成本：
+
+| 操作 | LLM 调用次数 | 优化手段 |
+|---|---|---|
+| 增量编译 1 篇笔记 | 1（提取概念）+ N（更新 N 个概念条目）| 概念条目更新可批量（多个概念合并到 1 次调用） |
+| 全量编译 100 篇笔记 | 合并：~20 次（每次 5 篇笔记）+ ~30 次（概念条目生成）| 并发执行、缓存 hash 跳过未变化的 |
+| lint 全量检查 | ~5 次（矛盾检测按概念分组）+ ~3 次（建议探索等高层分析）| 纯文件扫描的检查（孤岛、断链）不需要 LLM |
+| 增强问答 | 0 额外（INDEX.md 和概念条目是文件读取，不是 LLM 调用）| — |
+
+**关键优化**：
+1. **编译缓存**：content hash 不变则跳过
+2. **批量调用**：多篇笔记的概念提取合并到一次 LLM 调用
+3. **异步并发**：多个概念条目的生成/更新并发执行
+4. **分层读取**：问答时先读 INDEX.md（小文件），再按需读概念条目，最后才读完整笔记
+5. **纯文件检查前置**：lint 中不需要 LLM 的检查先跑，快速给出部分结果
+
+---
+
+## 8. 实现计划
+
+### Phase 1: 概念编译 + 知识索引（核心）
+
+1. `models.py` — 新增 ConceptRef、ConceptEntry、CompileResult 等模型
+2. `compiler.py` — 编译引擎：概念提取、条目生成、wikilink 插入、INDEX.md 生成
+3. `cmd_read.py` — 在 read 流程末尾接入增量编译
+4. CLI `compile` 命令 — 全量编译入口
+5. `search.py` — 扩展索引范围到 concepts/ 和 insights/
+
+### Phase 2: 问答沉淀 + 问答增强
+
+6. `asker.py` — 问答上下文增加知识库信息（INDEX.md + 概念条目）
+7. `cmd_knowledge.py` — ask/chat 增加保存提示和 --save flag
+8. insight 保存逻辑 + 触发增量编译
+
+### Phase 3: 健康检查
+
+9. `linter.py` — 健检引擎：9 项检查 + --fix 自动修复
+10. CLI `lint` 命令
+11. 与 converge 集成——lint 发现作为收敛报告输入
+
+### Phase 4: 可视化增强
+
+12. CLI `map` 命令 — Mermaid 概念图
+13. CLI `digest` 命令 — 学习周报
+14. recommender 上下文增加概念覆盖率
+15. slides 导出（Marp 格式）
+
+---
+
+## 9. 与 Karpathy 工作流的最终对比
+
+| Karpathy | Neocortex (实现后) | Neocortex 的优势 |
+|---|---|---|
+| 手动收集 raw 文件 | `neocortex read <url>` 一键摄取 | 自动 fetch + 格式转换 |
+| LLM 编译 wiki | `neocortex compile` + read 自动增量编译 | 增量编译 + 编译缓存 |
+| Obsidian 查看 | 原生 Obsidian 兼容 | 完全一致 |
+| 自己写 prompt 问答 | `neocortex ask/chat`（带知识库上下文） | 自动加载相关概念，个性化到用户水平 |
+| 手动 file 回 wiki | 自动沉淀（ask --save, chat 退出时保存） | 零手工 |
+| 自己写 lint 脚本 | `neocortex lint` | 9 项结构化检查 + auto-fix |
+| 无 | 闭环学习（recommend → read → track → re-recommend） | **独有** |
+| 无 | 技能校准（Socratic probe + calibration） | **独有** |
+| 无 | 学习路径依赖（step + depends_on） | **独有** |
+| 无 | 概念-gap 联动（编译驱动 gap 状态迁移） | **独有** |
+
+**Karpathy 在用脚本拼出一个原型。Neocortex 要把它做成产品。**
+
+---
+
+## 10. 竞品分析与新增功能
+
+> 以下基于对 30+ 竞品的调研，按 Neocortex 可借鉴的价值排序。
+
+### 10.1 竞品全景
+
+#### AI 个人知识管理
+
+| 产品 | 定位 | Neocortex 可借鉴 |
+|---|---|---|
+| [Khoj](https://github.com/khoj-ai/khoj) (33.8k⭐) | 开源 AI 第二大脑，支持多平台/多 LLM | 多平台接入（Obsidian 插件、浏览器、WhatsApp）；自定义 agent + 定时自动化 |
+| [Mem.ai](https://get.mem.ai) | AI 思维伙伴，自动构建知识图谱 | 后台自动构建知识图谱；自然语言检索整个笔记库 |
+| [Saner.AI](https://www.saner.ai) | 零摩擦 AI 第二大脑 | 跨应用全局捕获（侧边栏）；集合级综合报告 |
+| [AnythingLLM](https://github.com/Mintplex-Labs/anything-llm) | 本地私有 AI 知识库 | Workspace 隔离（每个项目独立上下文）；无代码 agent 工作流 |
+| [Sider Wisebase](https://sider.ai/wisebase) | AI 知识库 + 深度研究 | Deep Research（自动扫描 100+ 来源，产出报告，自动归档回知识库）|
+
+#### AI 开发者学习
+
+| 产品 | 定位 | Neocortex 可借鉴 |
+|---|---|---|
+| [Workera](https://www.workera.ai) | AI 技能评估平台 | 自适应测试（难度实时调整）；10,000+ 技能库；预测未来 6 个月技能需求 |
+| [CodeSignal](https://codesignal.com) | AI 编程技能评测 | 评估"与 AI 协作编程"的能力；"Cosmo" AI 导师实时上下文指导 |
+| [Codecademy](https://www.codecademy.com) | 交互式编程教育 | **Vibe Learning**：从用户实际项目代码生成个性化学习路径；Build + Learn 双标签 |
+| [Exercism](https://exercism.org) | CLI-first 编程练习 + 人类导师 | 82 种语言、7,792 道练习；人类导师反馈代码质量和惯用法 |
+| [Brilliant](https://brilliant.org) | 交互式 STEM 学习 | 交互式视觉课程（比被动阅读有效 6 倍）|
+
+#### 第二大脑 / PKM
+
+| 产品 | 定位 | Neocortex 可借鉴 |
+|---|---|---|
+| [Heptabase](https://heptabase.com) | 可视化知识管理（白板） | 空间画布——拖拽排列概念卡片，看到传统大纲看不到的关系 |
+| [Tana](https://tana.inc) | 结构化 PKM | **Supertag**：给笔记定义 schema（如"会议"标签自动有参与者、Action Items 字段）|
+| [Logseq](https://logseq.com) | 开源大纲式 PKM | 块级引用（任何 bullet 可在任何地方嵌入/查询）；内置闪卡 |
+| [Reor](https://github.com/reorproject/reor) (8.5k⭐) | 本地 AI 笔记（自动链接） | **向量自动链接**：写笔记时侧边栏实时显示语义相关笔记 |
+| [InfraNodus](https://infranodus.com/obsidian-plugin) | Obsidian 3D 知识图谱 | **Gap 可视化**：3D 网络图显示概念簇之间的空白——"你应该在这里建一条桥" |
+| [Atomic](https://github.com/kenforthewin/atomic) | 自托管知识库 | **Wiki 综合**：读取同一标签下所有笔记，生成带引用的 wiki 文章；单 SQLite 文件存一切 |
+
+#### 阅读 + 复习
+
+| 产品 | 定位 | Neocortex 可借鉴 |
+|---|---|---|
+| [Readwise Reader](https://readwise.io/read) | 阅读→高亮→间隔复习 | 30+ 来源同步高亮；YouTube 字幕高亮；Ghostreader AI 摘要/问答 |
+| [RemNote](https://www.remnote.com) | 笔记 = 闪卡 | **笔记即闪卡**：任何 bullet 可变成闪卡（Q&A / 填空 / 图片遮挡）|
+| [SuperMemo](https://www.supermemo.pro) | 间隔重复鼻祖 | **增量阅读**：同时阅读上千篇文章，提取片段转为闪卡，全部用 SM-18 调度 |
+| [Recall](https://www.getrecall.ai) | AI 个人百科 | 自动构建知识图谱 + 间隔复习；支持 YouTube/播客/TikTok |
+| [BeeMind](https://beemind.app) | 轻量阅读 + SRS | **兴趣过滤**：用自然语言描述兴趣，AI 自动匹配内容进入复习队列 |
+| [Screvi](https://screvi.com) | 高亮管理 + SRS | **实体书扫描**：拍照高亮页面，Gemini AI 提取文本 |
+| [Glasp](https://glasp.co) | 社交高亮 + AI 分身 | **AI Clone**：从阅读历史构建用户的数字化身，能替你回答问题 |
+| [Strater AI](https://strater.in) | AI 学习胶囊 | **学习胶囊**：一个来源 → 摘要 + 测验 + 闪卡 + 思维导图，一站式学习单元 |
+
+### 10.2 关键缺口（按影响排序）
+
+竞品调研揭示了 5 个 Neocortex 目前完全缺失、且多个竞品已验证的功能方向：
+
+#### 缺口 1：间隔复习（Spaced Repetition）— 最大空白
+
+**现状**：Neocortex 生成笔记后就结束了。没有复习机制，知识留存依赖用户自觉。
+
+**竞品证据**：RemNote、Recall、Screvi、BeeMind、SuperMemo、Strater 都有 SRS。RemNote 最优雅——笔记和闪卡是同一个对象。
+
+**设计方案**：`neocortex review`
+
+```
+笔记生成时 → LLM 自动从笔记中提取 5-10 个 Q&A 对（闪卡）
+           → 存储在笔记同目录的 .flashcards.json 中
+           → 每张卡有 SM-2 调度参数（interval, ease_factor, next_review）
+
+neocortex review
+  → 从所有 .flashcards.json 中选出今日到期的卡片
+  → 交互式展示：先显示问题，用户思考后按键显示答案
+  → 用户评分（1-5），更新 SM-2 参数
+  → 结束时显示统计（已复习 / 正确率 / 明日到期数）
+```
+
+闪卡格式（存储在每篇笔记旁的 `.flashcards.json`）：
+
+```json
+[
+  {
+    "id": "uuid",
+    "source_note": "event-sourcing-2026-03-15.md",
+    "question": "Event Sourcing 和传统 CRUD 的核心区别是什么？",
+    "answer": "CRUD 存最终状态，ES 存每一步变化。当前状态 = 所有事件的重放。",
+    "concept": "event-sourcing",
+    "difficulty": "medium",
+    "interval": 1,
+    "ease_factor": 2.5,
+    "next_review": "2026-04-04",
+    "review_count": 0
+  }
+]
+```
+
+与概念系统联动：
+- 闪卡关联到概念（`concept` 字段）
+- 复习表现影响概念的 `confidence` 值
+- 连续答错的卡片 → 对应概念 confidence 下降 → 可能触发新的推荐
+- 全部通过的概念 → confidence 上升 → gap 状态可能升级
+
+**关键参考**：
+- SM-2 算法简单可靠，足够 V1
+- RemNote 的"笔记即闪卡"理念——不要让用户单独创建闪卡，从笔记自动生成
+- SuperMemo 的增量阅读——复习不只是闪卡，也可以是重读笔记的重点段落
+
+#### 缺口 2：语义自动链接 — 零手工发现关联
+
+**现状**：笔记之间没有链接。概念编译（Phase 1）会建立 wikilinks，但那是 LLM 显式提取的。
+
+**竞品证据**：Reor 用向量相似度自动链接；InfraNodus 用 3D 网络图发现 gap。
+
+**设计方案**：复用现有 `search.py` 的 fastembed 向量
+
+```
+每篇笔记/概念条目已有 embedding（现在只用于 hybrid_search）
+  → 编译时计算笔记间的 cosine similarity
+  → 相似度 > 0.6 的笔记对自动建立 [[Related]] 链接
+  → 概念条目的 "关联概念" 部分由向量共现 + LLM 确认共同生成
+```
+
+额外功能——**写作时的实时关联提示**（类似 Reor 的侧边栏）：
+
+这在 CLI 中不太现实，但可以在 `neocortex read` 生成笔记后，附加一个"相关笔记"区块：
+
+```markdown
+---
+## 🔗 Related Notes (auto-linked)
+- [[building-event-stores-2026-03-20]] (similarity: 0.82)
+- [[microservices-patterns-2026-03-25]] (similarity: 0.71)
+- [[concepts/cqrs]] (similarity: 0.68)
+```
+
+#### 缺口 3：Deep Research — 知识库主动扩展
+
+**现状**：Neocortex 是被动的——用户给 URL，它才读。不会主动发现和摄取新内容。
+
+**竞品证据**：Sider Wisebase 的 Deep Research 自动扫描 100+ 来源；Karpathy 也提到 LLM 用 web search 补全缺失信息。
+
+**设计方案**：`neocortex research <topic>`
+
+```
+neocortex research "Event Sourcing 的快照策略"
+  → LLM 分析当前知识库中该主题的覆盖情况
+  → 识别缺失的子主题和开放问题
+  → 调用 web search 发现高质量文章（复用现有 httpx）
+  → 自动 fetch + 生成笔记（复用 read pipeline）
+  → 触发增量编译
+  → 报告："找到 5 篇文章，生成了 3 篇笔记，新增 2 个概念"
+```
+
+与 lint 的 "建议探索" 联动：
+- `neocortex lint` 发现 "你学了 X 和 Y，但没探索它们的交集 Z"
+- `neocortex research Z` 自动扩展这个领域
+
+这让知识库从"被动记录"变成"主动生长"。
+
+#### 缺口 4：学习胶囊（Learning Capsule）— 一站式学习单元
+
+**现状**：`neocortex read` 生成笔记，但笔记只是文字。没有配套的练习、测验、闪卡。
+
+**竞品证据**：Strater AI 的 Capsule（摘要 + 测验 + 闪卡 + 思维导图）；Codecademy 的 Build + Learn 双标签。
+
+**设计方案**：增强 `read` 的输出，一篇文章生成完整的学习胶囊
+
+```
+neocortex read <url>
+  → 现有：生成个性化笔记（.md）
+  → 新增：自动生成闪卡（.flashcards.json）   ← 缺口 1
+  → 新增：生成 2-3 道实践练习（.exercises.md） ← 本缺口
+  → 新增：更新概念条目和 INDEX.md              ← Phase 1 的概念编译
+```
+
+练习不是算法题，而是把所学应用到用户自己项目的提示：
+
+```markdown
+## 练习 1：在你的项目中应用 Event Sourcing
+你的 Neocortex 项目用 gap_progress.json 追踪状态变化。
+思考：如果把它改成 Event Sourcing 模式，需要怎么改？
+提示：每次 `update_gap_status()` 调用是一个事件...
+
+## 练习 2：设计一个快照策略
+当前 gap_progress 有 N 个条目。如果改成事件流，多久应该打一次快照？
+写出你的计算逻辑。
+```
+
+#### 缺口 5：兴趣过滤 + 内容推送 — 从手动到半自动
+
+**现状**：用户需要自己找文章喂给 `neocortex read`。推荐只给出主题和资源链接，不会主动摄取。
+
+**竞品证据**：BeeMind 的兴趣标签自动过滤；Readwise 的 RSS 集成；Recall 支持 YouTube/播客。
+
+**设计方案**：`neocortex feed`（RSS/来源订阅 + 智能过滤）
+
+```yaml
+# ~/.neocortex/feeds.yaml
+feeds:
+  - url: "https://martinfowler.com/feed.atom"
+    filter: "architecture, distributed systems"
+  - url: "https://overreacted.io/rss.xml"
+    filter: "react, frontend"
+  - type: "github-trending"
+    languages: ["python", "typescript"]
+    filter: "match my gaps"
+```
+
+```
+neocortex feed
+  → 拉取所有 feed 的新文章
+  → LLM 对比用户 gap 列表，筛选出相关文章
+  → 展示推荐列表，用户选择要读的
+  → 选中的直接进入 read pipeline
+```
+
+"match my gaps" 是关键——利用现有的 profile.gaps 自动判断文章是否值得读。
+
+### 10.3 Neocortex 的护城河
+
+竞品调研也确认了 Neocortex 的独有优势，这些是没有竞品做到的：
+
+| 独有能力 | 最接近的竞品 | 为什么 Neocortex 更好 |
+|---|---|---|
+| 代码扫描 → 技能画像 | Workera（问卷测评）| 从实际代码分析，不是问卷；对开发者更准确 |
+| CLI-first 开发者工作流 | Exercism（CLI 练习）| Exercism 只有练习，没有知识管理 |
+| Gap → 推荐 → 阅读 → 追踪 → 再推荐 闭环 | 无 | 没有竞品打通完整闭环 |
+| 学习路径依赖图（step + depends_on）| Codecademy（课程有顺序）| Codecademy 是固定课程，Neocortex 是动态个性化路径 |
+| Socratic Probe 渐进校准 | CodeSignal（AI 导师）| CodeSignal 用于评测，不用于日常学习中的被动校准 |
+| 概念编译 + gap 联动（Phase 1 后）| Atomic（wiki 综合）| Atomic 不关联技能画像，只是通用 wiki |
+
+---
+
+## 11. 修订后的实现计划
+
+> 加入竞品分析后，原 4 个 Phase 扩展为 6 个。
+
+### Phase 1: 概念编译 + 知识索引（核心，不变）
+
+1. `models.py` — 新增 ConceptRef、ConceptEntry、CompileResult 等模型
+2. `compiler.py` — 编译引擎：概念提取、条目生成、wikilink 插入、INDEX.md 生成
+3. `cmd_read.py` — 在 read 流程末尾接入增量编译
+4. CLI `compile` 命令 — 全量编译入口
+5. `search.py` — 扩展索引范围到 concepts/ 和 insights/
+
+### Phase 2: 间隔复习（最大的竞品差距）
+
+6. `reviewer.py` — SM-2 调度引擎
+7. `reader/teacher.py` — 笔记生成时自动提取闪卡
+8. CLI `review` 命令 — 交互式复习会话
+9. 闪卡表现 → 概念 confidence 联动
+
+### Phase 3: 问答沉淀 + 问答增强（不变）
+
+10. `asker.py` — 问答上下文增加知识库信息
+11. `cmd_knowledge.py` — ask/chat 增加保存提示
+12. insight 保存 + 增量编译
+
+### Phase 4: 健康检查 + 语义自动链接
+
+13. `linter.py` — 9 项检查 + --fix 自动修复
+14. CLI `lint` 命令
+15. 向量自动链接（复用 fastembed）
+16. 笔记末尾自动附加 "Related Notes" 区块
+
+### Phase 5: 可视化 + 学习胶囊
+
+17. CLI `map` 命令 — Mermaid 概念图
+18. CLI `digest` 命令 — 学习周报
+19. `read` 增强：自动生成实践练习（.exercises.md）
+20. slides 导出（Marp）
+
+### Phase 6: 主动扩展（长期）
+
+21. CLI `research` 命令 — 基于知识库缺口的主动搜索和摄取
+22. CLI `feed` 命令 — RSS/来源订阅 + gap 智能过滤
+23. recommender 上下文增加概念覆盖率 + 复习表现
+
+---
+
+## 12. 开放问题
+
+> 原有 5 个问题 + 竞品分析新增 4 个。
+
+1. **概念粒度**：多细算一个概念？"React" 是一个概念还是 "React Hooks"、"React Server Components" 各算一个？
+   - 倾向：按用户的学习粒度来，LLM 提取时参考 gap 列表的粒度
+   - 同义词系统兜底，太细的可以合并
+
+2. **大规模性能**：100 篇笔记时增量编译很快，1000 篇呢？
+   - 编译缓存保证只处理变化的笔记
+   - INDEX.md 如果太大，可以分域生成（`INDEX-distributed.md`, `INDEX-frontend.md`）
+   - 目前不需要过早优化，先跑起来
+
+3. **概念条目的"声音"**：概念条目应该是客观的 wiki 风格，还是延续笔记的个性化风格？
+   - 倾向：混合。核心定义客观，"从你的项目看" 部分个性化
+   - 这是 Neocortex 相比通用 wiki 的差异化
+
+4. **多语言概念**：同一个概念中英文名不同（"事件溯源" vs "Event Sourcing"）
+   - aliases 字段覆盖
+   - `normalize_gap_name()` 已有多语言同义词基础
+
+5. **离线/无 LLM 模式**：编译和 lint 需要 LLM，如果用户没配置 provider 怎么办？
+   - compile/lint 命令检查 provider，没有则提示配置
+   - wikilink 插入和断链检查等不需要 LLM 的操作仍可离线执行
+
+6. **闪卡质量**：LLM 自动生成的闪卡质量参差不齐怎么办？
+   - V1 先上线，收集用户"跳过/删除"的卡片模式
+   - 在 prompt 中加入反例："不要出纯记忆题，要出'为什么'和'怎么选'的题"
+   - 让用户可以编辑/删除生成的闪卡
+   - 参考 RemNote：好的闪卡 = 最小知识原则 + 一张卡只测一个点
+
+7. **Research 命令的来源可信度**：自动搜索的文章质量怎么保证？
+   - 优先从 recommend 系统已有的资源库中选取
+   - Web search 结果经过 LLM 可信度评估（域名声誉、内容质量）
+   - 用户确认后才进入 read pipeline，不是完全自动
+
+8. **Feed 的信噪比**：RSS 推送 + gap 过滤后，仍然可能噪音太多？
+   - 从严格过滤开始（只推送高度匹配 gap 的文章）
+   - 用户反馈（读/跳过）训练过滤阈值
+   - 限制每日推送上限（如 3-5 篇）
+
+9. **闪卡与概念编译的交互**：闪卡复习表现怎样影响概念状态？
+   - 概念下所有闪卡的平均正确率 > 80% 且复习 3+ 轮 → confidence 提升
+   - 连续 2 次答错同一张卡 → 对应概念标记为"需要强化"
+   - 不要过度自动化——confidence 变化是渐进的，不会因为一次答错就大幅下调

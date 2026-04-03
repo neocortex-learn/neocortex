@@ -299,3 +299,73 @@ class ProjectInfo(BaseModel):
     frameworks: list[str] = Field(default_factory=list)
     architecture_signals: list[str] = Field(default_factory=list)
     summary: str = ""
+
+
+# ── Spaced repetition (flashcards) ──
+
+class Flashcard(BaseModel):
+    id: str
+    source_note: str
+    question: str
+    answer: str
+    concept: str = ""
+    difficulty: str = "medium"  # easy / medium / hard
+    interval: int = 1
+    ease_factor: float = 2.5
+    next_review: str = ""
+    review_count: int = 0
+    last_review: str | None = None
+
+
+class ReviewStats(BaseModel):
+    date: str
+    cards_reviewed: int = 0
+    correct: int = 0
+    incorrect: int = 0
+    skipped: int = 0
+
+
+# ── Concept compilation ──
+
+class ConceptRef(BaseModel):
+    """从笔记中提取的概念引用。"""
+    name: str
+    definition_brief: str = ""
+    related_to: list[str] = Field(default_factory=list)
+
+
+class ConceptEntry(BaseModel):
+    """概念条目的元数据。"""
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    related_concepts: list[str] = Field(default_factory=list)
+    skill_level: SkillLevel = SkillLevel.BEGINNER
+    confidence: float = 0.3
+    evidence_count: int = 0
+    last_updated: str = ""
+    source_notes: list[str] = Field(default_factory=list)
+
+
+class CompileResult(BaseModel):
+    """编译结果统计。"""
+    notes_processed: int = 0
+    concepts_created: int = 0
+    concepts_updated: int = 0
+    wikilinks_inserted: int = 0
+    index_updated: bool = False
+
+
+# ── Lint ──
+
+class LintIssue(BaseModel):
+    type: str  # orphan, broken_link, stale, coverage_gap, duplicate, suggestion
+    severity: str = "warning"  # error, warning, info
+    message: str
+    details: str = ""
+    auto_fixable: bool = False
+
+
+class LintReport(BaseModel):
+    score: int = 100
+    issues: list[LintIssue] = Field(default_factory=list)
+    stats: dict[str, int] = Field(default_factory=dict)
