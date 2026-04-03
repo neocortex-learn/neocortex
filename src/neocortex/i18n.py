@@ -923,6 +923,20 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "{count} 篇文章与你的学习盲区相关：",
     },
     "feed_read_hint": {"en": "Read with: neocortex read <url>", "zh": "阅读：neocortex read <url>"},
+
+    # ── Research ──
+    "research_title": {"en": "Research", "zh": "主题研究"},
+    "research_analyzing": {"en": "Analyzing topic and gaps...", "zh": "正在分析主题和盲区..."},
+    "research_queries": {"en": "Generated {count} search queries:", "zh": "生成了 {count} 个搜索词："},
+    "research_searching": {"en": "Searching the web...", "zh": "正在搜索网页..."},
+    "research_ranking": {"en": "Ranking results by relevance...", "zh": "正在按相关度排序..."},
+    "research_found": {"en": "Found {count} articles, ranking...", "zh": "找到 {count} 篇文章，正在排序..."},
+    "research_results": {"en": "Top {count} articles for you:", "zh": "为你筛选的 {count} 篇文章："},
+    "research_no_results": {"en": "No relevant articles found.", "zh": "未找到相关文章。"},
+    "research_read_hint": {"en": "Select articles to read, or copy URLs above.", "zh": "选择要阅读的文章，或复制上方链接。"},
+    "research_select": {"en": "Select articles to read", "zh": "选择要阅读的文章"},
+    "research_select_nums": {"en": "Enter article numbers (e.g. 1 3 5), or Enter to skip", "zh": "输入文章编号（如 1 3 5），或回车跳过"},
+    "research_done": {"en": "{count} notes generated from research!", "zh": "研究完成，生成了 {count} 篇笔记！"},
 }
 
 
