@@ -60,6 +60,7 @@ def lint(
             ("stale", "lint_stale_concepts", "\u26a0\ufe0f", "yellow"),
             ("coverage_gap", "lint_coverage_gaps", "\u26a0\ufe0f", "yellow"),
             ("duplicate", "lint_duplicate_concepts", "\u26a0\ufe0f", "yellow"),
+            ("decaying", "lint_decaying", "\u23f3", "yellow"),
             ("suggestion", "lint_suggested", "\U0001f4a1", "cyan"),
         ]
 

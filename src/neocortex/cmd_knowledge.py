@@ -395,10 +395,19 @@ def review(
         console.print(f"  [dim]{t('review_progress', lang, current=str(i), total=str(total_session))}[/dim]")
         console.print()
 
+        layer_key = {
+            "factual": "review_layer_fact",
+            "conceptual": "review_layer_concept",
+            "procedural": "review_layer_procedure",
+        }.get(card.knowledge_layer, "review_layer_concept")
+        layer_tag = t(layer_key, lang)
+        type_tag = f"{t('review_relationship', lang)} " if card.card_type == "relationship" else ""
+        source_info = card.source_note or card.concept
+
         console.print(Panel(
             f"[bold]{card.question}[/bold]",
             title=f"[cyan]{t('review_question', lang)}[/cyan]",
-            subtitle=f"[dim]{t('review_source', lang)}: {card.source_note}[/dim]",
+            subtitle=f"[dim]{type_tag}{layer_tag} {t('review_source', lang)}: {source_info}[/dim]",
             border_style="cyan",
             padding=(1, 2),
         ))
@@ -435,6 +444,9 @@ def review(
 
         sm2_update(card, quality)
 
+        if quality >= 3 and card.concept:
+            _boost_concept_confidence(notes_dir, card.concept)
+
         stats.cards_reviewed += 1
         if quality >= 3:
             stats.correct += 1
@@ -455,7 +467,68 @@ def review(
 
     console.print(f"  [bold green]{t('review_done', lang)}[/bold green]")
     console.print(f"  {t('review_stats', lang, reviewed=str(stats.cards_reviewed), correct=str(stats.correct), tomorrow=str(tomorrow_due))}")
+    rel_count = sum(1 for c in session_cards if c.card_type == "relationship")
+    if rel_count > 0:
+        console.print(f"  [dim]({rel_count} {t('review_relationship', lang)})[/dim]")
     console.print()
+
+
+def _boost_concept_confidence(notes_dir: Path, concept_name: str) -> None:
+    """Boost a concept's confidence after a successful review."""
+    import re as _re
+
+    from neocortex.decay import REVIEW_BOOST, boost_confidence, decayed_confidence
+
+    slug = concept_name.strip().lower().replace(" ", "-")
+    concept_path = notes_dir / "concepts" / f"{slug}.md"
+    if not concept_path.exists():
+        return
+
+    try:
+        content = concept_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return
+
+    conf_match = _re.search(r"^confidence:\s*([\d.]+)", content, _re.MULTILINE)
+    date_match = _re.search(r"^last_updated:\s*(\S+)", content, _re.MULTILINE)
+    if not conf_match:
+        return
+
+    old_conf = float(conf_match.group(1))
+    old_date = date_match.group(1) if date_match else ""
+    current = decayed_confidence(old_conf, old_date)
+    new_conf = boost_confidence(current, REVIEW_BOOST)
+    today = date.today().isoformat()
+
+    content = _re.sub(
+        r"^confidence:\s*[\d.]+",
+        f"confidence: {new_conf:.4f}",
+        content,
+        count=1,
+        flags=_re.MULTILINE,
+    )
+    content = _re.sub(
+        r"^last_updated:\s*\S+",
+        f"last_updated: {today}",
+        content,
+        count=1,
+        flags=_re.MULTILINE,
+    )
+
+    import os
+    import tempfile
+
+    fd, tmp_path = tempfile.mkstemp(dir=str(concept_path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_path, str(concept_path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def _fts_search(query: str) -> list[dict] | None:

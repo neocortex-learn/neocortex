@@ -512,6 +512,25 @@ def _save_concept_entry(concepts_dir: Path, name: str, content: str) -> None:
         raise
 
 
+def _patch_frontmatter_confidence(content: str, confidence: float, updated: str) -> str:
+    """Replace confidence and last_updated values in frontmatter via regex."""
+    content = re.sub(
+        r"^confidence:\s*[\d.]+",
+        f"confidence: {confidence:.4f}",
+        content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    content = re.sub(
+        r"^last_updated:\s*\S+",
+        f"last_updated: {updated}",
+        content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    return content
+
+
 def collect_all_concepts(concepts_dir: Path) -> list[ConceptEntry]:
     if not concepts_dir.exists():
         return []
@@ -653,6 +672,11 @@ async def compile_note(
                     if rc not in existing.related_concepts:
                         existing.related_concepts.append(rc)
 
+                from neocortex.decay import NOTE_BOOST, boost_confidence, decayed_confidence
+
+                current_conf = decayed_confidence(existing.confidence, existing.last_updated)
+                new_conf = boost_confidence(current_conf, NOTE_BOOST)
+
                 source_notes_info = [
                     {"filename": sn, "title": Path(sn).stem.replace("-", " "), "content_preview": ""}
                     for sn in existing.source_notes
@@ -662,6 +686,9 @@ async def compile_note(
                 entry_content = await generate_concept_entry(
                     display_name, source_notes_info,
                     existing.related_concepts, profile, provider, language,
+                )
+                entry_content = _patch_frontmatter_confidence(
+                    entry_content, new_conf, date.today().isoformat(),
                 )
                 _save_concept_entry(concepts_dir, display_name, entry_content)
                 result.concepts_updated += 1
@@ -689,6 +716,8 @@ async def compile_note(
         result.wikilinks_inserted = new_content.count("[[") - content.count("[[")
         note_path.write_text(new_content, encoding="utf-8")
 
+    await _generate_relationship_cards(notes_dir, concepts, provider, language)
+
     all_concepts = collect_all_concepts(concepts_dir)
     index_content = generate_index(notes_dir, all_concepts, profile, language)
     index_path = notes_dir / "INDEX.md"
@@ -706,6 +735,137 @@ async def compile_note(
     result.index_updated = True
 
     return result
+
+
+# ── Relationship cards ──
+
+
+async def _generate_relationship_cards(
+    notes_dir: Path,
+    concepts: list[ConceptRef],
+    provider: LLMProvider,
+    language: Language,
+) -> None:
+    """Generate relationship cards for concept pairs with evidence_count >= 2."""
+    from neocortex.config import load_flashcards, save_flashcards
+
+    concepts_dir = notes_dir / "concepts"
+
+    eligible = []
+    for ref in concepts:
+        existing = _load_concept_entry(concepts_dir, ref.name)
+        if existing and existing.evidence_count >= 2:
+            eligible.append(existing)
+
+    if len(eligible) < 2:
+        return
+
+    pairs: list[tuple[str, str]] = []
+    for c in eligible:
+        for rel_name in c.related_concepts:
+            for other in eligible:
+                if other.name == rel_name:
+                    pair = tuple(sorted([c.name, other.name]))
+                    if pair not in pairs:
+                        pairs.append(pair)
+
+    if not pairs:
+        return
+
+    all_cards = load_flashcards(notes_dir)
+    existing_pairs = set()
+    for fc in all_cards:
+        if fc.card_type == "relationship":
+            existing_pairs.add(fc.concept)
+
+    new_pairs = [p for p in pairs if f"{p[0]} <> {p[1]}" not in existing_pairs]
+    if not new_pairs:
+        return
+
+    for batch_pairs in [new_pairs[i:i + 3] for i in range(0, len(new_pairs), 3)]:
+        await _generate_relationship_batch(notes_dir, batch_pairs, provider, language)
+
+
+async def _generate_relationship_batch(
+    notes_dir: Path,
+    pairs: list[tuple[str, str]],
+    provider: LLMProvider,
+    language: Language,
+) -> None:
+    """Generate relationship flashcards for a batch of concept pairs."""
+    import uuid
+
+    from neocortex.config import save_flashcards
+    from neocortex.models import Flashcard
+
+    lang_inst = "\u7528\u4e2d\u6587\u8f93\u51fa\u3002" if language == Language.ZH else "Output in English."
+
+    pairs_text = "\n".join(f"- {a} \u2194 {b}" for a, b in pairs)
+
+    prompt = f"""Generate relationship flashcards that test the CONNECTION between concept pairs.
+
+Concept pairs:
+{pairs_text}
+
+For each pair, generate 1 flashcard:
+- question: Test why/how these concepts relate (not just definitions)
+- answer: Concise explanation of the relationship (2-3 sentences)
+- concept_a: First concept name
+- concept_b: Second concept name
+
+Output JSON array:
+[{{"question": "...", "answer": "...", "concept_a": "...", "concept_b": "..."}}]
+
+{lang_inst}"""
+
+    try:
+        raw = await provider.chat([{"role": "user", "content": prompt}], json_mode=True)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+        data = json.loads(raw)
+    except (json.JSONDecodeError, Exception):
+        return
+
+    if not isinstance(data, list):
+        return
+
+    cards: list[Flashcard] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        q = item.get("question", "")
+        a = item.get("answer", "")
+        ca = item.get("concept_a", "")
+        cb = item.get("concept_b", "")
+        if q and a and ca and cb:
+            pair_label = " <> ".join(sorted([ca, cb]))
+            cards.append(Flashcard(
+                id=str(uuid.uuid4())[:8],
+                source_note="",
+                question=q,
+                answer=a,
+                concept=pair_label,
+                difficulty="medium",
+                knowledge_layer="conceptual",
+                card_type="relationship",
+                next_review=date.today().isoformat(),
+            ))
+
+    if cards:
+        existing_cards: list[Flashcard] = []
+        rel_path = notes_dir / ".flashcards" / "_relationships.json"
+        if rel_path.exists():
+            try:
+                raw_data = json.loads(rel_path.read_text(encoding="utf-8"))
+                if isinstance(raw_data, list):
+                    for rd_item in raw_data:
+                        existing_cards.append(Flashcard.model_validate(rd_item))
+            except Exception:
+                pass
+        existing_cards.extend(cards)
+        save_flashcards(notes_dir, "_relationships", existing_cards)
 
 
 # ── Full compile ──
@@ -797,6 +957,11 @@ async def compile_all(
                         if rc not in existing.related_concepts:
                             existing.related_concepts.append(rc)
 
+                    from neocortex.decay import NOTE_BOOST, boost_confidence, decayed_confidence
+
+                    current_conf = decayed_confidence(existing.confidence, existing.last_updated)
+                    new_conf = boost_confidence(current_conf, NOTE_BOOST)
+
                     source_notes_info = [
                         {"filename": sn, "title": Path(sn).stem.replace("-", " "), "content_preview": ""}
                         for sn in existing.source_notes
@@ -806,6 +971,9 @@ async def compile_all(
                     entry_content = await generate_concept_entry(
                         display_name, source_notes_info,
                         existing.related_concepts, profile, provider, language,
+                    )
+                    entry_content = _patch_frontmatter_confidence(
+                        entry_content, new_conf, date.today().isoformat(),
                     )
                     _save_concept_entry(concepts_dir, display_name, entry_content)
                     result.concepts_updated += 1

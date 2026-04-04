@@ -175,6 +175,7 @@ def read(
                     answer=c["answer"],
                     concept=c.get("concept", ""),
                     difficulty=c.get("difficulty", "medium"),
+                    knowledge_layer=c.get("knowledge_layer", "conceptual"),
                     next_review=date.today().isoformat(),
                 ) for c in raw_cards]
                 save_flashcards(notes_dir, note_path.stem, cards)

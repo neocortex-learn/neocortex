@@ -13,3 +13,5 @@ node_modules/
 .mypy_cache/
 *.sqlite
 .DS_Store
+.obsidian/
+uv.lock

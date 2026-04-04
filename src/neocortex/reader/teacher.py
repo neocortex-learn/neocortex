@@ -331,18 +331,17 @@ Notes content (excerpt):
 Generate 5-10 flashcards from the notes above.
 
 Rules:
-- Only cover content from "deep" and "brief" sections
-- No pure memorization questions — ask "why", "how to choose", "what happens if"
+- Generate cards in three knowledge layers:
+  - "factual" (1-2 cards): "What is X?", "Name the 3 components of X"
+  - "conceptual" (2-3 cards): "Why choose X over Y?", "What's the relationship between X and Z?"
+  - "procedural" (1-2 cards): "In what scenario would you use X?", "What's the first step to solve Y with X?"
 - Each card tests exactly one concept (minimum knowledge principle)
 - Match difficulty to the reader's level
-- question: clear, specific question
-- answer: concise but complete answer (2-4 sentences)
-- concept: the concept name being tested
-- difficulty: "easy", "medium", or "hard"
+- Output JSON with fields: question, answer, concept, difficulty, knowledge_layer
 
 Output valid JSON array:
 [
-  {{"question": "...", "answer": "...", "concept": "...", "difficulty": "..."}}
+  {{"question": "...", "answer": "...", "concept": "...", "difficulty": "...", "knowledge_layer": "factual"}}
 ]
 
 {lang_inst}"""
@@ -374,6 +373,7 @@ Output valid JSON array:
                 "answer": item["answer"],
                 "concept": item.get("concept", ""),
                 "difficulty": item.get("difficulty", "medium"),
+                "knowledge_layer": item.get("knowledge_layer", "conceptual"),
             })
     return cards
 

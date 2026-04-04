@@ -193,6 +193,26 @@ def check_duplicate_concepts(notes_dir: Path) -> list[LintIssue]:
     return issues
 
 
+def check_decaying_concepts(notes_dir: Path) -> list[LintIssue]:
+    """Find concepts whose confidence has decayed below threshold."""
+    from neocortex.compiler import collect_all_concepts
+    from neocortex.decay import DECAY_THRESHOLD, decayed_confidence
+
+    concepts = collect_all_concepts(notes_dir / "concepts")
+    issues: list[LintIssue] = []
+    for c in concepts:
+        if not c.last_updated:
+            continue
+        current = decayed_confidence(c.confidence, c.last_updated)
+        if current < DECAY_THRESHOLD:
+            issues.append(LintIssue(
+                type="decaying",
+                severity="warning",
+                message=f"Concept \"{c.name}\" confidence decayed to {current:.2f} (last updated: {c.last_updated})",
+            ))
+    return issues
+
+
 async def check_suggested_explorations(
     notes_dir: Path,
     profile: Profile,
@@ -334,6 +354,7 @@ async def lint_knowledge_base(
         "stale": check_stale_concepts(notes_dir),
         "coverage_gap": check_coverage_gaps(notes_dir, profile),
         "duplicate": check_duplicate_concepts(notes_dir),
+        "decaying": check_decaying_concepts(notes_dir),
     }
 
     for check_type, issues in checks.items():

@@ -310,6 +310,8 @@ class Flashcard(BaseModel):
     answer: str
     concept: str = ""
     difficulty: str = "medium"  # easy / medium / hard
+    knowledge_layer: str = "conceptual"  # factual / conceptual / procedural
+    card_type: str = "standard"  # standard / relationship
     interval: int = 1
     ease_factor: float = 2.5
     next_review: str = ""

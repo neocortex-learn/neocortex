@@ -181,6 +181,9 @@ def digest(
         all_cards = load_flashcards(notes_dir)
         reviewed_cards = sum(1 for c in all_cards if c.review_count > 0)
 
+        from neocortex.decay import knowledge_complexity
+        complexity = knowledge_complexity(all_concepts)
+
     week_num = date.today().isocalendar()[1]
     year = date.today().year
 
@@ -192,6 +195,8 @@ def digest(
         f"- Concepts: {len(new_concepts)} new, {len(updated_concepts)} updated",
         f"- Insights: {insights_count} saved",
         f"- Reviews: {reviewed_cards} cards reviewed",
+        f"- {t('complexity_label', lang)}: {complexity['score']:.1f} ({complexity['concept_count']} concepts \u00d7 {complexity['avg_depth']:.2f} depth \u00d7 {complexity['connectivity']:.2f} connectivity)",
+        f"- {t('lint_decaying', lang)}: {len(complexity['decaying'])} concepts below threshold",
     ]
 
     md_content = "\n".join(stats_lines) + "\n"
@@ -231,6 +236,9 @@ def digest(
     console.print(f"  Concepts: [cyan]{len(new_concepts)}[/cyan] new, [cyan]{len(updated_concepts)}[/cyan] updated")
     console.print(f"  Insights: [cyan]{insights_count}[/cyan] saved")
     console.print(f"  Reviews:  [cyan]{reviewed_cards}[/cyan] cards reviewed")
+    console.print(f"  {t('complexity_label', lang)}: [cyan]{complexity['score']:.1f}[/cyan] ({complexity['concept_count']} \u00d7 {complexity['avg_depth']:.2f} \u00d7 {complexity['connectivity']:.2f})")
+    if complexity["decaying"]:
+        console.print(f"  {t('lint_decaying', lang)}: [yellow]{len(complexity['decaying'])}[/yellow] concepts below threshold")
     console.print()
 
     console.print(f"  [green]{t('digest_saved', lang, path=str(output_path))}[/green]")

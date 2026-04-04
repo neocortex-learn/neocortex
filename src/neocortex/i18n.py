@@ -725,6 +725,22 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Card {current}/{total}",
         "zh": "第 {current}/{total} 张",
     },
+    "review_layer_fact": {
+        "en": "[Fact]",
+        "zh": "[事实]",
+    },
+    "review_layer_concept": {
+        "en": "[Concept]",
+        "zh": "[概念]",
+    },
+    "review_layer_procedure": {
+        "en": "[Procedure]",
+        "zh": "[程序]",
+    },
+    "review_relationship": {
+        "en": "relationship cards",
+        "zh": "关系卡",
+    },
 
     # ── Recommend (closed-loop) ──
     "recommend_path_title": {
@@ -891,6 +907,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "lint_duplicate_concepts": {"en": "Duplicate Concepts", "zh": "重复概念"},
     "lint_suggested": {"en": "Suggested Explorations", "zh": "建议探索"},
     "lint_passed": {"en": "Passed", "zh": "通过"},
+    "lint_decaying": {"en": "Decaying Concepts", "zh": "衰减概念"},
+    "complexity_label": {"en": "Knowledge Complexity", "zh": "知识复杂性"},
 
     # ── Visualize ──
     "map_title": {"en": "Concept Map", "zh": "概念图"},
