@@ -1892,7 +1892,22 @@ neocortex clip --paste
 5. 状态标记为 `inbox`
 6. 全程 < 3 秒
 
-**不发生什么**：不生成笔记、不生成闪卡、不编译概念、不调 LLM。
+**轻度处理（1 次 LLM 调用，~5 秒）**：
+1. 一句话归纳：这条内容在说什么
+2. 关联概念：与知识库中哪些已有概念相关（读 INDEX.md 做匹配）
+3. 个人相关性：基于用户 profile，这条信息对你意味着什么（一句话）
+4. 自动分类：归入哪个主题目录
+
+输出示例：
+```
+  ✓ 已捕获
+
+  📌 LLM Knowledge Bases (@karpathy)
+     归纳：用 LLM 把原始文档编译成互联的 Markdown wiki，替代传统 RAG
+     关联：[[概念编译]], [[知识索引]]
+     对你：你的 Neocortex 项目正在做类似的事，可以参考他的 lint 和 health check 思路
+     分类：web-backend/
+```
 
 #### `neocortex inbox` — 碎片管理
 
@@ -1944,7 +1959,7 @@ class Clip(BaseModel):
 
 ### 20.4 存储
 
-碎片存为轻量 Markdown，一个文件一条：
+碎片存为轻量 Markdown，一个文件一条，包含 LLM 轻度处理结果：
 
 ```markdown
 ---
@@ -1954,9 +1969,21 @@ source: "https://x.com/karpathy/status/123"
 created_at: 2026-04-05
 status: inbox
 auto_tags: [knowledge-base, llm, obsidian]
+summary: "用 LLM 把原始文档编译成互联的 Markdown wiki，替代传统 RAG"
+relevance: "你的 Neocortex 项目正在做类似的事，可以参考他的 lint 思路"
+related_concepts: [概念编译, 知识索引]
+topic: web-backend
 ---
 
+# LLM Knowledge Bases
+
+> @karpathy · 2026-04-03
+
 LLM Knowledge Bases: Something I'm finding very useful recently...
+
+## 关联
+- [[概念编译]] — 本条内容描述的方法与概念编译引擎的设计高度吻合
+- [[知识索引]] — Karpathy 的 INDEX 文件维护方式可以参考
 ```
 
 目录结构：
@@ -1980,11 +2007,13 @@ NeocortexNotes/
 | 现有系统 | 碎片如何参与 |
 |---|---|
 | **FTS5 搜索** | 碎片在 `clip` 时立即进入索引，`ask`/`chat` 可以搜到 |
-| **概念编译** | 碎片不触发编译（太轻）。`inbox --auto` 时 LLM 关联已有概念 |
-| **推荐系统** | 碎片的 auto_tags 与 gap 匹配时，作为"用户已关注该领域"的弱信号 |
-| **知识衰减** | 碎片不影响 confidence（没有深度学习，不算证据） |
-| **反思** | 碎片不触发反思。周度 digest 中可以显示"本周捕获了 N 条碎片" |
-| **`read --scan`** | scan 结果可以存为碎片（bookmark），而不是丢弃 |
+| **概念关联** | `clip` 时 LLM 自动匹配已有概念，在碎片中插入 `[[wikilinks]]`。碎片成为概念的弱证据 |
+| **概念编译** | 碎片不触发完整编译，但概念条目的"来源"中会列出相关碎片（轻量引用） |
+| **推荐系统** | 碎片的关联概念作为"用户正在关注该领域"的信号，影响推荐优先级 |
+| **知识衰减** | 碎片给相关概念一个微弱的 confidence boost（+0.02，远小于 read 的 +0.1） |
+| **反思** | 碎片不触发反思。周度 digest 中显示"本周捕获 N 条碎片，关联了 M 个概念" |
+| **`read --scan`** | scan 结果可以存为碎片（bookmark + 优先级），而不是丢弃 |
+| **Obsidian 图谱** | 碎片中的 `[[wikilinks]]` 让它出现在 Obsidian 图谱中，与笔记和概念形成网络 |
 
 ### 20.6 内容光谱的完整覆盖
 
@@ -1994,12 +2023,12 @@ NeocortexNotes/
 轻 ──────────────────────────────────────────────────── 重
 
 clip          read --scan      read            read --deep
-(即时捕获)     (快速筛选)       (标准学习)       (深度研究)
+(轻度捕获)     (快速筛选)       (标准学习)       (深度研究)
 
-< 3秒         ~30秒            ~3分钟           ~5分钟
-无 LLM        1次 LLM          3-5次 LLM        5-7次 LLM
-存原文         输出摘要+优先级   笔记+闪卡+练习    深度笔记+解剖+更多闪卡
-不生成文件      可选存为 clip    自动存储+编译      自动存储+编译+声明提取
+~5秒          ~30秒            ~3分钟           ~5分钟
+1次 LLM       1次 LLM          3-5次 LLM        5-7次 LLM
+归纳+关联+     摘要+优先级      笔记+闪卡+练习    深度笔记+解剖+更多闪卡
+分类+相关性    可选存为 clip     自动存储+编译      自动存储+编译+声明提取
 ```
 
 ### 20.7 实现计划
