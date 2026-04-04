@@ -44,12 +44,16 @@ def _level_instruction(profile: Profile) -> str:
     return ""
 
 
-def _style_instruction(profile: Profile) -> str:
+def _style_instruction(profile: Profile, doc_title: str = "") -> str:
     style = profile.persona.learning_style
     if style is None:
         return ""
     mapping = {
-        LearningStyle.CODE_EXAMPLES: "Use real code examples to illustrate every concept. Show before-and-after code when possible.",
+        LearningStyle.CODE_EXAMPLES: (
+            "Use real code examples to illustrate concepts when the content is about programming or technical implementation. "
+            "For non-technical content (methodology, psychology, management, workflows), use concrete real-world scenarios "
+            "and step-by-step procedures instead of code. Adapt the illustration style to match the content type."
+        ),
         LearningStyle.THEORY_FIRST: "Start with theory and principles. Explain the 'why' before showing any implementation.",
         LearningStyle.JUST_DO_IT: "Be concise and actionable. Skip lengthy explanations, focus on what to do and how.",
         LearningStyle.COMPARE_WITH_KNOWN: "Compare new concepts with things the reader already knows. Use analogies from their existing projects.",
