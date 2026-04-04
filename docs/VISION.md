@@ -924,7 +924,109 @@ clip（播种）
 
 ---
 
-## 6. 开放问题
+## 6. 知识资产的 AI-first 开放——让所有 AI 都懂你
+
+> 来源：grapeot《用好AI的第一步：停止和AI聊天》(yage.ai, 2026-03)
+> 核心框架：上中下三策——下策信息消失，中策人类友好但 AI 难消费，上策 AI-first
+
+### 6.1 问题：知识库被锁在 Neocortex 里
+
+Neocortex 建了一个结构完善的个人知识库：profile.json（技能画像）、INDEX.md（知识地图）、
+concepts/（概念条目）、claims.json（事实声明）、.flashcards/（复习数据）。
+
+但这些数据**只有 Neocortex 自己能用**。
+
+用户在 Cursor 里写代码时，Cursor 不知道他的技能水平。
+用户在 Claude Code 里做项目时，Claude Code 不知道他的知识盲区。
+用户跟任何 AI 聊天时，那个 AI 不知道他已经读了什么、学了什么、在什么概念上挣扎。
+
+grapeot 的"资产积累"洞察：**"你用得越多、积累越多，AI 就越懂你"**。
+但前提是积累的资产能被所有 AI 消费，而不只是被一个工具独占。
+
+### 6.2 愿景：Neocortex 知识库 = 你的 AI 上下文层
+
+Neocortex 的定位应该从"一个学习工具"扩展为**"你的个人知识 API"**。
+
+```
+你的任何 AI 工具
+    │
+    ├─ Cursor（写代码）──→ 读 profile.json → 知道你的水平 → 更精准的代码建议
+    │
+    ├─ Claude Code（做项目）──→ 读 INDEX.md + concepts/ → 知道你学了什么 → 不重复解释
+    │
+    ├─ ChatGPT/其他 AI（聊天）──→ 读你的知识图谱 → 跳过你已知的 → 直击盲区
+    │
+    └─ 未来的任何 Agent ──→ 读你的完整画像 → 真正个性化的服务
+            │
+            ▼
+    ~/Documents/NeocortexNotes/     ← AI-first 格式
+    ~/.neocortex/                   ← 结构化数据
+```
+
+### 6.3 已经具备的条件
+
+Neocortex 的数据**已经是 AI-first 格式**（grapeot 说的"上策"）：
+
+| 数据 | 格式 | AI 可消费性 |
+|---|---|---|
+| 技能画像 | `profile.json` | 直接 JSON，任何 agent 可读 |
+| 知识地图 | `INDEX.md` | Markdown，已用于 ask/chat 上下文 |
+| 概念条目 | `concepts/*.md` | 结构化 Markdown + frontmatter |
+| 事实声明 | `claims.json` | 直接 JSON |
+| 学习历史 | `recommendations.json` + `gap_progress.json` | 直接 JSON |
+| 信念变更 | `belief_changes.json` | 直接 JSON |
+| 闪卡数据 | `.flashcards/*.json` | 直接 JSON |
+
+不需要额外做格式转换——数据已经是 AI-ready 的。
+
+### 6.4 实现路径
+
+**短期（零开发成本）：文档指南**
+
+写一份指南，教用户怎么在其他 AI 工具中引用 Neocortex 数据：
+
+```markdown
+# 在 Claude Code 中使用 Neocortex 画像
+
+在项目的 CLAUDE.md 中添加：
+  参考用户技能画像：~/.neocortex/profile.json
+  参考知识库索引：~/Documents/NeocortexNotes/INDEX.md
+  用户的知识盲区和学习进度见：~/.neocortex/gap_progress.json
+
+# 在 Cursor 中使用
+在 .cursorrules 中引用同样的路径。
+```
+
+**中期：Agent Skill 封装**
+
+把 Neocortex 封装为 Agent Skills 规范（agentskills.io），让 Claude Code / Cursor / Windsurf 原生支持：
+- `neocortex-profile` skill：读取和解释用户画像
+- `neocortex-knowledge` skill：搜索和引用知识库内容
+- `neocortex-gaps` skill：查看用户的技能盲区
+
+**长期：MCP Server**
+
+把 Neocortex 做成 MCP Server，通过标准协议暴露知识库：
+- `get_profile()` → 返回技能画像
+- `search_knowledge(query)` → 搜索笔记和概念
+- `get_gaps()` → 返回技能盲区
+- `get_concepts()` → 返回概念图谱
+
+任何支持 MCP 的 AI 工具都能连接，实现"一处积累，处处可用"。
+
+### 6.5 这意味着什么
+
+当 Neocortex 从"独立工具"变成"知识 API"：
+
+- 你在 Neocortex 里 `read` 一篇文章 → 知识更新 → 所有 AI 工具立刻感知到你变了
+- 你在 Cursor 里写了新代码 → 可以触发 Neocortex 更新画像 → 推荐路径自动调整
+- 你用 Claude Code 问了个问题 → 回答基于你的完整知识状态 → 不浪费时间解释你已知的
+
+**一处学习，处处受益。你的知识不再是孤岛，而是所有 AI 交互的共享地基。**
+
+---
+
+## 7. 开放问题
 
 1. **概念粒度**：多细算一个概念？"React" 是一个概念还是 "React Hooks"、"React Server Components" 各算一个？
    - 倾向：按用户的学习粒度来，LLM 提取时参考 gap 列表的粒度
