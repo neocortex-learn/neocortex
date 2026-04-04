@@ -35,12 +35,96 @@ _NAV_WORDS = frozenset((
 
 
 async def extract_article_links(page_url: str) -> list[ArticleEntry]:
-    """Fetch an archive/blog page and extract article links."""
+    """Fetch an archive/blog page and extract article links.
+
+    If the URL is an RSS/Atom feed, parses it directly.
+    Otherwise, tries to discover a feed link in the HTML, and falls back to HTML scraping.
+    """
     async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
         resp = await client.get(page_url)
         resp.raise_for_status()
 
-    html = resp.text
+    content_type = resp.headers.get("content-type", "")
+    text = resp.text
+
+    # 如果 URL 本身就是 RSS/Atom feed
+    if _is_feed_content(content_type, text):
+        return _parse_feed(text)
+
+    # 尝试从 HTML 中发现 RSS/Atom feed 链接
+    feed_url = _discover_feed_url(text, page_url)
+    if feed_url:
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+                feed_resp = await client.get(feed_url)
+                feed_resp.raise_for_status()
+            feed_articles = _parse_feed(feed_resp.text)
+            if feed_articles:
+                return feed_articles
+        except Exception:
+            pass
+
+    # 降级：从 HTML 提取链接
+    return _extract_links_from_html(text, page_url)
+
+
+def _is_feed_content(content_type: str, text: str) -> bool:
+    """Check if content is RSS/Atom feed."""
+    if "xml" in content_type or "rss" in content_type or "atom" in content_type:
+        return True
+    stripped = text.strip()[:200]
+    return "<rss" in stripped or "<feed" in stripped or "<?xml" in stripped
+
+
+def _parse_feed(text: str) -> list[ArticleEntry]:
+    """Parse RSS/Atom feed into article entries."""
+    import feedparser
+
+    parsed = feedparser.parse(text)
+    articles: list[ArticleEntry] = []
+    seen: set[str] = set()
+
+    for entry in parsed.entries:
+        link = entry.get("link", "")
+        title = entry.get("title", "")
+        if not title or not link or link in seen:
+            continue
+        seen.add(link)
+
+        snippet = ""
+        if hasattr(entry, "summary"):
+            snippet = re.sub(r"<[^>]+>", "", entry.summary).strip()[:200]
+
+        articles.append(ArticleEntry(title=title, url=link, snippet=snippet))
+
+    return articles
+
+
+def _discover_feed_url(html: str, page_url: str) -> str | None:
+    """Try to find RSS/Atom feed link in HTML <head>."""
+    # <link rel="alternate" type="application/rss+xml" href="...">
+    feed_pattern = re.compile(
+        r'<link[^>]+type=["\']application/(?:rss|atom)\+xml["\'][^>]*href=["\']([^"\']+)["\']',
+        re.IGNORECASE,
+    )
+    match = feed_pattern.search(html)
+    if match:
+        return urljoin(page_url, match.group(1))
+
+    # 反过来的属性顺序
+    feed_pattern2 = re.compile(
+        r'<link[^>]+href=["\']([^"\']+)["\'][^>]*type=["\']application/(?:rss|atom)\+xml["\']',
+        re.IGNORECASE,
+    )
+    match2 = feed_pattern2.search(html)
+    if match2:
+        return urljoin(page_url, match2.group(1))
+
+    return None
+
+
+def _extract_links_from_html(html: str, page_url: str) -> list[ArticleEntry]:
+    """Fallback: extract article links from HTML."""
     base_domain = urlparse(page_url).netloc
     current_path = urlparse(page_url).path
 
@@ -75,7 +159,6 @@ async def extract_article_links(page_url: str) -> list[ArticleEntry]:
         if not clean_title or len(clean_title) < 3:
             continue
 
-        # 过滤导航链接和分类标签
         if _is_nav_or_tag(clean_title, parsed.path):
             continue
 
