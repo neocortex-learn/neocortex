@@ -72,7 +72,7 @@ class TestExtractArticleLinks:
         assert "Understanding Async Python" in titles
         assert "React Hooks Explained" in titles
         assert "Database Indexing Strategies" in titles
-        assert "About" in titles
+        assert "About" not in titles  # 导航链接应被过滤
 
     @pytest.mark.asyncio
     async def test_filters_non_article_links(self):

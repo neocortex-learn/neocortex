@@ -26,6 +26,13 @@ _SKIP_EXTENSIONS = frozenset((
     ".ttf", ".eot", ".mp3", ".mp4", ".webp", ".avif",
 ))
 
+_NAV_WORDS = frozenset((
+    "home", "about", "contact", "rss", "feed", "search", "login", "signup",
+    "register", "subscribe", "services", "portfolio", "resume", "cv",
+    "privacy", "terms", "sitemap", "archive", "archives", "tags", "categories",
+    "news", "links", "friends", "sponsors", "donate", "support",
+))
+
 
 async def extract_article_links(page_url: str) -> list[ArticleEntry]:
     """Fetch an archive/blog page and extract article links."""
@@ -68,9 +75,42 @@ async def extract_article_links(page_url: str) -> list[ArticleEntry]:
         if not clean_title or len(clean_title) < 3:
             continue
 
+        # 过滤导航链接和分类标签
+        if _is_nav_or_tag(clean_title, parsed.path):
+            continue
+
         articles.append(ArticleEntry(title=clean_title, url=canonical))
 
     return articles
+
+
+def _is_nav_or_tag(title: str, path: str) -> bool:
+    """Filter out navigation links, category tags, and non-article pages."""
+    lower_title = title.lower().strip()
+
+    # 单词标题大概率是导航或分类标签（如 "About", "RSS", "Chinese", "Frontend"）
+    if " " not in lower_title and len(lower_title) < 20:
+        # 允许中文标题（中文没有空格但通常更长）
+        if all(ord(c) < 0x4E00 or ord(c) > 0x9FFF for c in lower_title):
+            return True
+
+    # 已知的导航词
+    if lower_title in _NAV_WORDS:
+        return True
+
+    # 只有 emoji/符号的标题
+    stripped = re.sub(r"[^\w]", "", lower_title)
+    if not stripped:
+        return True
+
+    # 路径太浅且标题很短（如 /about, /rss）——大概率是导航
+    path_parts = [p for p in path.strip("/").split("/") if p]
+    if len(path_parts) <= 1 and len(lower_title) < 15 and "." not in path:
+        # 但如果路径包含 .html 说明是文章页面
+        if not path.endswith((".html", ".htm", ".md")):
+            return True
+
+    return False
 
 
 def _collect_gaps(profile: Profile) -> list[str]:
