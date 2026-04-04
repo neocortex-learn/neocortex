@@ -1281,7 +1281,81 @@ Complexity: 38 → 42 (+10.5%) this week
 
 ---
 
-## 15. 开放问题
+## 15. 未来方向：Agent 式知识检索
+
+> 来源：Mintlify ChromaFs 工程博客（2026-04），@dotey 转述
+> 526 赞 / 745 收藏，HN 热议
+
+### 15.1 Mintlify 的方案
+
+Mintlify 给 AI 文档助手造了一套假文件系统 ChromaFs：AI 以为自己在用 grep/cat/ls 浏览文件，
+实际每个命令被拦截翻译成 Chroma 数据库查询。
+
+- 会话启动从 46 秒降到 100 毫秒
+- 月均 85 万次对话，年省 7 万美元计算成本
+- grep 最难虚拟化：先用元数据粗筛 → 批量预取到缓存 → 内存精确匹配
+- 权限控制：初始化时裁剪文件树，没权限的路径 AI 连路径都看不到
+- 所有写操作返回"只读文件系统"错误，无状态
+
+### 15.2 更深层的洞察
+
+HN 讨论中的关键观点：
+
+> **RAG ≠ 向量检索。RAG 里的 R 是 Retrieval，可以是任何方式：全文搜索、SQL、甚至翻电话簿。
+> 把 RAG 绑死在向量数据库上，是早期技术路径的惯性。**
+
+RAG 概念流行时 LLM 还不太会用工具，向量检索是最省事的方案。
+现在模型的工具调用和推理能力上来了，让 AI 自己决定用什么方式找信息，比预设检索管道更灵活。
+
+这与 Claude Code 的做法相通：不是把所有信息预检索好喂给模型，
+而是给模型一套探索工具，让它自己决定看什么、怎么找。
+
+### 15.3 对 Neocortex 的启示
+
+**当前状态**：`ask`/`chat` 加载 INDEX.md（≤2000 字符）作为上下文注入 system prompt。
+这是"预检索"模式——在 LLM 调用前就决定了它能看到什么。
+
+**当前够用的原因**：知识库规模小（~100 篇笔记），INDEX.md + 概念条目的三层导航
+（目录 → 摘要 → 原文）在这个规模下足够精准。
+
+**未来方向**（知识库 500+ 笔记后考虑）：
+
+把 `ask`/`chat` 改造为 **Agent + 工具调用模式**：
+
+```
+用户提问
+  → LLM 决定需要什么信息
+  → 调用工具：search(query) / read_concept(name) / read_note(filename) / list_concepts(domain)
+  → 拿到结果后可能再调用更多工具
+  → 综合所有信息生成回答
+```
+
+工具定义（类似 Mintlify 的假文件系统，但用 Neocortex 自己的数据层）：
+
+| 工具 | 对应 | 说明 |
+|---|---|---|
+| `search(query)` | FTS5 / hybrid search | 全文搜索笔记和概念 |
+| `read_concept(name)` | concepts/{slug}.md | 读取概念条目全文 |
+| `read_note(filename)` | notes_dir/{filename} | 读取笔记全文 |
+| `list_concepts(domain?)` | INDEX.md 的概念列表 | 列出所有或某领域的概念 |
+| `get_flashcards(concept)` | .flashcards/*.json | 获取某概念的闪卡 |
+
+好处：
+- LLM 按需读取，不浪费上下文窗口
+- 支持多步推理（先搜索 → 发现线索 → 深入读取）
+- 知识库再大也不受 system prompt 长度限制
+
+实现路径：
+- 使用 Anthropic/OpenAI 的 function calling / tool use API
+- 现有 `LLMProvider.chat()` 需要扩展支持 tools 参数
+- 或者用简单的 ReAct 循环（不依赖原生 tool use）
+
+**触发条件**：当 INDEX.md 超过 4000 字符，或 `ask` 的回答质量明显下降时，启动这个改造。
+在此之前，当前方案成本更低、更简单。
+
+---
+
+## 16. 开放问题
 
 1. **概念粒度**：多细算一个概念？"React" 是一个概念还是 "React Hooks"、"React Server Components" 各算一个？
    - 倾向：按用户的学习粒度来，LLM 提取时参考 gap 列表的粒度
