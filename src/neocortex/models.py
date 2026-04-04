@@ -355,6 +355,7 @@ class CompileResult(BaseModel):
     concepts_updated: int = 0
     wikilinks_inserted: int = 0
     index_updated: bool = False
+    conflicts: list[dict] = Field(default_factory=list)
 
 
 # ── Lint ──

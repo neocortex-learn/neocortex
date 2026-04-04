@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 
 import typer
+from rich.prompt import Prompt
 
 from neocortex.cli import _get_lang, app, console
 from neocortex.i18n import t
@@ -139,6 +141,88 @@ def map(
     console.print()
 
 
+async def _generate_monthly_reflection(
+    notes: list[dict],
+    concepts: list,
+    profile,
+    provider,
+    language,
+    days: int,
+) -> str:
+    """Generate a monthly reflection report via LLM."""
+    from neocortex.models import Language
+
+    lang_inst = "用中文输出。简洁有力，不要空洞的鼓励。" if language == Language.ZH else "Output in English. Be concise and substantive, no empty encouragement."
+
+    topics = set()
+    for note in notes[:20]:
+        topics.add(note.get("title", "")[:50])
+    topics_str = ", ".join(list(topics)[:10])
+
+    new_concept_count = sum(1 for c in concepts if c.evidence_count <= 1)
+    updated_concept_count = sum(1 for c in concepts if c.evidence_count > 1)
+
+    decaying_names: list[str] = []
+    try:
+        from neocortex.decay import knowledge_complexity
+        complexity = knowledge_complexity(concepts)
+        decaying_names = complexity.get("decaying", [])
+    except Exception:
+        pass
+
+    persona = profile.persona
+    role = persona.role.value if persona.role else "developer"
+    goal = persona.learning_goal.value if persona.learning_goal else "level up"
+
+    belief_changes_text = ""
+    try:
+        from neocortex.config import load_belief_changes
+        changes = load_belief_changes()
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        recent_changes = [c for c in changes if c.get("date", "") >= cutoff]
+        if recent_changes:
+            belief_changes_text = "\n本月信念变化：\n" + "\n".join(
+                f"- {c['concept']}: \"{c.get('from', '')}\" -> \"{c.get('to', '')}\""
+                for c in recent_changes
+            )
+    except Exception:
+        pass
+
+    prompt = f"""\
+你是一位学习教练，帮助用户回顾过去一个月的学习情况。
+
+用户画像：{role}, 目标: {goal}
+
+本月数据：
+- 阅读了 {len(notes)} 篇文章，主题包括：{topics_str}
+- 新增 {new_concept_count} 个概念，更新 {updated_concept_count} 个
+- {len(decaying_names)} 个概念进入衰减区
+{belief_changes_text}
+
+请生成月度反思报告，包含：
+
+## 知识演化
+哪些领域的理解加深了？哪些概念从 gap 变成了 learning 或 known？
+
+## 方向偏差
+用户的学习目标是 {goal}。实际学习内容与目标的偏差？
+
+## 认知更新
+基于阅读的主题，有哪些常见的误解可能已经被纠正？
+
+## 下月建议
+基于当前进度和衰减情况，下个月应该优先学什么？
+
+{lang_inst}"""
+
+    messages = [
+        {"role": "system", "content": "You are a learning coach who helps people reflect on their monthly learning progress. Output Markdown."},
+        {"role": "user", "content": prompt},
+    ]
+
+    return await provider.chat(messages)
+
+
 @app.command()
 def digest(
     days: int = typer.Option(7, help="Period in days"),
@@ -154,6 +238,7 @@ def digest(
     notes_dir = get_notes_dir()
     cutoff = (date.today() - timedelta(days=days)).isoformat()
     today = date.today().isoformat()
+    is_monthly = days >= 28
 
     with console.status(f"  {t('digest_generating', lang)}"):
         recent_notes = gather_recent_notes(notes_dir, days=days)
@@ -187,8 +272,9 @@ def digest(
     week_num = date.today().isocalendar()[1]
     year = date.today().year
 
+    title = t('reflect_monthly_title', lang) if is_monthly else t('digest_title', lang)
     stats_lines = [
-        f"# {t('digest_title', lang)} {year}-W{week_num:02d}\n",
+        f"# {title} {year}-W{week_num:02d}\n",
         f"> {t('digest_period', lang, days=str(days))}\n",
         "## Stats",
         f"- Notes: {notes_count} new",
@@ -223,11 +309,37 @@ def digest(
     if convergence_content:
         md_content += f"\n## Convergence\n\n{convergence_content}\n"
 
+    monthly_content = ""
+    if is_monthly and cfg.provider:
+        try:
+            from neocortex.llm import create_provider
+
+            provider = create_provider(cfg)
+
+            async def _gen_monthly() -> str:
+                return await _generate_monthly_reflection(
+                    recent_notes, all_concepts, prof, provider, lang, days,
+                )
+
+            with console.status(f"  {t('reflect_monthly_generating', lang)}"):
+                monthly_content = asyncio.run(_gen_monthly())
+        except Exception:
+            pass
+
+    if monthly_content:
+        md_content += f"\n## {t('reflect_monthly_title', lang)}\n\n{monthly_content}\n"
+
     output_path = notes_dir / f"digest-{today}.md"
+    if is_monthly:
+        insights_dir_save = notes_dir / "insights"
+        insights_dir_save.mkdir(parents=True, exist_ok=True)
+        monthly_path = insights_dir_save / f"monthly-reflect-{today}.md"
+        monthly_path.write_text(md_content, encoding="utf-8")
+
     output_path.write_text(md_content, encoding="utf-8")
 
     console.print()
-    console.print(f"  [bold]{t('digest_title', lang)}[/bold]")
+    console.print(f"  [bold]{title}[/bold]")
     console.print()
     console.print(f"  [dim]{t('digest_period', lang, days=str(days))}[/dim]")
     console.print()
@@ -243,3 +355,50 @@ def digest(
 
     console.print(f"  [green]{t('digest_saved', lang, path=str(output_path))}[/green]")
     console.print()
+
+    if sys.stdout.isatty() and recent_notes:
+        console.print(f"  [bold]{t('reflect_weekly_title', lang)}[/bold]")
+        console.print()
+
+        topics = set()
+        for note in recent_notes[:10]:
+            topics.add(note.get("title", "")[:30])
+        topics_str = ", ".join(list(topics)[:5])
+
+        console.print(f"  [dim]{t('reflect_weekly_context', lang, topics=topics_str)}[/dim]")
+        console.print()
+
+        synthesis = Prompt.ask(
+            f"  [bold]?[/bold] {t('reflect_weekly_synthesis', lang)}",
+            default="",
+            console=console,
+        )
+
+        active_gap = ""
+        for domain in prof.skills.domains.values():
+            if domain.gaps:
+                active_gap = domain.gaps[0]
+                break
+
+        update = ""
+        if active_gap:
+            update = Prompt.ask(
+                f"  [bold]?[/bold] {t('reflect_weekly_update', lang, gap=active_gap)}",
+                default="",
+                console=console,
+            )
+
+        if synthesis.strip() or update.strip():
+            from neocortex.asker import save_insight
+
+            reflection_content = ""
+            if synthesis.strip():
+                reflection_content += f"## 综合\n{synthesis}\n\n"
+            if update.strip():
+                reflection_content += f"## 认知更新\n{update}\n\n"
+
+            question = f"Weekly reflection {date.today().isoformat()}"
+            save_insight(question, reflection_content, lang)
+            console.print(f"  [green]{t('reflect_saved', lang)}[/green]")
+
+        console.print()

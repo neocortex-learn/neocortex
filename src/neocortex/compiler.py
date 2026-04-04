@@ -85,6 +85,173 @@ async def extract_concepts(
     return refs
 
 
+# ── Claim extraction ──
+
+
+async def extract_claims(
+    content: str,
+    provider: LLMProvider,
+    language: Language = Language.EN,
+) -> list[dict]:
+    """Extract core factual claims from note content.
+
+    Returns [{claim, concept, context}].
+    """
+    truncated = content[:3000]
+    lang_instruction = "用中文输出。" if language == Language.ZH else "Respond in English."
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "从以下笔记中提取 3-5 个核心声明（factual claims）。"
+                "每个声明是一个可以被验证或反驳的具体论断。"
+                "不要提取观点或偏好，只提取事实性声明。"
+                f"输出 JSON 数组: "
+                '[{"claim": "...", "concept": "相关概念名", "context": "适用条件"}] '
+                f"{lang_instruction} "
+                "Output ONLY a JSON array, no markdown fences."
+            ),
+        },
+        {
+            "role": "user",
+            "content": truncated,
+        },
+    ]
+
+    raw = await provider.chat(messages, json_mode=True)
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+
+    if not isinstance(data, list):
+        return []
+
+    claims: list[dict] = []
+    for item in data:
+        if not isinstance(item, dict) or "claim" not in item:
+            continue
+        claims.append({
+            "claim": item["claim"],
+            "concept": item.get("concept", ""),
+            "context": item.get("context", ""),
+        })
+    return claims
+
+
+# ── Conflict detection ──
+
+
+async def detect_conflicts(
+    new_claims: list[dict],
+    existing_claims: dict[str, list[dict]],
+    provider: LLMProvider,
+    language: Language = Language.EN,
+) -> list[dict]:
+    """Compare new claims against existing ones. Returns conflicts.
+
+    Each conflict: {claim_a, source_a, claim_b, source_b, concept, type, explanation, resolution_hint}
+    type: "temporal" | "contextual" | "genuine"
+    """
+    normalized_existing: dict[str, list[dict]] = {}
+    for key, value in existing_claims.items():
+        normalized_existing[normalize_gap_name(key)] = value
+
+    pairs: list[dict] = []
+    for nc in new_claims:
+        concept_name = normalize_gap_name(nc.get("concept", ""))
+        if not concept_name or concept_name not in normalized_existing:
+            continue
+        for ec in normalized_existing[concept_name]:
+            pairs.append({
+                "index": len(pairs),
+                "claim_a": ec["claim"],
+                "source_a": ec.get("source", ""),
+                "claim_b": nc["claim"],
+                "concept": concept_name,
+            })
+
+    if not pairs:
+        return []
+
+    pairs_text = ""
+    for p in pairs:
+        pairs_text += (
+            f"Pair {p['index']}:\n"
+            f"  A (existing): {p['claim_a']}\n"
+            f"  B (new): {p['claim_b']}\n\n"
+        )
+
+    lang_instruction = "用中文输出。" if language == Language.ZH else "Respond in English."
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "比较以下声明对，判断是否存在冲突：\n\n"
+                f"{pairs_text}"
+                "对每一对，分类为：\n"
+                "- temporal: 时间差异导致（技术演进）\n"
+                "- contextual: 不同上下文下各自成立\n"
+                "- genuine: 真正的矛盾\n"
+                "- no_conflict: 实际不矛盾\n\n"
+                '输出 JSON 数组: [{"pair_index": 0, "type": "...", "explanation": "...", "resolution_hint": "..."}]\n'
+                "只返回 type 不是 no_conflict 的。如果没有冲突，返回空数组 []。\n"
+                f"{lang_instruction} "
+                "Output ONLY a JSON array, no markdown fences."
+            ),
+        },
+        {
+            "role": "user",
+            "content": "请分析上述声明对。",
+        },
+    ]
+
+    raw = await provider.chat(messages, json_mode=True)
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+
+    if not isinstance(data, list):
+        return []
+
+    conflicts: list[dict] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        conflict_type = item.get("type", "no_conflict")
+        if conflict_type == "no_conflict":
+            continue
+        pair_index = item.get("pair_index", -1)
+        if not isinstance(pair_index, int) or pair_index < 0 or pair_index >= len(pairs):
+            continue
+        pair = pairs[pair_index]
+        conflicts.append({
+            "claim_a": pair["claim_a"],
+            "source_a": pair["source_a"],
+            "claim_b": pair["claim_b"],
+            "source_b": "",
+            "concept": pair["concept"],
+            "type": conflict_type,
+            "explanation": item.get("explanation", ""),
+            "resolution_hint": item.get("resolution_hint", ""),
+        })
+
+    return conflicts
+
+
 # ── Concept entry generation ──
 
 
@@ -701,6 +868,52 @@ async def compile_note(
             _save_concept_entry(concepts_dir, display_name, entry_content)
             result.concepts_created += 1
             all_aliases[display_name] = _generate_aliases(display_name)
+
+    try:
+        claims = await extract_claims(content, provider, language)
+        if claims:
+            from neocortex.config import load_claims, save_claims
+
+            all_claims = load_claims()
+
+            try:
+                conflicts = await detect_conflicts(claims, all_claims, provider, language)
+                if conflicts:
+                    for conflict in conflicts:
+                        conflict["source_b"] = note_path.name
+                    result.conflicts = conflicts
+
+                    from neocortex.config import load_belief_changes, save_belief_changes
+
+                    belief_changes = load_belief_changes()
+                    for conflict in conflicts:
+                        if conflict["type"] in ("temporal", "genuine"):
+                            belief_changes.append({
+                                "date": date.today().isoformat(),
+                                "concept": conflict.get("concept", ""),
+                                "from": conflict["claim_a"],
+                                "to": conflict["claim_b"],
+                                "trigger": conflict["source_b"],
+                                "type": conflict["type"],
+                            })
+                    if belief_changes:
+                        save_belief_changes(belief_changes)
+            except Exception:
+                pass
+
+            for c in claims:
+                concept_name = normalize_gap_name(c.get("concept", ""))
+                if not concept_name:
+                    continue
+                all_claims.setdefault(concept_name, []).append({
+                    "claim": c["claim"],
+                    "source": note_path.name,
+                    "date": date.today().isoformat(),
+                    "context": c.get("context", ""),
+                })
+            save_claims(all_claims)
+    except Exception:
+        pass
 
     new_content = insert_wikilinks(content, all_concept_names, all_aliases)
 

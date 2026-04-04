@@ -955,6 +955,53 @@ STRINGS: dict[str, dict[str, str]] = {
     "research_select": {"en": "Select articles to read", "zh": "选择要阅读的文章"},
     "research_select_nums": {"en": "Enter article numbers (e.g. 1 3 5), or Enter to skip", "zh": "输入文章编号（如 1 3 5），或回车跳过"},
     "research_done": {"en": "{count} notes generated from research!", "zh": "研究完成，生成了 {count} 篇笔记！"},
+
+    # ── Scan (quick read) ──
+    "scan_analyzing": {"en": "Quick scanning...", "zh": "正在快速扫描..."},
+    "scan_gaps": {"en": "Relevant gaps", "zh": "相关盲区"},
+
+    # ── Reflection ──
+    "reflect_title": {"en": "Quick Reflection", "zh": "快速反思"},
+    "reflect_surprise": {
+        "en": "What surprised you or contradicted your expectations?",
+        "zh": "这篇文章什么最让你意外，或与你的预期不同？",
+    },
+    "reflect_connection": {
+        "en": "How does this connect to {concept}?",
+        "zh": "这与 {concept} 有什么关系？",
+    },
+    "reflect_application": {
+        "en": "One specific thing you could apply to your work?",
+        "zh": "你能把哪个具体点用到自己的工作中？",
+    },
+    "reflect_skip_hint": {"en": "(Enter to skip)", "zh": "（回车跳过）"},
+    "reflect_saved": {"en": "Reflection saved", "zh": "反思已保存"},
+
+    # ── Claims / Conflicts ──
+    "conflict_detected": {"en": "Conflict detected", "zh": "检测到冲突"},
+    "conflict_temporal": {"en": "Outdated information", "zh": "信息过时"},
+    "conflict_contextual": {"en": "Context-dependent", "zh": "取决于上下文"},
+    "conflict_genuine": {"en": "Contradicting claims", "zh": "矛盾声明"},
+
+    # ── Weekly / Monthly Reflection ──
+    "reflect_weekly_title": {"en": "Weekly Reflection", "zh": "周度反思"},
+    "reflect_weekly_context": {
+        "en": "This week you studied: {topics}",
+        "zh": "本周你学习了：{topics}",
+    },
+    "reflect_weekly_synthesis": {
+        "en": "Across these articles, what's the biggest takeaway?",
+        "zh": "综合这些文章，最大的收获是什么？",
+    },
+    "reflect_weekly_update": {
+        "en": "Did anything change how you think about {gap}?",
+        "zh": "有什么改变了你对 {gap} 的看法吗？",
+    },
+    "reflect_monthly_generating": {
+        "en": "Generating monthly reflection...",
+        "zh": "正在生成月度反思...",
+    },
+    "reflect_monthly_title": {"en": "Monthly Reflection", "zh": "月度反思"},
 }
 
 

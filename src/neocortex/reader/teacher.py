@@ -432,6 +432,79 @@ Output pure Markdown. No JSON, no fences.
     return await provider.chat(messages)
 
 
+async def generate_scan_summary(
+    doc: Document,
+    profile: Profile,
+    provider: LLMProvider,
+) -> dict:
+    """Quick scan: 1-line summary + priority rating.
+
+    Returns ``{"summary": "...", "priority": "P0|P1|P2", "relevant_gaps": [...]}``.
+    """
+    lang_inst = _language_instruction(profile)
+
+    gap_names: list[str] = []
+    for domain_skill in profile.skills.domains.values():
+        gap_names.extend(domain_skill.gaps)
+    for int_skill in profile.skills.integrations.values():
+        gap_names.extend(int_skill.gaps)
+    gaps_str = ", ".join(gap_names[:30]) if gap_names else "(none)"
+
+    preview = doc.content[:2000] if doc.content else ""
+
+    prompt = f"""\
+You are a reading advisor who helps a developer decide what to read.
+
+The reader's knowledge gaps: {gaps_str}
+
+Article title: {doc.title}
+Article excerpt (first ~500 words):
+{preview}
+
+Evaluate this article for the reader. Output valid JSON with exactly these fields:
+{{
+  "summary": "One sentence describing the core value of this article for the reader",
+  "priority": "P0 or P1 or P2",
+  "relevant_gaps": ["gap1", "gap2"]
+}}
+
+Priority rules:
+- P0: Directly fills an active knowledge gap
+- P1: Related to gaps but not a direct fill
+- P2: Interesting but not urgent for the reader's growth
+
+relevant_gaps: list the reader's gaps that this article touches (use exact gap names from the list above). Empty list if none.
+
+{lang_inst}"""
+
+    messages = [{"role": "user", "content": prompt}]
+    response = await provider.chat(messages, json_mode=True)
+
+    try:
+        data = json.loads(response)
+    except json.JSONDecodeError:
+        start = response.find("{")
+        end = response.rfind("}") + 1
+        if start >= 0 and end > start:
+            try:
+                data = json.loads(response[start:end])
+            except json.JSONDecodeError:
+                return {"summary": doc.title, "priority": "P2", "relevant_gaps": []}
+        else:
+            return {"summary": doc.title, "priority": "P2", "relevant_gaps": []}
+
+    result: dict = {
+        "summary": data.get("summary", doc.title),
+        "priority": data.get("priority", "P2"),
+        "relevant_gaps": data.get("relevant_gaps", []),
+    }
+    if result["priority"] not in ("P0", "P1", "P2"):
+        result["priority"] = "P2"
+    if not isinstance(result["relevant_gaps"], list):
+        result["relevant_gaps"] = []
+    return result
+
+
 def _build_anatomy_prompt(doc: Document, profile: Profile) -> str:
     """Build a prompt for deep concept anatomy (8 dimensions)."""
     lang_inst = _language_instruction(profile)

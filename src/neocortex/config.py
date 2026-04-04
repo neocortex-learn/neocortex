@@ -330,6 +330,32 @@ def save_feed_history(history: dict[str, str]) -> None:
     _save_json("feed_history.json", history)
 
 
+def load_claims() -> dict[str, list[dict]]:
+    """Load claims grouped by concept name."""
+    raw = _load_json("claims.json", default={})
+    if not isinstance(raw, dict):
+        return {}
+    return raw
+
+
+def save_claims(claims: dict[str, list[dict]]) -> None:
+    """Save claims."""
+    _save_json("claims.json", claims)
+
+
+def load_belief_changes() -> list[dict]:
+    """Load belief change history."""
+    raw = _load_json("belief_changes.json", default=[])
+    if not isinstance(raw, list):
+        return []
+    return raw
+
+
+def save_belief_changes(changes: list[dict]) -> None:
+    """Save belief change history."""
+    _save_json("belief_changes.json", changes)
+
+
 def filter_known_gaps(profile: Profile) -> None:
     """Remove gaps already marked as known from profile. Called after scan."""
     progress = load_gap_progress()

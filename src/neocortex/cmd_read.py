@@ -24,6 +24,7 @@ from neocortex.models import Language, Profile, TopicRead
 @app.command()
 def read(
     source: str = typer.Argument(..., help="URL, PDF, or file path"),
+    scan: bool = typer.Option(False, "--scan", help="Quick scan: 1-line summary + priority rating"),
     focus: str = typer.Option(None, help="Focus topic"),
     question: str = typer.Option(None, help="Question to answer"),
     audio: bool = typer.Option(False, "--audio", help="Generate audio version"),
@@ -52,6 +53,22 @@ def read(
 
         with console.status(f"  {t('read_fetching', lang)}"):
             doc = await fetcher.fetch(source)
+
+        if scan:
+            with console.status(f"  {t('scan_analyzing', lang)}"):
+                from neocortex.reader.teacher import generate_scan_summary
+
+                result = await generate_scan_summary(doc, prof, provider)
+
+            console.print()
+            priority_colors = {"P0": "red bold", "P1": "yellow", "P2": "dim"}
+            style = priority_colors.get(result.get("priority", "P2"), "dim")
+            console.print(f"  [{style}]{result.get('priority', 'P2')}[/{style}] {result.get('summary', doc.title)}")
+            if result.get("relevant_gaps"):
+                gaps_str = ", ".join(result["relevant_gaps"][:5])
+                console.print(f"  [dim]{t('scan_gaps', lang)}: {gaps_str}[/dim]")
+            console.print()
+            return
 
         with console.status(f"  {t('analyzing', lang)}"):
             outline = await generate_outline(doc, prof, provider)
@@ -204,6 +221,16 @@ def read(
                 compile_result = await compile_note(note_path, notes_dir, prof, provider, lang)
             if compile_result.concepts_created + compile_result.concepts_updated > 0:
                 console.print(f"  [green]{t('compile_done', lang, created=str(compile_result.concepts_created), updated=str(compile_result.concepts_updated))}[/green]")
+            if compile_result.conflicts:
+                for conflict in compile_result.conflicts:
+                    conflict_type = conflict.get("type", "genuine")
+                    type_key = f"conflict_{conflict_type}"
+                    type_label = t(type_key, lang)
+                    console.print(f"  [yellow]\u26a1 {t('conflict_detected', lang)}: {type_label}[/yellow]")
+                    console.print(f"    {conflict.get('explanation', '')}")
+                    hint = conflict.get("resolution_hint", "")
+                    if hint:
+                        console.print(f"    [dim]{hint}[/dim]")
         except Exception:
             pass
 
@@ -232,6 +259,11 @@ def read(
         _match_and_update_recommendations(lang, prof, source, doc.title, str(note_path))
 
         _collect_feedback(lang, prof, source, doc.title, focus, note_path)
+
+        import random
+
+        if random.random() < 0.4:
+            _collect_reflection(lang, prof, note_path, provider)
 
     asyncio.run(_run_read())
 
@@ -346,3 +378,110 @@ def _collect_feedback(
         freq[normalized_focus] = freq.get(normalized_focus, 0) + 1
 
     save_profile(prof)
+
+
+def _collect_reflection(
+    lang: Language,
+    prof: Profile,
+    note_path: Path,
+    provider: object,
+) -> None:
+    """Collect 3 structured micro-reflection prompts after reading."""
+    from neocortex.compiler import collect_all_concepts
+    from neocortex.config import get_notes_dir
+
+    notes_dir = get_notes_dir()
+    concepts = collect_all_concepts(notes_dir / "concepts")
+    concept_name: str | None = None
+    if concepts:
+        import random as _rand
+
+        concept_name = _rand.choice(concepts).name
+
+    console.print()
+    console.print(f"  [bold]{t('reflect_title', lang)}[/bold]")
+    console.print()
+
+    skip_hint = f" [dim]{t('reflect_skip_hint', lang)}[/dim]"
+
+    surprise = Prompt.ask(
+        f"  [bold]1.[/bold] {t('reflect_surprise', lang)}{skip_hint}",
+        default="",
+        console=console,
+    )
+
+    if concept_name:
+        connection_prompt = t("reflect_connection", lang, concept=concept_name)
+    else:
+        connection_prompt = t("reflect_connection", lang, concept="your prior knowledge")
+    connection = Prompt.ask(
+        f"  [bold]2.[/bold] {connection_prompt}{skip_hint}",
+        default="",
+        console=console,
+    )
+
+    application = Prompt.ask(
+        f"  [bold]3.[/bold] {t('reflect_application', lang)}{skip_hint}",
+        default="",
+        console=console,
+    )
+
+    reflection: dict[str, str] = {}
+    if surprise.strip():
+        reflection["surprise"] = surprise.strip()
+    if connection.strip():
+        reflection["connection"] = connection.strip()
+    if application.strip():
+        reflection["application"] = application.strip()
+
+    if not reflection:
+        return
+
+    _write_reflection_to_frontmatter(note_path, reflection)
+    console.print(f"  [green]{t('reflect_saved', lang)}[/green]")
+    console.print()
+
+
+def _write_reflection_to_frontmatter(note_path: Path, reflection: dict[str, str]) -> None:
+    """Insert a ``reflection`` block into the note's YAML frontmatter."""
+    import os
+    import tempfile
+
+    content = note_path.read_text(encoding="utf-8")
+    lines = content.split("\n")
+
+    end_idx: int | None = None
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                end_idx = i
+                break
+
+    if end_idx is None:
+        return
+
+    if not reflection:
+        return
+
+    reflection_lines: list[str] = ["reflection:"]
+    for key in ("surprise", "connection", "application"):
+        if key in reflection:
+            escaped = reflection[key].replace('"', '\\"')
+            reflection_lines.append(f'  {key}: "{escaped}"')
+
+    new_lines = lines[:end_idx] + reflection_lines + lines[end_idx:]
+    new_content = "\n".join(new_lines)
+
+    fd, tmp_path = tempfile.mkstemp(dir=str(note_path.parent), suffix=".tmp")
+    closed = False
+    try:
+        os.write(fd, new_content.encode("utf-8"))
+        os.close(fd)
+        closed = True
+        os.replace(tmp_path, str(note_path))
+    except Exception:
+        if not closed:
+            os.close(fd)
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
