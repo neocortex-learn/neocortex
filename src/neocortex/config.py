@@ -15,16 +15,16 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from typing import Any
 
-from neocortex.models import AppConfig, Flashcard, GapProgress, Profile, RecommendationRecord
+from neocortex.models import AppConfig, Clip, Flashcard, GapProgress, Profile, RecommendationRecord
 
 _ENC_PREFIX = "enc:"
 _SALT = b"neocortex-api-key-salt"
 
 
 def _get_machine_fingerprint() -> str:
-    mac = uuid.getnode()
     hostname = socket.gethostname()
-    return f"{mac:012x}-{hostname}"
+    username = os.environ.get("USER", os.environ.get("USERNAME", "default"))
+    return f"{username}@{hostname}"
 
 
 def _derive_fernet_key() -> bytes:
@@ -354,6 +354,138 @@ def load_belief_changes() -> list[dict]:
 def save_belief_changes(changes: list[dict]) -> None:
     """Save belief change history."""
     _save_json("belief_changes.json", changes)
+
+
+def load_clips(notes_dir: Path) -> list[Clip]:
+    """Load all clips from clips/ directory."""
+    clips_dir = notes_dir / "clips"
+    if not clips_dir.exists():
+        return []
+    clips: list[Clip] = []
+    for f in sorted(clips_dir.glob("*.md")):
+        clip = _parse_clip_file(f)
+        if clip:
+            clips.append(clip)
+    return clips
+
+
+def _parse_clip_file(path: Path) -> Clip | None:
+    """Parse a clip markdown file into a Clip object."""
+    import re
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    fm_match = re.match(r"^---\n(.*?)\n---\n?(.*)", text, re.DOTALL)
+    if not fm_match:
+        return None
+
+    fm_text = fm_match.group(1)
+    content = fm_match.group(2).strip()
+
+    fields: dict[str, str | list[str]] = {}
+    for line in fm_text.splitlines():
+        if ":" not in line:
+            continue
+        key, _, val = line.partition(":")
+        key = key.strip()
+        val = val.strip()
+        if val.startswith("[") and val.endswith("]"):
+            items = [item.strip().strip('"').strip("'") for item in val[1:-1].split(",") if item.strip()]
+            fields[key] = items
+        else:
+            fields[key] = val.strip('"').strip("'")
+
+    clip_id = fields.get("id", "")
+    if not clip_id or not isinstance(clip_id, str):
+        return None
+
+    def _str(k: str, default: str = "") -> str:
+        v = fields.get(k, default)
+        return v if isinstance(v, str) else default
+
+    def _list(k: str) -> list[str]:
+        v = fields.get(k, [])
+        return v if isinstance(v, list) else []
+
+    def _opt_str(k: str) -> str | None:
+        v = fields.get(k)
+        if v is None or v == "" or v == "null":
+            return None
+        return v if isinstance(v, str) else None
+
+    return Clip(
+        id=clip_id,
+        source=_str("source", "manual"),
+        content=content,
+        title=_str("title"),
+        clip_type=_str("clip_type", "thought"),
+        auto_tags=_list("auto_tags"),
+        related_concepts=_list("related_concepts"),
+        status=_str("status", "inbox"),
+        summary=_str("summary"),
+        relevance=_str("relevance"),
+        priority=_str("priority"),
+        topic=_str("topic"),
+        created_at=_str("created_at"),
+        processed_at=_opt_str("processed_at"),
+        promoted_to=_opt_str("promoted_to"),
+        next_surface=_str("next_surface"),
+        surface_count=int(_str("surface_count", "0") or "0"),
+    )
+
+
+def save_clip(notes_dir: Path, clip: Clip) -> Path:
+    """Save a clip as markdown file. Returns the file path."""
+    import re
+    import tempfile
+    clips_dir = notes_dir / "clips"
+    clips_dir.mkdir(parents=True, exist_ok=True)
+
+    date_prefix = clip.created_at or "undated"
+    slug = re.sub(r"[^\w\s-]", "", clip.title or clip.id)
+    slug = re.sub(r"[\s_]+", "-", slug).strip("-").lower()[:50]
+    filename = f"{date_prefix}-{slug}.md" if slug else f"{date_prefix}-{clip.id}.md"
+
+    tags_str = "[" + ", ".join(f'"{t}"' for t in clip.auto_tags) + "]" if clip.auto_tags else "[]"
+    concepts_str = "[" + ", ".join(f'"{c}"' for c in clip.related_concepts) + "]" if clip.related_concepts else "[]"
+
+    frontmatter_lines = [
+        "---",
+        f"id: {clip.id}",
+        f"source: {clip.source}",
+        f"title: {clip.title}",
+        f"clip_type: {clip.clip_type}",
+        f"auto_tags: {tags_str}",
+        f"related_concepts: {concepts_str}",
+        f"status: {clip.status}",
+        f"summary: {clip.summary}",
+        f"relevance: {clip.relevance}",
+        f"priority: {clip.priority}",
+        f"topic: {clip.topic}",
+        f"created_at: {clip.created_at}",
+        f"processed_at: {clip.processed_at or ''}",
+        f"promoted_to: {clip.promoted_to or ''}",
+        f"next_surface: {clip.next_surface}",
+        f"surface_count: {clip.surface_count}",
+        "---",
+    ]
+    md_content = "\n".join(frontmatter_lines) + "\n\n" + clip.content
+
+    path = clips_dir / filename
+    fd, tmp_path = tempfile.mkstemp(dir=str(clips_dir), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(md_content)
+        os.replace(tmp_path, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    return path
 
 
 def filter_known_gaps(profile: Profile) -> None:

@@ -372,3 +372,25 @@ class LintReport(BaseModel):
     score: int = 100
     issues: list[LintIssue] = Field(default_factory=list)
     stats: dict[str, int] = Field(default_factory=dict)
+
+
+# ── Clip ──
+
+class Clip(BaseModel):
+    id: str
+    source: str
+    content: str
+    title: str = ""
+    clip_type: str = "thought"
+    auto_tags: list[str] = Field(default_factory=list)
+    related_concepts: list[str] = Field(default_factory=list)
+    status: str = "inbox"
+    summary: str = ""
+    relevance: str = ""
+    priority: str = ""
+    topic: str = ""
+    created_at: str = ""
+    processed_at: str | None = None
+    promoted_to: str | None = None
+    next_surface: str = ""
+    surface_count: int = 0

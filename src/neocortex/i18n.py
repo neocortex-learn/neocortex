@@ -1002,6 +1002,60 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "正在生成月度反思...",
     },
     "reflect_monthly_title": {"en": "Monthly Reflection", "zh": "月度反思"},
+
+    # ── Clip ──
+    "clip_saved": {"en": "Clipped!", "zh": "已捕获！"},
+    "clip_summary": {"en": "Summary", "zh": "归纳"},
+    "clip_related": {"en": "Related", "zh": "关联"},
+    "clip_relevance": {"en": "For you", "zh": "对你"},
+    "clip_topic": {"en": "Topic", "zh": "分类"},
+    "clip_fetching": {"en": "Fetching content...", "zh": "正在获取内容..."},
+    "clip_processing": {"en": "Processing...", "zh": "正在处理..."},
+    "clip_empty": {"en": "Nothing to clip.", "zh": "没有可捕获的内容。"},
+
+    # ── Inbox ──
+    "inbox_title": {"en": "Inbox", "zh": "收件箱"},
+    "inbox_empty": {"en": "Inbox is empty!", "zh": "收件箱为空！"},
+    "inbox_count": {"en": "{count} items in inbox", "zh": "收件箱中有 {count} 条"},
+    "inbox_keep": {"en": "Kept as reference", "zh": "已保留为参考"},
+    "inbox_deleted": {"en": "Archived", "zh": "已归档"},
+    "inbox_promoted": {
+        "en": "Promoted — run: neocortex read {url}",
+        "zh": "已升级 — 运行：neocortex read {url}",
+    },
+    "inbox_auto_done": {"en": "Processed {count} clips", "zh": "已处理 {count} 条碎片"},
+    "inbox_synthesize_done": {
+        "en": "Synthesized {count} clusters into notes",
+        "zh": "已将 {count} 个聚类综合为笔记",
+    },
+    "inbox_no_clusters": {
+        "en": "No clusters found (need 3+ clips per concept)",
+        "zh": "未发现聚类（需要同一概念 3+ 条碎片）",
+    },
+
+    # ── Daily ──
+    "daily_title": {"en": "Daily Briefing", "zh": "今日浮现"},
+    "daily_empty": {
+        "en": "Nothing to surface today. Keep clipping!",
+        "zh": "今天没有浮现内容。继续收藏吧！",
+    },
+    "daily_ago": {"en": "{days} days ago", "zh": "{days} 天前"},
+    "daily_absorbed": {
+        "en": "Absorbed — covered by your notes",
+        "zh": "已吸收 — 已被你的笔记覆盖",
+    },
+    "daily_suggest_read": {
+        "en": "Consider: neocortex read to go deeper",
+        "zh": "建议：neocortex read 深入了解",
+    },
+    "daily_flashcards": {
+        "en": "{count} flashcards due for review",
+        "zh": "{count} 张闪卡待复习",
+    },
+    "daily_cluster": {
+        "en": "Cluster: {count} clips about [[{concept}]]",
+        "zh": "聚类：{count} 条碎片关于 [[{concept}]]",
+    },
 }
 
 
