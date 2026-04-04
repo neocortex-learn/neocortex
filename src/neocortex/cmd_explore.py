@@ -112,7 +112,8 @@ def explore(
         selected_set = set(selected)
         notes_dir = get_notes_dir()
 
-        unselected = [r for r in results if r["url"] not in selected_set]
+        # 只存 P0 和 P1 的未选中文章为 clip，P2 不存（太多了）
+        unselected = [r for r in results if r["url"] not in selected_set and r["priority"] in ("P0", "P1")]
         if unselected:
             today = date.today()
             for r in unselected:

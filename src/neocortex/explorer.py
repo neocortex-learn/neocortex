@@ -183,7 +183,12 @@ async def batch_scan_articles(
     if not articles:
         return "", []
 
-    prompt = _build_prompt(articles, profile, language)
+    # 文章太多时截断，避免超出 LLM 上下文
+    max_articles = 50
+    truncated = len(articles) > max_articles
+    scan_articles = articles[:max_articles]
+
+    prompt = _build_prompt(scan_articles, profile, language)
 
     try:
         raw = await provider.chat(
@@ -200,7 +205,7 @@ async def batch_scan_articles(
                 "priority": "P1",
                 "reason": "",
             }
-            for i, a in enumerate(articles)
+            for i, a in enumerate(scan_articles)
         ]
         return "", results
 
@@ -216,12 +221,12 @@ async def batch_scan_articles(
             continue
         if isinstance(idx, str) and idx.isdigit():
             idx = int(idx)
-        if not isinstance(idx, int) or idx < 0 or idx >= len(articles):
+        if not isinstance(idx, int) or idx < 0 or idx >= len(scan_articles):
             continue
         index_map[idx] = item
 
     results: list[dict] = []
-    for i, a in enumerate(articles):
+    for i, a in enumerate(scan_articles):
         llm_item = index_map.get(i, {})
         priority = llm_item.get("priority", "P1")
         if priority not in ("P0", "P1", "P2"):
