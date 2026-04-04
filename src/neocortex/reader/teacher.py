@@ -206,6 +206,7 @@ Content requirements:
 3. Expand on the reader's knowledge gaps (the "gaps" in their profile)
 4. If this is a deep-dive section, include Action Items: specific, actionable improvements for the reader's own projects
 5. Keep difficulty at the reader's current level +1 to +2 — stretch but don't overwhelm
+6. NEVER describe or summarize the reader's profile back to them — they know who they are. The profile is for YOUR reference only, to calibrate depth and choose analogies. Do not start with "As a full-stack developer with 5+ years..." or any similar introduction
 
 Writing principles (non-negotiable):
 - Colloquial test: would you explain it this way to a friend? If not, rewrite
