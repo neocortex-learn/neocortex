@@ -1,6 +1,6 @@
 # Neocortex 命令速查
 
-> 26 个命令，覆盖从一条推文到一本书的完整学习流程。
+> 27 个命令，覆盖从一条推文到一本书的完整学习流程。
 > 安装：`pip install neocortex-ai`（开发中用 `pip install -e .`）
 
 ---
@@ -125,6 +125,22 @@ neocortex research "微服务 vs 单体 架构决策" --count 8
 ```
 
 不需要 API key，用 DuckDuckGo 搜索。
+
+---
+
+### `neocortex explore` — 扫描作者/站点
+
+发现一个好作者？一键扫描他的所有文章，按你的技能盲区排优先级。AI 替你选，不替你读。
+
+```bash
+# 扫描一个博客的归档页
+neocortex explore https://yage.ai/archives.html
+
+# 扫描任何有文章列表的页面
+neocortex explore https://someone.com/blog
+```
+
+**流程**：抓取文章列表 → LLM 批量评估优先级（P0/P1/P2）→ 按优先级分组展示 → 你选择要读哪些 → 其余存为 clip。
 
 ---
 
@@ -370,6 +386,7 @@ neocortex clip https://...        # 存个链接
 neocortex inbox                   # 看看积累了哪些碎片
 neocortex read <url>              # 挑一篇深入读
 neocortex research "某个主题"     # 或者让系统帮你找
+neocortex explore <archive-url>   # 发现好作者？扫描他所有文章
 ```
 
 ### 周末复盘
