@@ -1056,6 +1056,20 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Cluster: {count} clips about [[{concept}]]",
         "zh": "聚类：{count} 条碎片关于 [[{concept}]]",
     },
+
+    # ── Explore ──
+    "explore_title": {"en": "Explore", "zh": "站点探索"},
+    "explore_fetching": {"en": "Fetching article list...", "zh": "正在获取文章列表..."},
+    "explore_found": {"en": "Found {count} articles", "zh": "发现 {count} 篇文章"},
+    "explore_scanning": {"en": "Scanning and ranking...", "zh": "正在扫描排序..."},
+    "explore_no_articles": {"en": "No articles found on this page.", "zh": "未在页面上找到文章。"},
+    "explore_select": {"en": "Select articles to read", "zh": "选择要阅读的文章"},
+    "explore_select_nums": {
+        "en": "Enter article numbers (e.g. 1 3 5), or Enter to skip",
+        "zh": "输入文章编号（如 1 3 5），或回车跳过",
+    },
+    "explore_saved_clips": {"en": "{count} other articles saved as clips", "zh": "其他 {count} 篇已存为碎片"},
+    "explore_read_hint": {"en": "Run these commands to read:", "zh": "运行以下命令阅读："},
 }
 
 

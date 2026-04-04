@@ -558,3 +558,4 @@ import neocortex.cmd_feed  # noqa: F401, E402
 import neocortex.cmd_research  # noqa: F401, E402
 import neocortex.cmd_clip  # noqa: F401, E402
 import neocortex.cmd_daily  # noqa: F401, E402
+import neocortex.cmd_explore  # noqa: F401, E402
