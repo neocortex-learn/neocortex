@@ -18,14 +18,14 @@ from neocortex.cli import (
     _format_lines,
     _get_lang,
     _skill_bar,
-    app,
     console,
+    profile_app,
     smart_output,
 )
 from neocortex.i18n import t
 
 
-@app.command()
+@profile_app.command()
 def scan(
     paths: list[str] = typer.Argument(None, help="Local project paths to scan"),
     github: str = typer.Option(None, "--github", help="GitHub username or user/repo to scan"),
@@ -205,13 +205,16 @@ def scan(
     asyncio.run(_run_scan())
 
 
-@app.command()
+@profile_app.callback(invoke_without_command=True)
 def profile(
+    ctx: typer.Context,
     export: str = typer.Option(None, help="Export profile to file"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
     edit: bool = typer.Option(False, "--edit", help="Open profile in editor"),
 ) -> None:
     """View, export, or edit your skill profile."""
+    if ctx.invoked_subcommand is not None:
+        return
     from neocortex.config import load_profile, get_data_dir
 
     if edit:

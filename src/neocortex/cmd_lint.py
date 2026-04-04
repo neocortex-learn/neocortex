@@ -6,11 +6,11 @@ import asyncio
 
 import typer
 
-from neocortex.cli import app, console
+from neocortex.cli import console, kb_app
 from neocortex.i18n import t
 
 
-@app.command()
+@kb_app.command()
 def lint(
     fix: bool = typer.Option(False, "--fix", help="Auto-fix issues"),
 ) -> None:

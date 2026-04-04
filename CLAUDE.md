@@ -26,18 +26,33 @@ neocortex --help          # 查看 CLI 帮助
 - CLI 命令内部用延迟导入（在函数内 import）
 - 测试用 pytest，async 测试用 @pytest.mark.asyncio + AsyncMock
 
+## CLI 命令结构
+```
+顶层命令（6 个）：read, ask (--chat), review, clip, inbox, daily
+子命令组：
+  kb:       notes, card, compile, lint, map
+  discover: explore, research, feed
+  learn:    recommend (--plan), digest, opportunities
+  profile:  init, config, scan, import, 默认（查看画像）
+```
+
 ## 目录结构
 ```
 src/neocortex/
-├── cli.py          # CLI 入口，共享工具，init/config 命令
-├── cmd_scan.py     # scan + profile 命令
-├── cmd_read.py     # read + 匹配 + 反馈
-├── cmd_learn.py    # recommend + plan + growth + converge + opportunities
-├── cmd_knowledge.py # notes + card + index + ask + chat + review
-├── cmd_import.py   # import 命令
-├── cmd_compile.py  # compile 命令（概念编译）
-├── cmd_lint.py     # lint 命令（知识库健康检查）
-├── cmd_visualize.py # map + digest 命令（概念图、学习周报）
+├── cli.py          # CLI 入口，app + 4 个子 app（kb/discover/learn/profile）
+├── cmd_scan.py     # profile 组：scan + profile（callback）
+├── cmd_read.py     # 顶层：read + 匹配 + 反馈
+├── cmd_learn.py    # learn 组：recommend (--plan) + opportunities；保留 growth/converge 函数
+├── cmd_knowledge.py # 顶层：ask (--chat) + review；kb 组：notes + card
+├── cmd_import.py   # profile 组：import 命令
+├── cmd_compile.py  # kb 组：compile（概念编译）
+├── cmd_lint.py     # kb 组：lint（知识库健康检查）
+├── cmd_visualize.py # kb 组：map；learn 组：digest
+├── cmd_clip.py     # 顶层：clip + inbox
+├── cmd_daily.py    # 顶层：daily
+├── cmd_explore.py  # discover 组：explore
+├── cmd_research.py # discover 组：research
+├── cmd_feed.py     # discover 组：feed
 ├── compiler.py     # 概念编译引擎（提取、生成、wikilink、索引、语义链接）
 ├── reviewer.py     # SM-2 间隔复习调度引擎
 ├── linter.py       # 知识库健康检查（孤岛、断链、覆盖盲区等 6 项）

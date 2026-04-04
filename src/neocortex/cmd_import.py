@@ -7,11 +7,11 @@ from pathlib import Path
 
 import typer
 
-from neocortex.cli import app, console
+from neocortex.cli import console, profile_app
 from neocortex.i18n import t
 
 
-@app.command("import")
+@profile_app.command("import")
 def import_data(
     path: str = typer.Argument(None, help="Path to export file/directory"),
     source: str = typer.Option(None, help="Source: chatgpt or claude"),

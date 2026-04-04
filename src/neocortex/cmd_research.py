@@ -6,11 +6,11 @@ import asyncio
 
 import typer
 
-from neocortex.cli import _get_lang, app, console
+from neocortex.cli import _get_lang, console, discover_app
 from neocortex.i18n import t
 
 
-@app.command()
+@discover_app.command()
 def research(
     topic: str = typer.Argument(..., help="Topic or question to research"),
     count: int = typer.Option(5, help="Max articles to show"),

@@ -8,11 +8,11 @@ from datetime import date, timedelta
 
 import typer
 
-from neocortex.cli import _get_lang, app, console
+from neocortex.cli import _get_lang, console, discover_app
 from neocortex.i18n import t
 
 
-@app.command()
+@discover_app.command()
 def explore(
     url: str = typer.Argument(..., help="Archive/blog page URL"),
     no_read: bool = typer.Option(False, "--no-read", help="Skip showing read commands"),

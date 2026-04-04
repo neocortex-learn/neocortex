@@ -16,12 +16,13 @@ from neocortex.cli import (
     _open_file,
     app,
     console,
+    kb_app,
 )
 from neocortex.i18n import t
 from neocortex.models import Language
 
 
-@app.command()
+@kb_app.command()
 def notes(
     search: str = typer.Option(None, help="Search notes"),
     open_note: bool = typer.Option(False, "--open", help="Open matched note in editor"),
@@ -115,7 +116,7 @@ def notes(
         _open_file(md_files[0], lang)
 
 
-@app.command()
+@kb_app.command()
 def card(
     note_path: str = typer.Argument(None, help="Path to note file (default: latest note)"),
     theme: str = typer.Option("dark", help="Theme: dark or light"),
@@ -173,7 +174,6 @@ def card(
         console.print(f"  [dim]{t('card_install_playwright', lang)}[/dim]")
 
 
-@app.command()
 def index() -> None:
     """Build or rebuild the note search index (FTS5 + embeddings)."""
     from neocortex.config import get_data_dir, get_notes_dir
@@ -197,10 +197,19 @@ def index() -> None:
 
 @app.command()
 def ask(
-    question: str = typer.Argument(..., help="Your question"),
+    question: str = typer.Argument(None, help="Your question"),
+    chat: bool = typer.Option(False, "--chat", help="Start multi-turn chat"),
     save: bool = typer.Option(False, "--save", help="Save answer to knowledge base"),
 ) -> None:
-    """Ask a question with your skill profile as context."""
+    """Ask a question (or start a chat session with --chat)."""
+    if chat:
+        _run_chat()
+        return
+
+    if not question:
+        console.print("  Usage: neocortex ask <question> or neocortex ask --chat")
+        raise typer.Exit(1)
+
     from neocortex.config import get_notes_dir, load_config, load_profile
     from neocortex.llm import create_provider
     from neocortex.asker import ask_question
@@ -263,8 +272,7 @@ def ask(
             pass
 
 
-@app.command()
-def chat() -> None:
+def _run_chat() -> None:
     """Start an interactive multi-turn Q&A session with your profile as context."""
     from rich.markdown import Markdown
 

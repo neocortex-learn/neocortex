@@ -11,7 +11,7 @@ from pathlib import Path
 import typer
 from rich.prompt import Prompt
 
-from neocortex.cli import _get_lang, app, console
+from neocortex.cli import _get_lang, console, kb_app, learn_app
 from neocortex.i18n import t
 
 
@@ -36,7 +36,7 @@ def _node_style(slug: str, evidence_count: int) -> str:
     return f"    style {slug} fill:#555,color:#fff"
 
 
-@app.command()
+@kb_app.command()
 def map(
     domain: str = typer.Option(None, help="Filter by domain"),
     around: str = typer.Option(None, help="Show neighborhood of a concept"),
@@ -223,7 +223,7 @@ async def _generate_monthly_reflection(
     return await provider.chat(messages)
 
 
-@app.command()
+@learn_app.command()
 def digest(
     days: int = typer.Option(7, help="Period in days"),
 ) -> None:

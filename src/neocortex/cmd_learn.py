@@ -11,17 +11,22 @@ from pathlib import Path
 import typer
 from rich.prompt import Prompt
 
-from neocortex.cli import _get_lang, app, console
+from neocortex.cli import _get_lang, app, console, learn_app
 from neocortex.i18n import t
 from neocortex.models import Language
 
 
-@app.command()
+@learn_app.command()
 def recommend(
     count: int = typer.Option(5, help="Number of recommendations"),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+    plan: bool = typer.Option(False, "--plan", help="Generate detailed learning plan"),
+    weeks: int = typer.Option(4, help="Number of weeks (with --plan)"),
 ) -> None:
-    """Get personalized learning recommendations based on your profile."""
+    """Get personalized learning recommendations (or a plan with --plan)."""
+    if plan:
+        _run_plan(weeks)
+        return
     from uuid import uuid4
 
     from neocortex.config import (
@@ -195,9 +200,8 @@ def recommend(
     console.print()
 
 
-@app.command()
-def plan(
-    weeks: int = typer.Option(4, help="Number of weeks"),
+def _run_plan(
+    weeks: int = 4,
 ) -> None:
     """Generate a personalized learning plan."""
     from neocortex.config import get_data_dir, get_notes_dir, load_config, load_profile
@@ -257,7 +261,6 @@ def plan(
             pass
 
 
-@app.command()
 def growth(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
@@ -354,7 +357,6 @@ def growth(
     console.print()
 
 
-@app.command()
 def converge(
     weekly: bool = typer.Option(False, "--weekly", help="Force weekly scope"),
     monthly: bool = typer.Option(False, "--monthly", help="Force monthly scope"),
@@ -414,7 +416,7 @@ def converge(
         html_path.write_text(html, encoding="utf-8")
 
 
-@app.command()
+@learn_app.command()
 def opportunities(
     opp_type: str = typer.Option("oss", "--type", help="Type: oss or job"),
     fetch: bool = typer.Option(True, help="Fetch fresh data from APIs"),

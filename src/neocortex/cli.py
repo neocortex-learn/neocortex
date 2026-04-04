@@ -31,6 +31,16 @@ from neocortex.models import (
 app = typer.Typer(help="Neocortex — AI-powered developer learning assistant")
 console = Console()
 
+kb_app = typer.Typer(help="Knowledge base management")
+discover_app = typer.Typer(help="Content discovery")
+learn_app = typer.Typer(help="Learning path & progress")
+profile_app = typer.Typer(help="Profile management")
+
+app.add_typer(kb_app, name="kb")
+app.add_typer(discover_app, name="discover")
+app.add_typer(learn_app, name="learn")
+app.add_typer(profile_app, name="profile")
+
 LEVEL_PROGRESS: dict[SkillLevel, tuple[int, str]] = {
     SkillLevel.BEGINNER: (4, "level_beginner"),
     SkillLevel.PROFICIENT: (10, "level_proficient"),
@@ -264,7 +274,7 @@ def _open_file(path: Path, lang: Language) -> None:
         console.print(f"  [dim]{str(path)}[/dim]")
 
 
-@app.command()
+@profile_app.command()
 def init() -> None:
     """First-time setup: role, experience, goals, language."""
     from neocortex.config import load_config, load_profile, save_config, save_profile
@@ -483,7 +493,7 @@ def init() -> None:
     console.print()
 
 
-@app.command()
+@profile_app.command()
 def config(
     provider: str = typer.Option(None, help="LLM provider"),
     api_key: str = typer.Option(None, help="API key"),
@@ -546,16 +556,16 @@ def config(
 
 
 # Register commands from submodules
-import neocortex.cmd_scan  # noqa: F401, E402
-import neocortex.cmd_read  # noqa: F401, E402
-import neocortex.cmd_learn  # noqa: F401, E402
-import neocortex.cmd_knowledge  # noqa: F401, E402
-import neocortex.cmd_import  # noqa: F401, E402
-import neocortex.cmd_compile  # noqa: F401, E402
-import neocortex.cmd_lint  # noqa: F401, E402
-import neocortex.cmd_visualize  # noqa: F401, E402
-import neocortex.cmd_feed  # noqa: F401, E402
-import neocortex.cmd_research  # noqa: F401, E402
-import neocortex.cmd_clip  # noqa: F401, E402
-import neocortex.cmd_daily  # noqa: F401, E402
-import neocortex.cmd_explore  # noqa: F401, E402
+import neocortex.cmd_scan  # noqa: F401, E402  (profile group)
+import neocortex.cmd_read  # noqa: F401, E402  (top-level)
+import neocortex.cmd_learn  # noqa: F401, E402  (learn group)
+import neocortex.cmd_knowledge  # noqa: F401, E402  (kb group + top-level)
+import neocortex.cmd_import  # noqa: F401, E402  (profile group)
+import neocortex.cmd_compile  # noqa: F401, E402  (kb group)
+import neocortex.cmd_lint  # noqa: F401, E402  (kb group)
+import neocortex.cmd_visualize  # noqa: F401, E402  (kb + learn groups)
+import neocortex.cmd_feed  # noqa: F401, E402  (discover group)
+import neocortex.cmd_research  # noqa: F401, E402  (discover group)
+import neocortex.cmd_clip  # noqa: F401, E402  (top-level)
+import neocortex.cmd_daily  # noqa: F401, E402  (top-level)
+import neocortex.cmd_explore  # noqa: F401, E402  (discover group)

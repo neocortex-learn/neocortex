@@ -7,11 +7,11 @@ import asyncio
 import typer
 from rich.table import Table
 
-from neocortex.cli import _get_lang, app, console
+from neocortex.cli import _get_lang, console, discover_app
 from neocortex.i18n import t
 
 
-@app.command()
+@discover_app.command()
 def feed(
     add: str = typer.Option(None, help="Add a new RSS feed URL"),
     remove: str = typer.Option(None, help="Remove a feed by URL"),

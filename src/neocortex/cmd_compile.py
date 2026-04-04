@@ -6,11 +6,11 @@ import asyncio
 
 import typer
 
-from neocortex.cli import _get_lang, app, console
+from neocortex.cli import _get_lang, console, kb_app
 from neocortex.i18n import t
 
 
-@app.command()
+@kb_app.command()
 def compile(
     full: bool = typer.Option(False, "--full", help="Full recompilation (ignore cache)"),
 ) -> None:
