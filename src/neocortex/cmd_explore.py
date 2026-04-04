@@ -72,7 +72,17 @@ def explore(
             console.print(f"  [dim]{author_overview}[/dim]")
         console.print()
 
-        # 用排序后的位置编号显示（1-based），保证输入和显示一致
+        # 过滤掉被标记为跳过的结果（中英文重复等）
+        skip_words = ("跳过", "skip", "duplicate", "重复", "英文版本")
+        results = [
+            r for r in results
+            if not any(w in r.get("reason", "").lower() for w in skip_words)
+        ]
+
+        if not results:
+            console.print(f"  {t('explore_no_articles', lang)}")
+            return
+
         priority_colors = {"P0": "red bold", "P1": "yellow", "P2": "dim"}
         display_num = 1
         for priority in ("P0", "P1", "P2"):
