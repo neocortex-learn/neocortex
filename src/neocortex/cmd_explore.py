@@ -72,7 +72,9 @@ def explore(
             console.print(f"  [dim]{author_overview}[/dim]")
         console.print()
 
+        # 用排序后的位置编号显示（1-based），保证输入和显示一致
         priority_colors = {"P0": "red bold", "P1": "yellow", "P2": "dim"}
+        display_num = 1
         for priority in ("P0", "P1", "P2"):
             group = [r for r in results if r["priority"] == priority]
             if not group:
@@ -80,41 +82,28 @@ def explore(
             style = priority_colors[priority]
             console.print(f"  [{style}]{priority}[/{style}]")
             for r in group:
-                console.print(f"    {r['index'] + 1}. {r['title']}")
+                r["_display_num"] = display_num
+                console.print(f"    {display_num}. {r['title']}")
                 if r.get("reason"):
                     console.print(f"       [dim]{r['reason']}[/dim]")
+                display_num += 1
             console.print()
 
-        try:
-            from InquirerPy import inquirer
+        from rich.prompt import Prompt
 
-            choices = [
-                {
-                    "name": f"[{r['priority']}] {r['title']}",
-                    "value": r["url"],
-                    "enabled": r["priority"] == "P0",
-                }
-                for r in results
-            ]
-            selected = inquirer.checkbox(
-                message=t("explore_select", lang),
-                choices=choices,
-                cycle=False,
-            ).execute()
-        except (ImportError, Exception):
-            from rich.prompt import Prompt
-
-            nums = Prompt.ask(
-                f"  [bold]?[/bold] {t('explore_select_nums', lang)}",
-                default="",
-                console=console,
-            )
-            selected: list[str] = []
-            for n in nums.replace(",", " ").split():
-                if n.strip().isdigit():
-                    idx = int(n.strip()) - 1
-                    if 0 <= idx < len(results):
-                        selected.append(results[idx]["url"])
+        nums = Prompt.ask(
+            f"  [bold]?[/bold] {t('explore_select_nums', lang)}",
+            default="",
+            console=console,
+        )
+        selected: list[str] = []
+        for n in nums.replace(",", " ").split():
+            if n.strip().isdigit():
+                num = int(n.strip())
+                for r in results:
+                    if r.get("_display_num") == num:
+                        selected.append(r["url"])
+                        break
 
         selected_set = set(selected)
         notes_dir = get_notes_dir()
