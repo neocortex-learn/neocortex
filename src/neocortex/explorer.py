@@ -126,6 +126,7 @@ def _build_prompt(
     articles: list[ArticleEntry],
     profile: Profile,
     language: Language,
+    already_read: list[str] | None = None,
 ) -> str:
     domains = list(profile.skills.domains.keys())
     gaps = _collect_gaps(profile)
@@ -133,24 +134,43 @@ def _build_prompt(
     if profile.persona and profile.persona.learning_goal:
         goal = profile.persona.learning_goal.value
 
+    # 已读文章的 domain 级别描述，让 LLM 从宽（领域）和窄（具体 gap）两个层面匹配
+    domain_descriptions: list[str] = []
+    for name, skill in profile.skills.domains.items():
+        desc = f"- {name} (level: {skill.level.value})"
+        if skill.gaps:
+            desc += f", gaps: {', '.join(skill.gaps[:5])}"
+        domain_descriptions.append(desc)
+
     article_list = "\n".join(
-        f"{i}. {a.title}" for i, a in enumerate(articles)
+        f"{i}. {a.title}" + (f" — {a.snippet[:80]}" if a.snippet else "")
+        for i, a in enumerate(articles)
     )
+
+    already_read_text = ""
+    if already_read:
+        already_read_text = (
+            f"\nArticles the user has ALREADY read (skip these, set priority to 'skip'):\n"
+            + "\n".join(f"- {t}" for t in already_read[:20])
+            + "\n"
+        )
 
     lang_instruction = "回复使用中文。" if language == Language.ZH else ""
 
     return (
         "You are a learning advisor. The user found a promising author/site and wants to "
         "know which articles are worth reading.\n\n"
-        f"User skill domains: {', '.join(domains) if domains else '(none yet)'}\n"
-        f"User skill gaps: {', '.join(gaps) if gaps else '(none yet)'}\n"
-        f"User learning goal: {goal or '(not set)'}\n\n"
+        f"User skill domains and gaps:\n"
+        + "\n".join(domain_descriptions) + "\n\n"
+        f"User learning goal: {goal or '(not set)'}\n"
+        f"{already_read_text}\n"
         f"Articles on this page:\n{article_list}\n\n"
-        "Rate each article:\n"
-        "- P0: directly fills an active gap — must read\n"
-        "- P1: relevant but not urgent\n"
-        "- P2: interesting but doesn't match current learning direction\n"
-        "- Also give each article a relevance score (1-10, 10 = most relevant to user's gaps)\n\n"
+        "Rate each article by relevance to the user's DOMAINS (broad match) and GAPS (specific match).\n"
+        "An article about AI workflows is relevant to a developer even if it doesn't match a specific gap like 'MVVM'.\n"
+        "- P0: highly relevant to user's domains or directly fills a gap — must read\n"
+        "- P1: somewhat relevant\n"
+        "- P2: not relevant to user's current direction\n"
+        "- Also give each article a relevance score (1-10, 10 = most relevant)\n\n"
         "Output JSON:\n"
         '{\n'
         '  "author_overview": "one sentence about this author/site\'s theme",\n'
@@ -171,21 +191,20 @@ async def batch_scan_articles(
     profile: Profile,
     provider: LLMProvider,
     language: Language = Language.EN,
+    already_read: list[str] | None = None,
 ) -> tuple[str, list[dict]]:
     """Batch scan articles: rank by gap relevance.
 
     Returns (author_overview, sorted_results).
-    Each result: {index, title, url, priority, reason}.
+    Each result: {index, title, url, priority, score, reason}.
     """
     if not articles:
         return "", []
 
-    # 文章太多时截断，避免超出 LLM 上下文
     max_articles = 50
-    truncated = len(articles) > max_articles
     scan_articles = articles[:max_articles]
 
-    prompt = _build_prompt(scan_articles, profile, language)
+    prompt = _build_prompt(scan_articles, profile, language, already_read)
 
     try:
         raw = await provider.chat(

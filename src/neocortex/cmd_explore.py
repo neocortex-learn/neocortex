@@ -52,9 +52,16 @@ def explore(
 
         console.print(f"  [dim]{t('explore_found', lang, count=str(len(articles)))}[/dim]")
 
+        # 获取已读文章标题，避免重复推荐
+        notes_dir = get_notes_dir()
+        already_read: list[str] = []
+        for topic_read in prof.learning_history.topics_read:
+            already_read.append(topic_read.title)
+
         with console.status(f"  {t('explore_scanning', lang)}"):
             author_overview, results = await batch_scan_articles(
                 articles, prof, provider, lang,
+                already_read=already_read if already_read else None,
             )
 
         console.print()
