@@ -21,6 +21,30 @@ from neocortex.i18n import t
 from neocortex.models import Language, Profile, TopicRead
 
 
+def _resolve_topic_dir(notes_dir: Path, doc, outline, prof: Profile) -> Path:
+    """Determine subdirectory based on profile domains. Falls back to 'general'."""
+    known_domains = set()
+    for domain_name in prof.skills.domains:
+        known_domains.add(domain_name.lower())
+
+    # 从 outline 的 deep 标记和文档标题中提取关键词
+    keywords: list[str] = []
+    if outline and outline.items:
+        for item in outline.items:
+            if item.marker == "deep":
+                keywords.extend(item.title.lower().split())
+    keywords.extend(doc.title.lower().replace("-", " ").replace("_", " ").split())
+
+    # 匹配 domain
+    for domain in known_domains:
+        domain_words = domain.replace("_", " ").replace("-", " ").split()
+        for dw in domain_words:
+            if len(dw) >= 3 and any(dw in kw for kw in keywords):
+                return notes_dir / domain.replace("_", "-")
+
+    return notes_dir / "general"
+
+
 @app.command()
 def read(
     source: str = typer.Argument(..., help="URL, PDF, or file path"),
@@ -118,13 +142,18 @@ def read(
         if not safe_title:
             safe_title = "note"
         today = date.today().isoformat()
+
+        # 按 profile domain 分类存储
+        topic_dir = _resolve_topic_dir(notes_dir, doc, outline, prof)
+        topic_dir.mkdir(parents=True, exist_ok=True)
+
         filename = f"{safe_title}-{today}.md"
-        note_path = notes_dir / filename
+        note_path = topic_dir / filename
         counter = 1
         while note_path.exists():
             counter += 1
             filename = f"{safe_title}-{today}-{counter}.md"
-            note_path = notes_dir / filename
+            note_path = topic_dir / filename
         # Build frontmatter
         frontmatter_lines = [
             "---",

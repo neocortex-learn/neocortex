@@ -147,13 +147,18 @@ def research(
                 safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in doc.title)
                 safe_title = safe_title.strip().replace(" ", "-").lower()[:60] or "note"
                 today = date.today().isoformat()
+
+                from neocortex.cmd_read import _resolve_topic_dir
+                topic_dir = _resolve_topic_dir(notes_dir, doc, outline, prof)
+                topic_dir.mkdir(parents=True, exist_ok=True)
+
                 filename = f"{safe_title}-{today}.md"
-                note_path = notes_dir / filename
+                note_path = topic_dir / filename
                 counter = 1
                 while note_path.exists():
                     counter += 1
                     filename = f"{safe_title}-{today}-{counter}.md"
-                    note_path = notes_dir / filename
+                    note_path = topic_dir / filename
 
                 frontmatter_lines = [
                     "---",
