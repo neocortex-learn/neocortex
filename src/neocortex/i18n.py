@@ -1062,7 +1062,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "explore_fetching": {"en": "Fetching article list...", "zh": "正在获取文章列表..."},
     "explore_found": {"en": "Found {count} articles", "zh": "发现 {count} 篇文章"},
     "explore_scanning": {"en": "Scanning and ranking...", "zh": "正在扫描排序..."},
-    "explore_no_articles": {"en": "No articles found on this page.", "zh": "未在页面上找到文章。"},
+    "explore_no_articles": {"en": "No articles found. Make sure the URL is an RSS/Atom feed.", "zh": "未找到文章。请确认 URL 是 RSS/Atom 订阅源。"},
     "explore_select": {"en": "Select articles to read", "zh": "选择要阅读的文章"},
     "explore_select_nums": {
         "en": "Enter article numbers (e.g. 1 3 5), or Enter to skip",

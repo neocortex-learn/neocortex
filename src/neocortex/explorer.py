@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -20,25 +20,13 @@ class ArticleEntry:
     snippet: str = ""
 
 
-_SKIP_EXTENSIONS = frozenset((
-    ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg",
-    ".ico", ".xml", ".json", ".zip", ".pdf", ".woff", ".woff2",
-    ".ttf", ".eot", ".mp3", ".mp4", ".webp", ".avif",
-))
 
-_NAV_WORDS = frozenset((
-    "home", "about", "contact", "rss", "feed", "search", "login", "signup",
-    "register", "subscribe", "services", "portfolio", "resume", "cv",
-    "privacy", "terms", "sitemap", "archive", "archives", "tags", "categories",
-    "news", "links", "friends", "sponsors", "donate", "support",
-))
 
 
 async def extract_article_links(page_url: str) -> list[ArticleEntry]:
-    """Fetch an archive/blog page and extract article links.
+    """Fetch an RSS/Atom feed and extract article entries.
 
-    If the URL is an RSS/Atom feed, parses it directly.
-    Otherwise, tries to discover a feed link in the HTML, and falls back to HTML scraping.
+    If the URL is an HTML page, tries to discover a feed link in <head>.
     """
     async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
         resp = await client.get(page_url)
@@ -47,25 +35,18 @@ async def extract_article_links(page_url: str) -> list[ArticleEntry]:
     content_type = resp.headers.get("content-type", "")
     text = resp.text
 
-    # 如果 URL 本身就是 RSS/Atom feed
     if _is_feed_content(content_type, text):
         return _parse_feed(text)
 
-    # 尝试从 HTML 中发现 RSS/Atom feed 链接
+    # HTML 页面：尝试发现 feed 链接
     feed_url = _discover_feed_url(text, page_url)
     if feed_url:
-        try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
-                feed_resp = await client.get(feed_url)
-                feed_resp.raise_for_status()
-            feed_articles = _parse_feed(feed_resp.text)
-            if feed_articles:
-                return feed_articles
-        except Exception:
-            pass
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            feed_resp = await client.get(feed_url)
+            feed_resp.raise_for_status()
+        return _parse_feed(feed_resp.text)
 
-    # 降级：从 HTML 提取链接
-    return _extract_links_from_html(text, page_url)
+    return []
 
 
 def _is_feed_content(content_type: str, text: str) -> bool:
@@ -123,77 +104,6 @@ def _discover_feed_url(html: str, page_url: str) -> str | None:
     return None
 
 
-def _extract_links_from_html(html: str, page_url: str) -> list[ArticleEntry]:
-    """Fallback: extract article links from HTML."""
-    base_domain = urlparse(page_url).netloc
-    current_path = urlparse(page_url).path
-
-    link_pattern = re.compile(
-        r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
-        re.DOTALL | re.IGNORECASE,
-    )
-
-    seen_urls: set[str] = set()
-    articles: list[ArticleEntry] = []
-
-    for href, text in link_pattern.findall(html):
-        if href.startswith("javascript:") or (href.startswith("#") and "/" not in href):
-            continue
-
-        full_url = urljoin(page_url, href)
-        parsed = urlparse(full_url)
-
-        if parsed.netloc != base_domain:
-            continue
-        if parsed.path == current_path:
-            continue
-        if any(full_url.lower().endswith(ext) for ext in _SKIP_EXTENSIONS):
-            continue
-
-        canonical = parsed._replace(fragment="").geturl()
-        if canonical in seen_urls:
-            continue
-        seen_urls.add(canonical)
-
-        clean_title = re.sub(r"<[^>]+>", "", text).strip()
-        if not clean_title or len(clean_title) < 3:
-            continue
-
-        if _is_nav_or_tag(clean_title, parsed.path):
-            continue
-
-        articles.append(ArticleEntry(title=clean_title, url=canonical))
-
-    return articles
-
-
-def _is_nav_or_tag(title: str, path: str) -> bool:
-    """Filter out navigation links, category tags, and non-article pages."""
-    lower_title = title.lower().strip()
-
-    # 单词标题大概率是导航或分类标签（如 "About", "RSS", "Chinese", "Frontend"）
-    if " " not in lower_title and len(lower_title) < 20:
-        # 允许中文标题（中文没有空格但通常更长）
-        if all(ord(c) < 0x4E00 or ord(c) > 0x9FFF for c in lower_title):
-            return True
-
-    # 已知的导航词
-    if lower_title in _NAV_WORDS:
-        return True
-
-    # 只有 emoji/符号的标题
-    stripped = re.sub(r"[^\w]", "", lower_title)
-    if not stripped:
-        return True
-
-    # 路径太浅且标题很短（如 /about, /rss）——大概率是导航
-    path_parts = [p for p in path.strip("/").split("/") if p]
-    if len(path_parts) <= 1 and len(lower_title) < 15 and "." not in path:
-        # 但如果路径包含 .html 说明是文章页面
-        if not path.endswith((".html", ".htm", ".md")):
-            return True
-
-    return False
 
 
 def _collect_gaps(profile: Profile) -> list[str]:
@@ -239,15 +149,16 @@ def _build_prompt(
         "Rate each article:\n"
         "- P0: directly fills an active gap — must read\n"
         "- P1: relevant but not urgent\n"
-        "- P2: interesting but doesn't match current learning direction\n\n"
+        "- P2: interesting but doesn't match current learning direction\n"
+        "- Also give each article a relevance score (1-10, 10 = most relevant to user's gaps)\n\n"
         "Output JSON:\n"
         '{\n'
         '  "author_overview": "one sentence about this author/site\'s theme",\n'
         '  "articles": [\n'
-        '    {"index": 0, "priority": "P0", "reason": "one sentence"}\n'
+        '    {"index": 0, "priority": "P0", "score": 9, "reason": "one sentence"}\n'
         '  ]\n'
         '}\n\n'
-        "Every article must appear in the output. "
+        "Every article must appear in the output. Sort by score descending (most relevant first). "
         + lang_instruction
     )
 
@@ -314,15 +225,19 @@ async def batch_scan_articles(
         priority = llm_item.get("priority", "P1")
         if priority not in ("P0", "P1", "P2"):
             priority = "P1"
+        score = llm_item.get("score", 5)
+        if not isinstance(score, (int, float)):
+            score = 5
         results.append({
             "index": i,
             "title": a.title,
             "url": a.url,
             "priority": priority,
+            "score": score,
             "reason": llm_item.get("reason", ""),
         })
 
     priority_order = {"P0": 0, "P1": 1, "P2": 2}
-    results.sort(key=lambda r: priority_order.get(r["priority"], 1))
+    results.sort(key=lambda r: (priority_order.get(r["priority"], 1), -r["score"]))
 
     return author_overview, results

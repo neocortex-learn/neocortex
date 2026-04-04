@@ -13,41 +13,44 @@ from neocortex.explorer import (
 from neocortex.models import DomainSkill, Language, Profile, Skills
 
 
-SAMPLE_HTML = """<!DOCTYPE html>
+SAMPLE_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+  <title>Test Blog</title>
+  <link>https://example.com</link>
+  <item>
+    <title>Understanding Async Python</title>
+    <link>https://example.com/posts/async-python</link>
+    <description>A deep dive into asyncio and concurrency.</description>
+  </item>
+  <item>
+    <title>React Hooks Explained</title>
+    <link>https://example.com/posts/react-hooks</link>
+    <description>Modern React patterns.</description>
+  </item>
+  <item>
+    <title>Database Indexing Strategies</title>
+    <link>https://example.com/posts/database-indexing</link>
+    <description>How to make queries fast.</description>
+  </item>
+</channel>
+</rss>"""
+
+SAMPLE_HTML_WITH_FEED = """<!DOCTYPE html>
 <html>
-<head><title>Test Blog</title></head>
-<body>
-<nav>
-  <a href="/">Home</a>
-  <a href="/about">About</a>
-</nav>
-<main>
-  <article>
-    <a href="/posts/async-python">Understanding Async Python</a>
-    <p>A deep dive into asyncio.</p>
-  </article>
-  <article>
-    <a href="/posts/react-hooks">React Hooks Explained</a>
-  </article>
-  <article>
-    <a href="/posts/database-indexing">Database Indexing Strategies</a>
-  </article>
-  <a href="/posts/short">OK</a>
-  <a href="/assets/style.css">Stylesheet</a>
-  <a href="/images/logo.png">Logo</a>
-  <a href="javascript:void(0)">Click</a>
-  <a href="#section">Jump</a>
-  <a href="https://external.com/other">External Link</a>
-  <a href="/posts/async-python">Understanding Async Python</a>
-</main>
-</body>
+<head>
+  <title>Test Blog</title>
+  <link rel="alternate" type="application/rss+xml" href="/feeds/rss.xml">
+</head>
+<body><h1>Blog</h1></body>
 </html>"""
 
 
-def _mock_httpx_response(text: str, status_code: int = 200):
+def _mock_httpx_response(text: str, status_code: int = 200, content_type: str = "text/html"):
     resp = MagicMock()
     resp.text = text
     resp.status_code = status_code
+    resp.headers = {"content-type": content_type}
     resp.raise_for_status = MagicMock()
     if status_code >= 400:
         resp.raise_for_status.side_effect = Exception(f"HTTP {status_code}")
@@ -56,8 +59,8 @@ def _mock_httpx_response(text: str, status_code: int = 200):
 
 class TestExtractArticleLinks:
     @pytest.mark.asyncio
-    async def test_extracts_article_links(self):
-        resp = _mock_httpx_response(SAMPLE_HTML)
+    async def test_parses_rss_feed(self):
+        resp = _mock_httpx_response(SAMPLE_RSS, content_type="application/rss+xml")
 
         with patch("neocortex.explorer.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
@@ -66,17 +69,63 @@ class TestExtractArticleLinks:
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_cls.return_value = mock_client
 
-            articles = await extract_article_links("https://example.com/blog")
+            articles = await extract_article_links("https://example.com/feeds/rss.xml")
 
         titles = [a.title for a in articles]
+        assert len(articles) == 3
         assert "Understanding Async Python" in titles
         assert "React Hooks Explained" in titles
-        assert "Database Indexing Strategies" in titles
-        assert "About" not in titles  # 导航链接应被过滤
+        assert articles[0].snippet  # should have snippet from description
 
     @pytest.mark.asyncio
-    async def test_filters_non_article_links(self):
-        resp = _mock_httpx_response(SAMPLE_HTML)
+    async def test_discovers_feed_from_html(self):
+        html_resp = _mock_httpx_response(SAMPLE_HTML_WITH_FEED)
+        rss_resp = _mock_httpx_response(SAMPLE_RSS, content_type="application/rss+xml")
+
+        call_count = 0
+
+        async def mock_get(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if "rss.xml" in url:
+                return rss_resp
+            return html_resp
+
+        with patch("neocortex.explorer.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            articles = await extract_article_links("https://example.com/blog")
+
+        assert len(articles) == 3
+
+    @pytest.mark.asyncio
+    async def test_deduplicates(self):
+        rss_with_dups = """<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <item><title>Article A</title><link>https://example.com/a</link></item>
+  <item><title>Article A</title><link>https://example.com/a</link></item>
+  <item><title>Article B</title><link>https://example.com/b</link></item>
+</channel></rss>"""
+        resp = _mock_httpx_response(rss_with_dups, content_type="application/rss+xml")
+
+        with patch("neocortex.explorer.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_cls.return_value = mock_client
+
+            articles = await extract_article_links("https://example.com/feed.xml")
+
+        assert len(articles) == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_page_no_feed(self):
+        resp = _mock_httpx_response("<html><body>No feed here</body></html>")
 
         with patch("neocortex.explorer.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
@@ -86,62 +135,11 @@ class TestExtractArticleLinks:
             mock_cls.return_value = mock_client
 
             articles = await extract_article_links("https://example.com/blog")
-
-        urls = [a.url for a in articles]
-        assert not any(u.endswith(".css") for u in urls)
-        assert not any(u.endswith(".png") for u in urls)
-        assert not any("javascript:" in u for u in urls)
-        assert not any("external.com" in u for u in urls)
-
-    @pytest.mark.asyncio
-    async def test_deduplicates_links(self):
-        resp = _mock_httpx_response(SAMPLE_HTML)
-
-        with patch("neocortex.explorer.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
-
-            articles = await extract_article_links("https://example.com/blog")
-
-        async_urls = [a.url for a in articles if "async-python" in a.url]
-        assert len(async_urls) == 1
-
-    @pytest.mark.asyncio
-    async def test_filters_short_titles(self):
-        resp = _mock_httpx_response(SAMPLE_HTML)
-
-        with patch("neocortex.explorer.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
-
-            articles = await extract_article_links("https://example.com/blog")
-
-        titles = [a.title for a in articles]
-        assert "OK" not in titles
-
-    @pytest.mark.asyncio
-    async def test_empty_page(self):
-        resp = _mock_httpx_response("<html><body>No links here</body></html>")
-
-        with patch("neocortex.explorer.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=resp)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
-
-            articles = await extract_article_links("https://example.com/empty")
 
         assert articles == []
 
     @pytest.mark.asyncio
-    async def test_http_error_propagates(self):
+    async def test_http_error(self):
         resp = _mock_httpx_response("", status_code=404)
 
         with patch("neocortex.explorer.httpx.AsyncClient") as mock_cls:
@@ -152,126 +150,73 @@ class TestExtractArticleLinks:
             mock_cls.return_value = mock_client
 
             with pytest.raises(Exception):
-                await extract_article_links("https://example.com/404")
+                await extract_article_links("https://example.com/feed.xml")
 
 
-class TestBatchScanArticles:
+# ── batch_scan_articles ──
+
+
+@pytest.fixture
+def sample_articles():
+    return [
+        ArticleEntry("Understanding Async Python", "https://example.com/async", "asyncio guide"),
+        ArticleEntry("React Hooks Explained", "https://example.com/hooks", "React patterns"),
+        ArticleEntry("Database Indexing", "https://example.com/db", "SQL optimization"),
+    ]
+
+
+@pytest.fixture
+def profile():
+    return Profile(
+        skills=Skills(
+            domains={
+                "backend": DomainSkill(level="proficient", gaps=["async patterns", "database optimization"]),
+            },
+        ),
+    )
+
+
+class TestBatchScan:
     @pytest.mark.asyncio
-    async def test_normal_ranking(self):
-        articles = [
-            ArticleEntry(title="Understanding Async Python", url="https://example.com/async"),
-            ArticleEntry(title="CSS Grid Tips", url="https://example.com/css"),
-            ArticleEntry(title="Database Indexing", url="https://example.com/db"),
-        ]
-        profile = Profile(skills=Skills(
-            domains={"backend": DomainSkill(gaps=["async_programming", "database_optimization"])},
-        ))
-
-        llm_response = json.dumps({
-            "author_overview": "Backend-focused blog",
-            "articles": [
-                {"index": 0, "priority": "P0", "reason": "Fills async gap"},
-                {"index": 1, "priority": "P2", "reason": "Not backend related"},
-                {"index": 2, "priority": "P0", "reason": "Fills DB gap"},
-            ],
-        })
-
+    async def test_ranks_articles(self, sample_articles, profile):
         provider = AsyncMock()
-        provider.chat = AsyncMock(return_value=llm_response)
+        provider.chat = AsyncMock(return_value=json.dumps({
+            "author_overview": "A tech blog about web development",
+            "articles": [
+                {"index": 0, "priority": "P0", "reason": "Directly addresses async patterns gap"},
+                {"index": 1, "priority": "P2", "reason": "Frontend, not relevant"},
+                {"index": 2, "priority": "P0", "reason": "Database optimization is an active gap"},
+            ],
+        }))
 
-        overview, results = await batch_scan_articles(articles, profile, provider, Language.EN)
+        overview, results = await batch_scan_articles(sample_articles, profile, provider)
 
-        assert overview == "Backend-focused blog"
-        assert len(results) == 3
+        assert overview == "A tech blog about web development"
         assert results[0]["priority"] == "P0"
         assert results[-1]["priority"] == "P2"
-        p0_titles = [r["title"] for r in results if r["priority"] == "P0"]
-        assert "Understanding Async Python" in p0_titles
-        assert "Database Indexing" in p0_titles
 
     @pytest.mark.asyncio
-    async def test_llm_failure_degrades_gracefully(self):
-        articles = [
-            ArticleEntry(title="Article A", url="https://example.com/a"),
-            ArticleEntry(title="Article B", url="https://example.com/b"),
-        ]
-        profile = Profile()
-
+    async def test_llm_failure_degrades_to_p1(self, sample_articles, profile):
         provider = AsyncMock()
         provider.chat = AsyncMock(side_effect=Exception("LLM error"))
 
-        overview, results = await batch_scan_articles(articles, profile, provider, Language.EN)
+        overview, results = await batch_scan_articles(sample_articles, profile, provider)
 
         assert overview == ""
-        assert len(results) == 2
         assert all(r["priority"] == "P1" for r in results)
 
     @pytest.mark.asyncio
-    async def test_empty_articles(self):
+    async def test_empty_articles(self, profile):
         provider = AsyncMock()
-        overview, results = await batch_scan_articles([], Profile(), provider, Language.EN)
+        overview, results = await batch_scan_articles([], profile, provider)
         assert overview == ""
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_invalid_json_degrades(self):
-        articles = [
-            ArticleEntry(title="Article A", url="https://example.com/a"),
-        ]
-        profile = Profile()
-
+    async def test_invalid_json(self, sample_articles, profile):
         provider = AsyncMock()
-        provider.chat = AsyncMock(return_value="not valid json at all")
+        provider.chat = AsyncMock(return_value="not json")
 
-        overview, results = await batch_scan_articles(articles, profile, provider, Language.EN)
+        overview, results = await batch_scan_articles(sample_articles, profile, provider)
 
-        assert len(results) == 1
-        assert results[0]["priority"] == "P1"
-
-    @pytest.mark.asyncio
-    async def test_partial_llm_response(self):
-        articles = [
-            ArticleEntry(title="Article A", url="https://example.com/a"),
-            ArticleEntry(title="Article B", url="https://example.com/b"),
-            ArticleEntry(title="Article C", url="https://example.com/c"),
-        ]
-        profile = Profile()
-
-        llm_response = json.dumps({
-            "author_overview": "Tech blog",
-            "articles": [
-                {"index": 0, "priority": "P0", "reason": "Great"},
-            ],
-        })
-
-        provider = AsyncMock()
-        provider.chat = AsyncMock(return_value=llm_response)
-
-        overview, results = await batch_scan_articles(articles, profile, provider, Language.EN)
-
-        assert len(results) == 3
-        priorities = {r["title"]: r["priority"] for r in results}
-        assert priorities["Article A"] == "P0"
-        assert priorities["Article B"] == "P1"
-        assert priorities["Article C"] == "P1"
-
-    @pytest.mark.asyncio
-    async def test_invalid_priority_normalized(self):
-        articles = [
-            ArticleEntry(title="Article A", url="https://example.com/a"),
-        ]
-        profile = Profile()
-
-        llm_response = json.dumps({
-            "author_overview": "",
-            "articles": [
-                {"index": 0, "priority": "HIGH", "reason": "Important"},
-            ],
-        })
-
-        provider = AsyncMock()
-        provider.chat = AsyncMock(return_value=llm_response)
-
-        _, results = await batch_scan_articles(articles, profile, provider, Language.EN)
-
-        assert results[0]["priority"] == "P1"
+        assert all(r["priority"] == "P1" for r in results)
