@@ -158,7 +158,10 @@ def _build_prompt(
         '    {"index": 0, "priority": "P0", "score": 9, "reason": "one sentence"}\n'
         '  ]\n'
         '}\n\n'
-        "Every article must appear in the output. Sort by score descending (most relevant first). "
+        "If there are Chinese and English versions of the same article, "
+        "only include the one matching the user's language preference. "
+        "Skip the duplicate version entirely (set priority to 'skip'). "
+        "Sort by score descending (most relevant first). "
         + lang_instruction
     )
 
@@ -223,6 +226,8 @@ async def batch_scan_articles(
     for i, a in enumerate(scan_articles):
         llm_item = index_map.get(i, {})
         priority = llm_item.get("priority", "P1")
+        if priority == "skip":
+            continue
         if priority not in ("P0", "P1", "P2"):
             priority = "P1"
         score = llm_item.get("score", 5)
