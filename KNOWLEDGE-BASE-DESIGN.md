@@ -1826,3 +1826,190 @@ belief_changes:
     - 需要足够多的用户数据才能校准
     - V1 先展示原始数字 + 趋势，不做跨用户对比
     - 长期可以参考 Hidalgo 的经济复杂性指数方法论
+
+---
+
+## 20. Phase 9 设计：碎片化知识捕获
+
+> 核心问题：日常大部分知识输入是碎片化的（推文、微博、短想法），但当前工具只为长内容设计。
+> 在 Agent 时代，一个工具应该能处理从一条推文到一本书的全部内容光谱。
+
+### 20.1 设计原则
+
+> 来源：Readwise Reader、Tiago Forte 渐进式摘要、Obsidian 社区实践、nb CLI
+
+**原则 1：捕获和处理是不同的认知模式**
+
+捕获时要求零决策、零延迟。分类、标签、总结全部延后。
+Obsidian 社区的共识：先全部扔进 inbox，每周批量处理。
+
+**原则 2：处理深度应与实际使用成正比，而非预测的重要性**
+
+Tiago Forte 的渐进式摘要：大部分笔记永远停在 L1（原文存档），只有 10-20% 到 L2（标记重点），
+只有真正要用的才到 L4（自己写总结）。这是刻意的——不浪费精力在"可能有用"的内容上。
+
+**原则 3：按内容重量自动分级，不需要用户判断**
+
+| 内容类型 | 字数 | 自动深度 | 处理 |
+|---|---|---|---|
+| 推文/想法/语录 | < 300 字 | highlight | 存原文 + 自动打标签，不调 LLM |
+| 文章/博文 | 300-8000 字 | note | 标准 read 流程 |
+| 论文/书籍/长文 | > 8000 字 | study | 深度 read + 闪卡 + 练习 |
+
+URL 特征覆盖字数规则：`x.com`/`weibo.cn` → highlight，`arxiv.org`/`.pdf` → study。
+
+**原则 4：轻内容通过显式行动变成重内容**
+
+```
+clip（即时捕获）→ inbox（待处理）→ scan（快速筛选）→ read（深度学习）
+```
+
+每一步都是用户主动升级，系统从不自动把一条推文膨胀成 16KB 笔记。
+
+### 20.2 新增命令
+
+#### `neocortex clip <source>` — 即时捕获（< 3 秒）
+
+```bash
+# 捕获一条推文
+neocortex clip https://x.com/karpathy/status/123456
+
+# 捕获一段想法
+neocortex clip "Event Sourcing 的快照策略可能和 CQRS 的读模型重建有关"
+
+# 捕获一个链接（只存书签，不读内容）
+neocortex clip https://martinfowler.com/articles/event-sourcing.html
+
+# 从剪贴板捕获
+neocortex clip --paste
+```
+
+**发生了什么**：
+1. 如果是 URL → 用 httpx 抓取标题和前 300 字（推文直接抓全文）
+2. 如果是文本 → 直接存
+3. 自动打标签（关键词提取，**不调 LLM**，纯粹 split + 匹配 gap 列表）
+4. 存入 `~/Documents/NeocortexNotes/clips/` 目录
+5. 状态标记为 `inbox`
+6. 全程 < 3 秒
+
+**不发生什么**：不生成笔记、不生成闪卡、不编译概念、不调 LLM。
+
+#### `neocortex inbox` — 碎片管理
+
+```bash
+# 查看待处理的碎片
+neocortex inbox
+# 输出：
+#   Inbox (12 items)
+#   ━━━━━━━━━━━━━━━━
+#   1. [tweet]    @karpathy: LLM Knowledge Bases...     3 days ago
+#   2. [thought]  Event Sourcing 快照策略...              2 days ago
+#   3. [bookmark] Martin Fowler - Event Sourcing          1 day ago
+#   ...
+
+# 交互式处理（逐条）
+neocortex inbox --process
+# 对每条：
+#   → [k] Keep  保留为参考资料（移入对应主题目录）
+#   → [d] Delete 删除
+#   → [r] Read  升级为完整阅读（进入 read pipeline）
+#   → [s] Skip  跳过，下次再看
+
+# AI 批量处理
+neocortex inbox --auto
+# LLM 一次性：
+#   → 给所有碎片生成一句话摘要
+#   → 关联到已有概念
+#   → 推荐哪些值得深入阅读（标记 P0/P1/P2）
+```
+
+### 20.3 数据模型
+
+```python
+class Clip(BaseModel):
+    id: str
+    source: str                          # URL 或 "manual"
+    content: str                         # 原文内容
+    title: str = ""                      # 自动提取或用户输入
+    clip_type: str = "thought"           # tweet / bookmark / thought / snippet / quote
+    auto_tags: list[str] = Field(default_factory=list)
+    related_concepts: list[str] = Field(default_factory=list)  # inbox --auto 时填充
+    status: str = "inbox"                # inbox / reference / promoted / archived
+    summary: str = ""                    # inbox --auto 时填充
+    priority: str = ""                   # inbox --auto 时填充 P0/P1/P2
+    created_at: str = ""
+    processed_at: str | None = None
+    promoted_to: str | None = None       # 升级为完整笔记后的文件路径
+```
+
+### 20.4 存储
+
+碎片存为轻量 Markdown，一个文件一条：
+
+```markdown
+---
+type: clip
+clip_type: tweet
+source: "https://x.com/karpathy/status/123"
+created_at: 2026-04-05
+status: inbox
+auto_tags: [knowledge-base, llm, obsidian]
+---
+
+LLM Knowledge Bases: Something I'm finding very useful recently...
+```
+
+目录结构：
+```
+NeocortexNotes/
+├── clips/              ← 碎片存储（inbox 状态）
+│   ├── 2026-04-05-karpathy-llm-kb.md
+│   └── 2026-04-05-event-sourcing-thought.md
+├── general/            ← 处理后的非技术内容
+├── web-backend/        ← 处理后的技术笔记
+├── concepts/
+├── insights/
+└── INDEX.md
+```
+
+当碎片被 `Keep` 时 → 移入对应主题目录（用 `_resolve_topic_dir` 逻辑）。
+当碎片被 `Read` 时 → 用其 URL 调用 `read` pipeline，完成后标记 `promoted`。
+
+### 20.5 与现有系统的集成
+
+| 现有系统 | 碎片如何参与 |
+|---|---|
+| **FTS5 搜索** | 碎片在 `clip` 时立即进入索引，`ask`/`chat` 可以搜到 |
+| **概念编译** | 碎片不触发编译（太轻）。`inbox --auto` 时 LLM 关联已有概念 |
+| **推荐系统** | 碎片的 auto_tags 与 gap 匹配时，作为"用户已关注该领域"的弱信号 |
+| **知识衰减** | 碎片不影响 confidence（没有深度学习，不算证据） |
+| **反思** | 碎片不触发反思。周度 digest 中可以显示"本周捕获了 N 条碎片" |
+| **`read --scan`** | scan 结果可以存为碎片（bookmark），而不是丢弃 |
+
+### 20.6 内容光谱的完整覆盖
+
+改完后，Neocortex 覆盖从推文到书籍的全光谱：
+
+```
+轻 ──────────────────────────────────────────────────── 重
+
+clip          read --scan      read            read --deep
+(即时捕获)     (快速筛选)       (标准学习)       (深度研究)
+
+< 3秒         ~30秒            ~3分钟           ~5分钟
+无 LLM        1次 LLM          3-5次 LLM        5-7次 LLM
+存原文         输出摘要+优先级   笔记+闪卡+练习    深度笔记+解剖+更多闪卡
+不生成文件      可选存为 clip    自动存储+编译      自动存储+编译+声明提取
+```
+
+### 20.7 实现计划
+
+| 优先级 | 任务 | 改动量 |
+|---|---|---|
+| 1 | Clip 数据模型 + 存储函数 | 小：models.py + config.py |
+| 2 | `clip` 命令 + URL/文本自动识别 | 中：新建 cmd_clip.py |
+| 3 | `inbox` 命令（列表 + 交互处理） | 中：新建 cmd_clip.py 扩展 |
+| 4 | `inbox --auto` LLM 批量处理 | 中：LLM 调用 + 概念关联 |
+| 5 | `read --scan` 结果可选存为 clip | 小：cmd_read.py 修改 |
+| 6 | FTS5 索引覆盖 clips/ | 小：search.py 已支持 rglob |
+| 7 | digest 显示碎片统计 | 小：cmd_visualize.py |
