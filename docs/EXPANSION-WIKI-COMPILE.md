@@ -411,3 +411,69 @@ neocortex read podcast.mp3
 | RAG / 向量数据库 | 已有 FTS5 + fastembed 混合搜索，当前规模够用 |
 | 批量编译模式 | Neocortex 的增量编译（每次 read 后立即编译）更适合个人学习场景 |
 | 平台内容目录分离 | Neocortex 的用户是学习者不是内容创作者，不需要 draft/publish 分离 |
+
+---
+
+## 6. 实施结果
+
+> 2026-04-05 全部实施完成，765 tests passed, 0 failed。
+
+### 实际改动文件
+
+| 文件 | 改动内容 |
+|------|---------|
+| `config.py` | 新增 `append_log()` |
+| `asker.py` | 新增 `evaluate_insight_value()` |
+| `cmd_read.py` | 接入 log |
+| `cmd_knowledge.py` | Query 反写 + chat 自动保存 + review 接入 log |
+| `cmd_compile.py` | 接入 log |
+| `cmd_lint.py` | 报告持久化 + 趋势追踪 + 接入 log |
+| `cmd_clip.py` | clip→概念联动 + 接入 log |
+| `compiler.py` | `generate_overview()` + `_ripple_related_notes()` |
+| `reader/audio.py` | 新建，Whisper API / 本地转录 |
+| `reader/fetcher.py` | 音频路由 |
+| `i18n.py` | 3 个新 i18n 键 |
+| `CLAUDE.md` | 播客/log/反写/overview 文档 |
+
+### 用户可感知的变化
+
+1. **ask/chat 不再弹保存确认** — 自动评估，有价值的洞察静默保存 + 编译
+2. **笔记目录多了 log.md** — 所有操作自动追加，学习轨迹一目了然
+3. **`kb lint` 显示趋势** — `Score: 85 ▲ +5 vs 上次检查`，报告存 `_reports/`
+4. **`kb compile --full` 生成 overview.md** — 叙事性全局综述
+5. **`read` 后相关笔记自动更新** — 涟漪效应，最多更新 5 篇
+6. **`clip` 自动联动概念页** — evidence_count + 1
+7. **`read` 支持音频** — mp3/m4a/wav 等，自动转录
+
+---
+
+## 7. 社区精选留言分析（10 条）
+
+> 来源：Karpathy idea file gist 评论区精选
+> 分析日期：2026-04-05
+
+### 7.1 已覆盖的洞察
+
+| # | 留言要点 | 作者 | Neocortex 对应 |
+|---|---------|------|---------------|
+| 1 | 个性化作为一等公民层："来源 + 读者语境 + 模板" | dkushnikov | **已有且更强** — outline 的 skip/brief/deep 基于用户画像个性化 |
+| 4 | 每个任务产生两个输出（用户答案 + Wiki 更新） | bluewater8008 | ✅ Query 反写 — ask 回答 + insight 编译 |
+| 5 | 开发专属编译工具，query 结果归档回 wiki | xoai | ✅ Neocortex 整体就是这个工具 |
+| 7 | 闭环复利：query 结果存入 notes，下次查询受益 | VictorVVedtion | ✅ insight 编译进概念图 |
+
+### 7.2 值得后续跟进的洞察
+
+| # | 留言要点 | 作者 | 价值 | 实施思路 |
+|---|---------|------|------|---------|
+| **3** | "不做内容发明"硬约束 — LLM 是速记员不是代笔 | peas | **高** — 防止知识库被 LLM 幻觉污染 | overview.md 和 insight 反写中标记 `source_type: llm_synthesis`，与 `source_type: user_note` 区分；lint 新增检查项：综合内容占比超过阈值时警告 |
+| **4** | Token 预算分层 L0→L3 — 强制先读索引再读全文 | bluewater8008 | **中高** — 扩展时必要 | 当前 ask 只截取 INDEX.md 前 2000 字符；可改为：先读 INDEX 定位相关概念 → 再读相关概念页 → 必要时读原始笔记。分层检索比暴力截断更精准 |
+| **9** | 发散性检查 — 摄入后自动生成"反面论点与数据空白" | localwolfpackai | **中** — 对抗确认偏误 | 在 `compile_note()` 中可选生成 `## Counterarguments` 段落；或在 lint 中新增检查：某概念所有 source 来自同一立场时建议补充对立来源 |
+| **8** | 反转思路 — 数据进 SQLite，渲染为 Markdown | mpazik | **中** — 扩展到千篇以上时考虑 | 当前 FTS5 + fastembed 已有 SQLite 基础；如果未来笔记量过千，可以考虑 DB-first 架构 |
+
+### 7.3 参考但不采纳的洞察
+
+| # | 留言要点 | 作者 | 不采纳原因 |
+|---|---------|------|----------|
+| 2 | inbox/foundations/data 四阶段目录 | umbex | Neocortex 已有 notes/concepts/insights/clips 分层，不需要再加一套 |
+| 6 | 知识库作为"状态管理" | KeremSalman | 理念认同，但 Neocortex 面向学习场景而非全生活状态管理 |
+| 10 | 定时提示词让 Claude 每天维护知识库 | tkgally | `daily` 命令已有类似功能，自动化可通过 cron 实现 |
