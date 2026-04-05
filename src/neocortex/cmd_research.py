@@ -182,7 +182,11 @@ def research(
                 note_path.write_text(full_content, encoding="utf-8")
 
                 note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
-                note_index.index_note(note_path.name, doc.title, full_content)
+                try:
+                    rel = str(note_path.relative_to(notes_dir))
+                except ValueError:
+                    rel = note_path.name
+                note_index.index_note(rel, doc.title, full_content)
 
                 try:
                     from neocortex.compiler import compile_note

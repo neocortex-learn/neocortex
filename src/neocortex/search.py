@@ -95,9 +95,10 @@ class NoteIndex:
                     if stripped.startswith("# "):
                         title = stripped[2:].strip()
                         break
+                rel_path = str(md_file.relative_to(notes_dir))
                 conn.execute(
                     "INSERT INTO notes_fts (filename, title, content) VALUES (?, ?, ?)",
-                    (md_file.name, title, content),
+                    (rel_path, title, content),
                 )
                 count += 1
         model = self._get_embedding_model()
@@ -109,7 +110,7 @@ class NoteIndex:
                     content = md_file.read_text(encoding="utf-8")
                 except (UnicodeDecodeError, OSError):
                     continue
-                self.index_note_embedding(md_file.name, content)
+                self.index_note_embedding(str(md_file.relative_to(notes_dir)), content)
         return count
 
     def index_all_with_progress(self, notes_dir: Path, on_fts_done=None, on_embed_progress=None) -> int:
@@ -135,9 +136,10 @@ class NoteIndex:
                     if stripped.startswith("# "):
                         title = stripped[2:].strip()
                         break
+                rel_path = str(md_file.relative_to(notes_dir))
                 conn.execute(
                     "INSERT INTO notes_fts (filename, title, content) VALUES (?, ?, ?)",
-                    (md_file.name, title, content),
+                    (rel_path, title, content),
                 )
                 count += 1
 
@@ -153,7 +155,7 @@ class NoteIndex:
                     content = md_file.read_text(encoding="utf-8")
                 except (UnicodeDecodeError, OSError):
                     continue
-                self.index_note_embedding(md_file.name, content)
+                self.index_note_embedding(str(md_file.relative_to(notes_dir)), content)
                 if on_embed_progress is not None:
                     on_embed_progress(i + 1, total)
 

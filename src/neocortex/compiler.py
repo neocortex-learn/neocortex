@@ -742,7 +742,10 @@ def generate_related_notes_block(
     if not rows:
         return None
 
-    target_filename = note_path.name
+    try:
+        target_filename = str(note_path.relative_to(notes_dir))
+    except ValueError:
+        target_filename = note_path.name
     target_blob = None
     other_entries: list[tuple[str, bytes]] = []
 

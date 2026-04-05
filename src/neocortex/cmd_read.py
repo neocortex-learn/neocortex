@@ -202,7 +202,11 @@ def read(
         from neocortex.search import NoteIndex
         final_content = note_path.read_text(encoding="utf-8")
         note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
-        note_index.index_note(note_path.name, doc.title, final_content)
+        try:
+            rel = str(note_path.relative_to(notes_dir))
+        except ValueError:
+            rel = note_path.name
+        note_index.index_note(rel, doc.title, final_content)
 
         # Generate flashcards for spaced repetition
         import uuid as _uuid

@@ -245,7 +245,11 @@ def _run_plan(
 
     note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
     title = "Personalized Learning Plan" if lang == Language.EN else "\u4e2a\u6027\u5316\u5b66\u4e60\u8ba1\u5212"
-    note_index.index_note(plan_path.name, title, plan_md)
+    try:
+        rel = str(plan_path.relative_to(notes_dir))
+    except ValueError:
+        rel = plan_path.name
+    note_index.index_note(rel, title, plan_md)
 
     console.print()
     console.print(f"  [green]{t('plan_saved', lang, path=str(plan_path))}[/green]")

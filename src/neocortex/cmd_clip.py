@@ -133,7 +133,11 @@ def clip(
                 console.print(f"  [green]{t('read_saved', lang, path=str(note_path))}[/green]")
 
                 note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
-                note_index.index_note(note_path.name, doc.title, full_content)
+                try:
+                    rel = str(note_path.relative_to(notes_dir))
+                except ValueError:
+                    rel = note_path.name
+                note_index.index_note(rel, doc.title, full_content)
 
                 try:
                     from neocortex.compiler import compile_note
@@ -196,7 +200,11 @@ def clip(
             from neocortex.search import NoteIndex
 
             idx = NoteIndex(get_data_dir() / "neocortex.sqlite")
-            idx.index_note(saved_path.name, clip_obj.title or raw_input[:50], clip_obj.content)
+            try:
+                rel = str(saved_path.relative_to(notes_dir))
+            except ValueError:
+                rel = saved_path.name
+            idx.index_note(rel, clip_obj.title or raw_input[:50], clip_obj.content)
         except Exception:
             pass
 
