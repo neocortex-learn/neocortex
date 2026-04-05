@@ -328,13 +328,13 @@ async def generate_concept_entry(
         f"---\n"
         f"type: concept\n"
         f"name: {name}\n"
-        f"aliases: [{', '.join(aliases)}]\n"
-        f"related_concepts: [{', '.join(related_concepts)}]\n"
+        f"aliases: [{', '.join(f'\"' + a + '\"' for a in aliases)}]\n"
+        f"related_concepts: [{', '.join(f'\"' + rc + '\"' for rc in related_concepts)}]\n"
         f"skill_level: {SkillLevel.BEGINNER.value}\n"
         f"confidence: 0.3\n"
         f"evidence_count: {len(source_notes)}\n"
         f"last_updated: {today}\n"
-        f"source_notes: [{', '.join(note_filenames)}]\n"
+        f"source_notes: [{', '.join(f'\"' + fn + '\"' for fn in note_filenames)}]\n"
         f"---\n"
     )
 
@@ -834,7 +834,6 @@ async def compile_note(
             if note_path.name not in existing.source_notes:
                 existing.source_notes.append(note_path.name)
                 existing.evidence_count = len(existing.source_notes)
-                existing.last_updated = date.today().isoformat()
                 for rc in ref.related_to:
                     if rc not in existing.related_concepts:
                         existing.related_concepts.append(rc)
@@ -842,6 +841,7 @@ async def compile_note(
                 from neocortex.decay import NOTE_BOOST, boost_confidence, decayed_confidence
 
                 current_conf = decayed_confidence(existing.confidence, existing.last_updated)
+                existing.last_updated = date.today().isoformat()
                 new_conf = boost_confidence(current_conf, NOTE_BOOST)
 
                 source_notes_info = [
@@ -1165,7 +1165,6 @@ async def compile_all(
                 if note_path.name not in existing.source_notes:
                     existing.source_notes.append(note_path.name)
                     existing.evidence_count = len(existing.source_notes)
-                    existing.last_updated = date.today().isoformat()
                     for rc in ref.related_to:
                         if rc not in existing.related_concepts:
                             existing.related_concepts.append(rc)
@@ -1173,6 +1172,7 @@ async def compile_all(
                     from neocortex.decay import NOTE_BOOST, boost_confidence, decayed_confidence
 
                     current_conf = decayed_confidence(existing.confidence, existing.last_updated)
+                    existing.last_updated = date.today().isoformat()
                     new_conf = boost_confidence(current_conf, NOTE_BOOST)
 
                     source_notes_info = [

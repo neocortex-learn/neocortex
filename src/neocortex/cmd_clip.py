@@ -195,7 +195,7 @@ def clip(
             from neocortex.config import get_data_dir
             from neocortex.search import NoteIndex
 
-            idx = NoteIndex(get_data_dir() / "search.db")
+            idx = NoteIndex(get_data_dir() / "neocortex.sqlite")
             idx.index_note(saved_path.name, clip_obj.title or raw_input[:50], clip_obj.content)
         except Exception:
             pass

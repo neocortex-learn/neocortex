@@ -78,8 +78,6 @@ class OpenAICompatProvider(LLMProvider):
             "model": self._model,
             "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
         }
-        if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
 
         response = await self._client.chat.completions.create(**kwargs)
         if not response.choices:

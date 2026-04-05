@@ -107,22 +107,21 @@ class ContentFetcher:
     @staticmethod
     def _is_public_url(url: str) -> bool:
         """Check if URL is safe to send to third-party services."""
+        import ipaddress
         from urllib.parse import urlparse
+
         parsed = urlparse(url)
         host = parsed.hostname or ""
-        # Block private/local hosts
-        if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+        if host in ("localhost",):
             return False
         if host.endswith(".local") or host.endswith(".internal"):
             return False
-        # Block private IP ranges
-        if host.startswith(("10.", "172.16.", "172.17.", "172.18.", "172.19.",
-                           "172.20.", "172.21.", "172.22.", "172.23.",
-                           "172.24.", "172.25.", "172.26.", "172.27.",
-                           "172.28.", "172.29.", "172.30.", "172.31.",
-                           "192.168.")):
-            return False
-        # Block URLs with sensitive query params
+        try:
+            addr = ipaddress.ip_address(host)
+            if addr.is_private or addr.is_reserved or addr.is_loopback or addr.is_link_local:
+                return False
+        except ValueError:
+            pass
         query = parsed.query.lower()
         sensitive_params = ("token", "key", "secret", "password", "auth", "credential", "sig", "signature")
         if any(param in query for param in sensitive_params):

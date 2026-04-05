@@ -94,7 +94,7 @@ def _batch_by_tokens(
     current_batch: list[ParsedMessage] = []
     current_tokens = 0
     for msg in messages:
-        msg_tokens = _estimate_tokens(msg.text)
+        msg_tokens = _estimate_tokens(msg.content)
         if current_batch and current_tokens + msg_tokens > max_tokens:
             batches.append(current_batch)
             current_batch = []

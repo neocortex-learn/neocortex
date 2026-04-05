@@ -47,11 +47,15 @@ def parse_chatgpt_export(path: str) -> list[ParsedMessage]:
             if len(text) < MIN_MESSAGE_LENGTH:
                 continue
 
-            timestamp = msg.get("create_time") or conv.get("create_time") or 0.0
+            raw_ts = msg.get("create_time") or conv.get("create_time") or 0.0
+            try:
+                timestamp = float(raw_ts)
+            except (ValueError, TypeError):
+                timestamp = 0.0
 
             messages.append(ParsedMessage(
                 content=text,
-                timestamp=float(timestamp),
+                timestamp=timestamp,
                 conversation_title=title,
             ))
 

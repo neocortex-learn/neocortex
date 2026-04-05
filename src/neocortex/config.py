@@ -415,6 +415,12 @@ def _parse_clip_file(path: Path) -> Clip | None:
             return None
         return v if isinstance(v, str) else None
 
+    def _safe_int(v: str) -> int:
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return 0
+
     return Clip(
         id=clip_id,
         source=_str("source", "manual"),
@@ -432,7 +438,7 @@ def _parse_clip_file(path: Path) -> Clip | None:
         processed_at=_opt_str("processed_at"),
         promoted_to=_opt_str("promoted_to"),
         next_surface=_str("next_surface"),
-        surface_count=int(_str("surface_count", "0") or "0"),
+        surface_count=_safe_int(_str("surface_count", "0") or "0"),
     )
 
 

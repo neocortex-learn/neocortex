@@ -197,7 +197,7 @@ def scan(
             save_profile(prof)
 
             from neocortex.growth import save_snapshot
-            notes_count = len(list(get_notes_dir().glob("*.md")))
+            notes_count = len([p for p in get_notes_dir().rglob("*.md") if p.parts and "concepts" not in p.parts and "insights" not in p.parts and "diagrams" not in p.parts])
             save_snapshot(prof, get_data_dir(), notes_count)
 
             console.print(f"  [green]{t('scan_complete', lang)}[/green]")

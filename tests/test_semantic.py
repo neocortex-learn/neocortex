@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from neocortex.search import NoteIndex, _cosine_similarity, _merge_results
+from neocortex.search import NoteIndex, _merge_results
 
 
 @pytest.fixture()
@@ -17,41 +17,6 @@ def db_path(tmp_path):
 @pytest.fixture()
 def note_index(db_path):
     return NoteIndex(db_path)
-
-
-class TestCosineSimilarity:
-    def test_identical_vectors(self):
-        v = [1.0, 2.0, 3.0]
-        assert math.isclose(_cosine_similarity(v, v), 1.0, rel_tol=1e-6)
-
-    def test_orthogonal_vectors(self):
-        a = [1.0, 0.0]
-        b = [0.0, 1.0]
-        assert math.isclose(_cosine_similarity(a, b), 0.0, abs_tol=1e-9)
-
-    def test_opposite_vectors(self):
-        a = [1.0, 0.0]
-        b = [-1.0, 0.0]
-        assert math.isclose(_cosine_similarity(a, b), -1.0, rel_tol=1e-6)
-
-    def test_zero_vector(self):
-        a = [0.0, 0.0, 0.0]
-        b = [1.0, 2.0, 3.0]
-        assert _cosine_similarity(a, b) == 0.0
-
-    def test_both_zero_vectors(self):
-        a = [0.0, 0.0]
-        b = [0.0, 0.0]
-        assert _cosine_similarity(a, b) == 0.0
-
-    def test_known_value(self):
-        a = [1.0, 2.0, 3.0]
-        b = [4.0, 5.0, 6.0]
-        dot = 1 * 4 + 2 * 5 + 3 * 6  # 32
-        norm_a = math.sqrt(1 + 4 + 9)  # sqrt(14)
-        norm_b = math.sqrt(16 + 25 + 36)  # sqrt(77)
-        expected = dot / (norm_a * norm_b)
-        assert math.isclose(_cosine_similarity(a, b), expected, rel_tol=1e-6)
 
 
 class TestMergeResults:

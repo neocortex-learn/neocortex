@@ -233,10 +233,3 @@ class ProjectScanner:
             if part.endswith(".egg-info"):
                 return True
         return False
-
-    def _count_lines(self, file_path: Path) -> int:
-        try:
-            text = file_path.read_text(encoding="utf-8")
-            return len(text.splitlines())
-        except (UnicodeDecodeError, OSError):
-            return 0

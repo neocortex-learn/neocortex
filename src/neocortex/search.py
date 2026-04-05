@@ -7,10 +7,6 @@ import re
 import sqlite3
 import struct
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 _CJK_RE = re.compile(
     r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff"
@@ -264,15 +260,6 @@ def _prepare_query(query: str) -> str:
             prepared.append(term)
     return " ".join(prepared)
 
-
-def _cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
-    """Compute cosine similarity between two vectors using pure Python."""
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(x * x for x in b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
 
 
 def _merge_results(fts: list[dict], vec: list[dict], limit: int) -> list[dict]:
