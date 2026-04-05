@@ -859,6 +859,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Insight saved: {path}",
         "zh": "洞察已保存：{path}",
     },
+    "insight_evaluating": {
+        "en": "Evaluating insight value...",
+        "zh": "正在评估洞察价值...",
+    },
+    "insight_auto_saved": {
+        "en": "{count} valuable insight(s) auto-saved to knowledge base",
+        "zh": "已自动保存 {count} 条有价值的洞察到知识库",
+    },
 
     # ── Compile ──
     "compile_updating": {
@@ -900,6 +908,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "lint_no_issues": {"en": "All checks passed!", "zh": "所有检查通过！"},
     "lint_checking": {"en": "Running health checks...", "zh": "正在运行健康检查..."},
     "lint_fixed": {"en": "Fixed {count} issues", "zh": "已修复 {count} 个问题"},
+    "lint_trend_last": {"en": "last check", "zh": "上次检查"},
     "lint_broken_links": {"en": "Broken Links", "zh": "断裂链接"},
     "lint_orphan_notes": {"en": "Orphan Notes", "zh": "孤岛笔记"},
     "lint_stale_concepts": {"en": "Stale Concepts", "zh": "陈旧概念"},

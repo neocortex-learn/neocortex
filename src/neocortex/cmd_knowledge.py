@@ -239,21 +239,29 @@ def ask(
     console.print(Markdown(answer))
     console.print()
 
+    from neocortex.config import append_log
+    append_log("ask", question[:80])
+
+    # Auto-evaluate whether this answer is worth saving
     should_save = save
+
     if not should_save:
-        save_answer = Prompt.ask(
-            f"  [bold]?[/bold] {t('insight_save_prompt', lang)}",
-            choices=["y", "n"],
-            default="n",
-            console=console,
-        )
-        should_save = save_answer.lower() == "y"
+        async def _evaluate() -> bool:
+            from neocortex.asker import evaluate_insight_value
+            with console.status(f"  {t('insight_evaluating', lang)}"):
+                return await evaluate_insight_value(question, answer, provider)
+
+        try:
+            should_save = asyncio.run(_evaluate())
+        except Exception:
+            should_save = False
 
     if should_save:
         from neocortex.asker import save_insight
 
         insight_path = save_insight(question, answer, lang)
         console.print(f"  [green]{t('insight_saved', lang, path=str(insight_path))}[/green]")
+        append_log("insight", question[:80])
 
         async def _compile_insight() -> None:
             try:
@@ -341,18 +349,45 @@ def _run_chat() -> None:
 
     non_system = [m for m in session.history if m["role"] != "system"]
     if len(non_system) >= 2:
-        save_answer = Prompt.ask(
-            f"  [bold]?[/bold] {t('insight_save_chat', lang)}",
-            choices=["y", "n"],
-            default="n",
-            console=console,
-        )
-        if save_answer.lower() == "y":
-            from neocortex.asker import save_chat_insights
+        # Auto-evaluate which Q&A pairs are worth saving
+        from neocortex.asker import evaluate_insight_value, save_insight
+        from neocortex.config import append_log
 
-            paths = save_chat_insights(non_system, lang)
-            for p in paths:
-                console.print(f"  [green]{t('insight_saved', lang, path=str(p))}[/green]")
+        pairs: list[tuple[str, str]] = []
+        for msg in non_system:
+            if msg["role"] == "user":
+                pairs.append((msg["content"], ""))
+            elif msg["role"] == "assistant" and pairs and not pairs[-1][1]:
+                q, _ = pairs[-1]
+                pairs[-1] = (q, msg["content"])
+
+        saved_count = 0
+
+        async def _save_valuable_pairs() -> int:
+            count = 0
+            for question, answer in pairs:
+                if not answer:
+                    continue
+                try:
+                    worthy = await evaluate_insight_value(question, answer, provider)
+                except Exception:
+                    worthy = False
+                if worthy:
+                    path = save_insight(question, answer, lang)
+                    console.print(f"  [green]{t('insight_saved', lang, path=str(path))}[/green]")
+                    append_log("insight", question[:80])
+                    count += 1
+            return count
+
+        with console.status(f"  {t('insight_evaluating', lang)}"):
+            try:
+                saved_count = asyncio.run(_save_valuable_pairs())
+            except Exception:
+                pass
+
+        if saved_count > 0:
+            console.print(f"  [dim]{t('insight_auto_saved', lang, count=str(saved_count))}[/dim]")
+        console.print()
 
 
 @app.command()
@@ -477,6 +512,9 @@ def review(
         1 for c in all_cards
         if c.next_review and c.next_review <= tomorrow
     )
+
+    from neocortex.config import append_log
+    append_log("review", f"{stats.cards_reviewed} cards, {stats.correct} correct")
 
     console.print(f"  [bold green]{t('review_done', lang)}[/bold green]")
     console.print(f"  {t('review_stats', lang, reviewed=str(stats.cards_reviewed), correct=str(stats.correct), tomorrow=str(tomorrow_due))}")

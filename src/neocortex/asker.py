@@ -153,6 +153,26 @@ def save_chat_insights(
     return paths
 
 
+async def evaluate_insight_value(
+    question: str,
+    answer: str,
+    provider: LLMProvider,
+) -> bool:
+    """Quick LLM check: does this answer contain new knowledge worth saving?"""
+    prompt = (
+        "Does this Q&A contain a novel synthesis, cross-concept connection, "
+        "or original analysis that would be worth saving as a knowledge entry? "
+        "Pure factual lookups, simple definitions, or how-to instructions do NOT qualify.\n\n"
+        f"Q: {question[:200]}\nA: {answer[:500]}\n\n"
+        "Reply with ONLY 'yes' or 'no'."
+    )
+    try:
+        result = await provider.chat([{"role": "user", "content": prompt}])
+        return result.strip().lower().startswith("y")
+    except Exception:
+        return False
+
+
 async def ask_question(
     question: str,
     profile: Profile,

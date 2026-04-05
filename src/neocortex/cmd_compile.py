@@ -76,4 +76,8 @@ def compile(
 
         console.print()
 
+        from neocortex.config import append_log
+        if result.notes_processed > 0:
+            append_log("compile", f"{result.notes_processed} notes, {result.concepts_created + result.concepts_updated} concepts")
+
     asyncio.run(_run_compile())

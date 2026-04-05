@@ -208,6 +208,13 @@ def clip(
         except Exception:
             pass
 
+        # Link clip to concept pages (boost evidence_count)
+        if clip_obj.related_concepts:
+            _link_clip_to_concepts(notes_dir, clip_obj)
+
+        from neocortex.config import append_log
+        append_log("clip", clip_obj.title or raw_input[:50])
+
         console.print()
         console.print(f"  [green]{t('clip_saved', lang)}[/green]")
         console.print()
@@ -514,3 +521,78 @@ def _inbox_synthesize(all_clips: list, notes_dir, lang) -> None:
         console.print(f"  [green]{t('inbox_synthesize_done', lang, count=str(synthesized_count))}[/green]")
 
     asyncio.run(_run())
+
+
+def _link_clip_to_concepts(notes_dir: Path, clip_obj) -> None:
+    """Link a clip's related_concepts to existing concept pages.
+
+    For each concept that already has a page, append the clip as a
+    source reference and bump evidence_count.
+    """
+    import os
+    import re
+    import tempfile
+    from datetime import date as _date
+
+    concepts_dir = notes_dir / "concepts"
+    if not concepts_dir.exists():
+        return
+
+    for concept_name in clip_obj.related_concepts:
+        slug = concept_name.strip().lower().replace(" ", "-")
+        concept_path = concepts_dir / f"{slug}.md"
+        if not concept_path.exists():
+            continue
+
+        try:
+            content = concept_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        # Check if this clip source is already referenced
+        clip_ref = f"clip:{clip_obj.id}"
+        if clip_ref in content:
+            continue
+
+        # Bump evidence_count
+        ec_match = re.search(r"^evidence_count:\s*(\d+)", content, re.MULTILINE)
+        if ec_match:
+            old_count = int(ec_match.group(1))
+            content = re.sub(
+                r"^evidence_count:\s*\d+",
+                f"evidence_count: {old_count + 1}",
+                content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+
+        # Update last_updated
+        today = _date.today().isoformat()
+        content = re.sub(
+            r"^last_updated:\s*\S+",
+            f"last_updated: {today}",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+
+        # Append clip reference to source notes list in frontmatter
+        sn_match = re.search(r'^source_notes:\s*\[([^\]]*)\]', content, re.MULTILINE)
+        if sn_match:
+            existing = sn_match.group(1).strip()
+            if existing:
+                new_list = f'{existing}, "{clip_ref}"'
+            else:
+                new_list = f'"{clip_ref}"'
+            content = content[:sn_match.start()] + f"source_notes: [{new_list}]" + content[sn_match.end():]
+
+        fd, tmp_path = tempfile.mkstemp(dir=str(concepts_dir), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(concept_path))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass

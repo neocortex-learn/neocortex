@@ -934,6 +934,9 @@ async def compile_note(
 
     await _generate_relationship_cards(notes_dir, concepts, provider, language)
 
+    # Ripple: update related_notes blocks in notes that share concepts
+    _ripple_related_notes(note_path, notes_dir, concepts)
+
     all_concepts = collect_all_concepts(concepts_dir)
     index_content = generate_index(notes_dir, all_concepts, profile, language)
     index_path = notes_dir / "INDEX.md"
@@ -951,6 +954,69 @@ async def compile_note(
     result.index_updated = True
 
     return result
+
+
+# ── Ripple effect ──
+
+
+def _ripple_related_notes(
+    new_note: Path,
+    notes_dir: Path,
+    concepts: list[ConceptRef],
+    max_updates: int = 5,
+) -> int:
+    """Update related_notes blocks in existing notes that share concepts with the new note.
+
+    Returns the number of notes updated.
+    """
+    concepts_dir = notes_dir / "concepts"
+    if not concepts_dir.exists():
+        return 0
+
+    # Collect all note filenames that share concepts with the new note
+    sibling_files: set[str] = set()
+    for ref in concepts:
+        entry = _load_concept_entry(concepts_dir, ref.name)
+        if entry:
+            for sn in entry.source_notes:
+                if sn != new_note.name:
+                    sibling_files.add(sn)
+
+    if not sibling_files:
+        return 0
+
+    # Find actual file paths for siblings
+    all_md = {f.name: f for f in notes_dir.rglob("*.md")
+              if "concepts" not in f.parts and "insights" not in f.parts
+              and f.name != "INDEX.md" and f.name != "overview.md"
+              and "diagrams" not in f.parts and "_reports" not in f.parts}
+
+    updated = 0
+    for sib_name in list(sibling_files)[:max_updates]:
+        sib_path = all_md.get(sib_name)
+        if not sib_path or not sib_path.exists():
+            continue
+
+        new_block = generate_related_notes_block(sib_path, notes_dir)
+        if not new_block:
+            continue
+
+        try:
+            content = sib_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        existing_related = re.search(r"\n---\s*\n\s*## Related Notes\b.*", content, re.DOTALL)
+        if existing_related:
+            new_content = content[:existing_related.start()] + new_block
+        else:
+            new_content = content.rstrip("\n") + "\n" + new_block
+
+        if new_content != content:
+            sib_path.write_text(new_content, encoding="utf-8")
+            updated += 1
+
+    return updated
 
 
 # ── Relationship cards ──
@@ -1235,4 +1301,117 @@ async def compile_all(
         raise
     result.index_updated = True
 
+    # Generate overview.md — narrative synthesis of the entire knowledge base
+    try:
+        await generate_overview(notes_dir, all_concepts, profile, provider, language)
+    except Exception:
+        pass
+
     return result
+
+
+# ── Overview generation ──
+
+
+async def generate_overview(
+    notes_dir: Path,
+    concepts: list[ConceptEntry],
+    profile: Profile,
+    provider: LLMProvider,
+    language: Language = Language.EN,
+) -> None:
+    """Generate overview.md — a narrative synthesis of the knowledge base."""
+    if not concepts:
+        return
+
+    # Build context for LLM
+    concept_summary = []
+    for c in sorted(concepts, key=lambda x: -x.evidence_count):
+        concept_summary.append(
+            f"- {c.name} (evidence: {c.evidence_count}, confidence: {c.confidence:.2f}, "
+            f"sources: {len(c.source_notes)}, related: {', '.join(c.related_concepts[:3])})"
+        )
+    concepts_text = "\n".join(concept_summary[:40])
+
+    # Profile gaps
+    gap_list: list[str] = []
+    for d in profile.skills.domains.values():
+        gap_list.extend(d.gaps)
+    gaps_text = ", ".join(gap_list[:20]) if gap_list else "(none)"
+
+    # Recent belief changes
+    belief_text = ""
+    try:
+        from neocortex.config import load_belief_changes
+        changes = load_belief_changes()
+        if changes:
+            recent = changes[-5:]
+            belief_lines = []
+            for ch in recent:
+                belief_lines.append(
+                    f"- [{ch.get('date', '?')}] {ch.get('concept', '?')}: "
+                    f"'{ch.get('from', '')[:60]}' → '{ch.get('to', '')[:60]}'"
+                )
+            belief_text = "\n".join(belief_lines)
+    except Exception:
+        pass
+
+    # Recent log entries
+    log_text = ""
+    log_path = notes_dir / "log.md"
+    if log_path.exists():
+        try:
+            lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+            log_text = "\n".join(lines[-20:])
+        except (OSError, UnicodeDecodeError):
+            pass
+
+    lang_inst = "用中文写作。" if language == Language.ZH else "Write in English."
+    if language == Language.ZH:
+        sections = "## 知识地图\n## 跨领域连接\n## 信念演变\n## 盲区提示\n## 建议方向"
+    else:
+        sections = "## Knowledge Map\n## Cross-Domain Connections\n## Belief Evolution\n## Blind Spots\n## Suggested Directions"
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You generate a narrative overview of a developer's personal knowledge base. "
+                "This is NOT an index — it is a thoughtful synthesis of what the knowledge "
+                "base reveals about the user's learning journey. Be specific, reference "
+                "actual concepts and connections. Be concise — each section 2-4 sentences.\n\n"
+                f"Generate these sections:\n{sections}\n\n{lang_inst}"
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Concepts ({len(concepts)} total):\n{concepts_text}\n\n"
+                f"Skill gaps: {gaps_text}\n\n"
+                f"Recent belief changes:\n{belief_text or '(none)'}\n\n"
+                f"Recent activity:\n{log_text or '(none)'}"
+            ),
+        },
+    ]
+
+    body = await provider.chat(messages)
+
+    today = date.today().isoformat()
+    content = (
+        f"---\ntype: overview\ndate: {today}\nconcepts: {len(concepts)}\n---\n\n"
+        f"# Overview\n\n"
+        f"> Auto-generated on {today} from {len(concepts)} concepts.\n\n"
+        f"{body}\n"
+    )
+
+    overview_path = notes_dir / "overview.md"
+    fd, tmp_path = tempfile.mkstemp(dir=str(notes_dir), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_path, str(overview_path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass

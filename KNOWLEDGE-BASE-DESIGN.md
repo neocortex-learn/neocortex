@@ -9,3 +9,4 @@
 另见：
 - **[DESIGN.md](DESIGN.md)** — 原始产品设计（42K）
 - **[CLAUDE.md](CLAUDE.md)** — 开发规范
+- **[docs/EXPANSION-WIKI-COMPILE.md](docs/EXPANSION-WIKI-COMPILE.md)** — Wiki 编译模式拓展（借鉴 Karpathy LLM Knowledge Bases）

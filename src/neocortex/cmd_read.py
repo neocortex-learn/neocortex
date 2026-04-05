@@ -289,6 +289,9 @@ def read(
             except OSError:
                 pass
 
+        from neocortex.config import append_log
+        append_log("read", doc.title)
+
         _match_and_update_recommendations(lang, prof, source, doc.title, str(note_path))
 
         _collect_feedback(lang, prof, source, doc.title, focus, note_path)

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from neocortex.llm.base import LLMProvider
 
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
+_AUDIO_EXTENSIONS = {".mp3", ".mp4", ".m4a", ".wav", ".ogg", ".flac", ".webm", ".mpeg", ".mpga"}
 
 _MEDIA_TYPES = {
     ".png": "image/png",
@@ -72,6 +73,8 @@ class ContentFetcher:
             return self._read_epub(source)
         if suffix in _IMAGE_EXTENSIONS:
             return await self._fetch_image(source)
+        if suffix in _AUDIO_EXTENSIONS:
+            return await self._fetch_audio(source)
         if suffix == ".md":
             return self._read_markdown(source)
         return self._read_text(source)
@@ -368,6 +371,41 @@ class ContentFetcher:
             content=text,
             source=path,
             sections=[Section(title=title, content=text, level=1)],
+        )
+
+    async def _fetch_audio(self, path: str) -> Document:
+        """Transcribe an audio file and return it as a Document."""
+        from neocortex.reader.audio import transcribe_audio
+
+        # Try to get API key for Whisper
+        api_key = None
+        try:
+            from neocortex.config import load_config
+            cfg = load_config()
+            if cfg.provider == "openai" and cfg.api_key:
+                api_key = cfg.api_key
+        except Exception:
+            pass
+
+        text = await transcribe_audio(path, api_key=api_key)
+
+        title = Path(path).stem.replace("-", " ").replace("_", " ").title()
+
+        # Split transcript into sections by paragraph breaks
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        sections = []
+        for i, para in enumerate(paragraphs):
+            sections.append(Section(
+                title=f"Segment {i + 1}",
+                content=para,
+                level=2,
+            ))
+
+        return Document(
+            title=title,
+            content=text,
+            source=path,
+            sections=sections if sections else [Section(title=title, content=text, level=1)],
         )
 
     def _parse_html_sections(self, html: str) -> list[Section]:

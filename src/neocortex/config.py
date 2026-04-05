@@ -82,6 +82,22 @@ def get_notes_dir() -> Path:
     return notes_dir
 
 
+def append_log(action: str, detail: str) -> None:
+    """Append an activity entry to log.md in the notes directory.
+
+    Actions: read, ask, insight, compile, lint, clip, review
+    """
+    from datetime import date
+
+    try:
+        log_path = get_notes_dir() / "log.md"
+        line = f"## [{date.today().isoformat()}] {action} | {detail}\n\n"
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(line)
+    except OSError:
+        pass
+
+
 def _config_path() -> Path:
     return get_data_dir() / "config.json"
 
