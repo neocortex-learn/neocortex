@@ -501,6 +501,7 @@ def config(
     model: str = typer.Option(None, help="Model name"),
     language: str = typer.Option(None, help="Note language (en/zh)"),
     github_token: str = typer.Option(None, "--github-token", help="GitHub Personal Access Token"),
+    notes_dir: str = typer.Option(None, "--notes-dir", help="Notes directory path"),
 ) -> None:
     """Configure LLM provider, API key, and preferences."""
     from neocortex.config import load_config, save_config
@@ -509,7 +510,7 @@ def config(
     cfg = load_config()
     lang = cfg.output_settings.language
 
-    has_updates = any(v is not None for v in [provider, api_key, base_url, model, language, github_token])
+    has_updates = any(v is not None for v in [provider, api_key, base_url, model, language, github_token, notes_dir])
 
     if not has_updates:
         console.print()
@@ -521,6 +522,7 @@ def config(
         console.print(f"  model:         {cfg.model or '(not set)'}")
         console.print(f"  github_token:  {_mask_api_key(cfg.github_token)}")
         console.print(f"  language:      {cfg.output_settings.language.value}")
+        console.print(f"  notes_dir:     {cfg.output_settings.notes_dir}")
         console.print()
         return
 
@@ -550,6 +552,9 @@ def config(
         except ValueError:
             console.print(f"  [red]{t('error', lang)}: Invalid language '{language}'. Valid: en, zh[/red]")
             raise typer.Exit(1)
+
+    if notes_dir is not None:
+        cfg.output_settings.notes_dir = notes_dir
 
     save_config(cfg)
     console.print(f"  {t('config_saved', cfg.output_settings.language)}")
