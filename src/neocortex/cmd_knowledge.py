@@ -358,6 +358,7 @@ def _run_chat() -> None:
 @app.command()
 def review(
     count: int = typer.Option(20, help="Max cards per session"),
+    mode: str = typer.Option("default", help="Mode: default, diagnostic, drill, hard"),
 ) -> None:
     """Review flashcards with spaced repetition (SM-2)."""
     from datetime import timedelta
@@ -372,8 +373,12 @@ def review(
     lang = _get_lang()
     notes_dir = get_notes_dir()
 
+    if mode not in ("default", "diagnostic", "drill", "hard"):
+        console.print(f"  [red]Invalid mode '{mode}'. Valid: default, diagnostic, drill, hard[/red]")
+        raise typer.Exit(1)
+
     all_cards = load_flashcards(notes_dir)
-    session_cards = get_review_session(all_cards, max_cards=count)
+    session_cards = get_review_session(all_cards, max_cards=count, mode=mode)
 
     console.print()
     console.print(f"  [bold]{t('review_title', lang)}[/bold]")

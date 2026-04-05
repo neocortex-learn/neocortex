@@ -33,9 +33,29 @@ def sm2_update(card: Flashcard, quality: int) -> Flashcard:
     return card
 
 
-def get_review_session(cards: list[Flashcard], max_cards: int = 20) -> list[Flashcard]:
-    """Select due cards for today's session, sorted by priority."""
+def get_review_session(
+    cards: list[Flashcard],
+    max_cards: int = 20,
+    mode: str = "default",
+) -> list[Flashcard]:
+    """Select cards for review session.
+
+    Modes:
+    - default: due cards, interleaved across concepts/sources
+    - diagnostic: random sample across ALL cards (not just due), test coverage
+    - drill: only struggling cards (ease_factor < 2.0), ignore schedule
+    - hard: due cards with ease_factor < 2.3 first, then others
+    """
     today = date.today().isoformat()
+
+    if mode == "diagnostic":
+        return _diagnostic_session(cards, max_cards)
+    if mode == "drill":
+        return _drill_session(cards, max_cards)
+    if mode == "hard":
+        return _hard_session(cards, max_cards)
+
+    # Default: due cards, interleaved
     due = [c for c in cards if not c.next_review or c.next_review <= today]
 
     def _sort_key(c: Flashcard) -> tuple[int, str]:
@@ -44,4 +64,62 @@ def get_review_session(cards: list[Flashcard], max_cards: int = 20) -> list[Flas
         return (1, c.next_review or "")
 
     due.sort(key=_sort_key)
-    return due[:max_cards]
+    due = due[:max_cards]
+    return _interleave(due)
+
+
+def _diagnostic_session(cards: list[Flashcard], max_cards: int) -> list[Flashcard]:
+    """Random sample across all cards, not just due. Tests coverage breadth."""
+    import random
+    pool = list(cards)
+    random.shuffle(pool)
+    return pool[:max_cards]
+
+
+def _drill_session(cards: list[Flashcard], max_cards: int) -> list[Flashcard]:
+    """Only struggling cards (ease_factor < 2.0), regardless of schedule."""
+    struggling = [c for c in cards if c.ease_factor < 2.0]
+    struggling.sort(key=lambda c: c.ease_factor)
+    return struggling[:max_cards]
+
+
+def _hard_session(cards: list[Flashcard], max_cards: int) -> list[Flashcard]:
+    """Due cards, but hard ones (ease_factor < 2.3) first."""
+    today = date.today().isoformat()
+    due = [c for c in cards if not c.next_review or c.next_review <= today]
+    hard = [c for c in due if c.ease_factor < 2.3]
+    normal = [c for c in due if c.ease_factor >= 2.3]
+    combined = hard + normal
+    return _interleave(combined[:max_cards])
+
+
+def _interleave(cards: list[Flashcard]) -> list[Flashcard]:
+    """Interleave cards across different sources/concepts to avoid blocking.
+
+    Based on Tulving's research: interleaving topics improves retention
+    compared to reviewing all cards from the same source consecutively.
+    """
+    if len(cards) <= 2:
+        return cards
+
+    # Group by source note (or concept for relationship cards)
+    groups: dict[str, list[Flashcard]] = {}
+    for c in cards:
+        key = c.source_note or c.concept or "unknown"
+        groups.setdefault(key, []).append(c)
+
+    # Round-robin across groups
+    result: list[Flashcard] = []
+    group_lists = list(groups.values())
+    idx = 0
+    while len(result) < len(cards):
+        added = False
+        for g in group_lists:
+            if idx < len(g):
+                result.append(g[idx])
+                added = True
+        if not added:
+            break
+        idx += 1
+
+    return result
