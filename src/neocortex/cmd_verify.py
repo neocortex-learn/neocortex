@@ -45,6 +45,28 @@ def _save_verify_report(notes_dir: Path, report: VerifyReport) -> Path:
             if fc.explanation:
                 lines.append(f"  {fc.explanation}")
 
+    if report.claims_checks:
+        drifted = [c for c in report.claims_checks if c.verdict != FactVerdict.SUPPORTED]
+        if drifted:
+            lines.append("")
+            lines.append("### Claims Drift")
+            for fc in drifted:
+                tag = fc.verdict.value.upper()
+                lines.append(f"- [{tag}] {fc.fact.text}")
+                if fc.explanation:
+                    lines.append(f"  {fc.explanation}")
+
+    if report.consistency_checks:
+        inconsistent = [c for c in report.consistency_checks if c.verdict != FactVerdict.SUPPORTED]
+        if inconsistent:
+            lines.append("")
+            lines.append("### Self-Consistency")
+            for fc in inconsistent:
+                tag = fc.verdict.value.upper()
+                lines.append(f"- [{tag}] {fc.fact.text}")
+                if fc.explanation:
+                    lines.append(f"  {fc.explanation}")
+
     content = (
         f"---\ntype: verify-report\ndate: {today}\n"
         f"fidelity_score: {report.fidelity_score}\n"
@@ -107,6 +129,45 @@ def _get_previous_fidelity(notes_dir: Path) -> int | None:
     return None
 
 
+def _get_all_fidelity_scores(notes_dir: Path) -> list[tuple[str, int]]:
+    """Read (date, score) from all verify reports, newest first."""
+    reports_dir = notes_dir / "_reports"
+    if not reports_dir.exists():
+        return []
+
+    results: list[tuple[str, int]] = []
+    for rp in sorted(reports_dir.glob("verify-*.md"), reverse=True):
+        try:
+            content = rp.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        date_match = re.search(r"^date:\s*(\S+)", content, re.MULTILINE)
+        score_match = re.search(r"^fidelity_score:\s*(\d+)", content, re.MULTILINE)
+        if date_match and score_match:
+            results.append((date_match.group(1), int(score_match.group(1))))
+    return results
+
+
+def _render_trend(scores: list[tuple[str, int]], width: int = 40) -> str:
+    """Render a simple ASCII sparkline of fidelity scores over time."""
+    if not scores:
+        return ""
+    # Reverse to chronological order
+    scores = list(reversed(scores))
+    values = [s for _, s in scores]
+    lo, hi = min(values), max(values)
+    span = max(hi - lo, 1)
+    bars = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
+
+    line = ""
+    for _, v in scores:
+        idx = min(len(bars) - 1, int((v - lo) / span * (len(bars) - 1)))
+        line += bars[idx]
+
+    dates_line = f"  {scores[0][0]}  {'.' * max(0, len(scores) - 2)}  {scores[-1][0]}"
+    return f"  {line}  ({lo}-{hi})\n{dates_line}"
+
+
 def _render_bar(ratio: float, width: int = 12) -> str:
     """Render a progress bar like ██████████░░."""
     filled = round(ratio * width)
@@ -119,10 +180,29 @@ def verify(
     full: bool = typer.Option(False, "--full", help="Verify all concepts (ignore cache)"),
     depth: str = typer.Option("standard", "--depth", help="shallow|standard|deep"),
     fix: bool = typer.Option(False, "--fix", help="Lower confidence for low-fidelity concepts"),
+    trend: bool = typer.Option(False, "--trend", help="Show fidelity score trend"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
 ) -> None:
     """Verify that compiled concepts are faithful to source notes."""
     from neocortex.config import get_notes_dir, load_config
+
+    if trend:
+        notes_dir = get_notes_dir()
+        scores = _get_all_fidelity_scores(notes_dir)
+        console.print()
+        console.print(f"  [bold]{t('verify_trend_title', load_config().output_settings.language)}[/bold]")
+        console.print()
+        if not scores:
+            console.print(f"  [dim]{t('verify_no_reports', load_config().output_settings.language)}[/dim]")
+        else:
+            console.print(_render_trend(scores))
+            console.print()
+            for d, s in scores[:10]:
+                style = "green" if s >= 80 else ("yellow" if s >= 50 else "red")
+                console.print(f"  {d}  [{style}]{s:>3}/100[/{style}]")
+        console.print()
+        return
+
     from neocortex.llm import create_provider
 
     cfg = load_config()
@@ -216,6 +296,28 @@ def verify(
                     tag = "[!]" if fc.verdict == FactVerdict.UNSUPPORTED else "[?]"
                     color = "red" if fc.verdict == FactVerdict.UNSUPPORTED else "yellow"
                     console.print(f"    [{color}]{tag} \"{fc.fact.text}\"[/{color}]")
+
+        # Claims cross-verification results (deep mode)
+        if report.claims_checks:
+            drifted = [c for c in report.claims_checks if c.verdict == FactVerdict.UNSUPPORTED]
+            if drifted:
+                console.print()
+                console.print(f"  [bold]{t('verify_claims_drift', lang)} ({len(drifted)})[/bold]")
+                for fc in drifted:
+                    console.print(f"    [red][!] \"{fc.fact.text}\"[/red]")
+                    if fc.explanation:
+                        console.print(f"        [dim]{fc.explanation}[/dim]")
+
+        # Self-consistency results (deep mode)
+        if report.consistency_checks:
+            inconsistent = [c for c in report.consistency_checks if c.verdict == FactVerdict.UNVERIFIABLE]
+            if inconsistent:
+                console.print()
+                console.print(f"  [bold]{t('verify_inconsistent', lang)} ({len(inconsistent)})[/bold]")
+                for fc in inconsistent:
+                    console.print(f"    [yellow][~] \"{fc.fact.text}\"[/yellow]")
+                    if fc.explanation:
+                        console.print(f"        [dim]{fc.explanation}[/dim]")
 
         console.print()
         console.print("  " + "\u2501" * 32)

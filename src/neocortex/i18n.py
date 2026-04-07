@@ -937,6 +937,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "verify_report_saved": {"en": "Report: {path}", "zh": "报告：{path}"},
     "verify_fixed": {"en": "Confidence lowered for {count} concepts", "zh": "已降低 {count} 个概念的信心度"},
     "verify_cached": {"en": "All concepts unchanged since last verify", "zh": "所有概念自上次验证以来未变化"},
+    "verify_claims_drift": {"en": "Claims Drift Detected", "zh": "声明漂移"},
+    "verify_inconsistent": {"en": "Inconsistent Assertions", "zh": "不一致断言"},
+    "verify_trend_title": {"en": "Fidelity Score Trend", "zh": "忠实度趋势"},
+    "verify_no_reports": {"en": "No verify reports found. Run 'kb verify' first.", "zh": "没有验证报告。请先运行 'kb verify'。"},
 
     # ── Visualize ──
     "map_title": {"en": "Concept Map", "zh": "概念图"},

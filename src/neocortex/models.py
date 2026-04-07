@@ -433,6 +433,8 @@ class VerifyReport(BaseModel):
     unverifiable: int = 0
     concept_results: list[ConceptVerification] = Field(default_factory=list)
     overview_checks: list[FactCheck] = Field(default_factory=list)
+    claims_checks: list[FactCheck] = Field(default_factory=list)
+    consistency_checks: list[FactCheck] = Field(default_factory=list)
     depth: str = "standard"
     date: str = ""
 

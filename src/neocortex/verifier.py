@@ -553,6 +553,181 @@ async def verify_overview(
     return checks
 
 
+# ── Claims cross-verification ──
+
+
+async def cross_verify_claims(
+    concept_name: str,
+    concept_body: str,
+    stored_claims: list[dict],
+    provider: LLMProvider,
+    language: Language = Language.EN,
+) -> list[FactCheck]:
+    """Compare stored claims (from compile) against concept entry content.
+
+    Checks whether claims extracted during compile are consistent with
+    the final concept entry. Detects drift between claims.json and
+    the actual concept page.
+    """
+    if not stored_claims or not concept_body.strip():
+        return []
+
+    lang_instruction = "用中文输出。" if language == Language.ZH else "Respond in English."
+
+    claims_text = "\n".join(
+        f"Claim {i}: {c['claim']}" for i, c in enumerate(stored_claims)
+    )
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are comparing stored factual claims against a concept wiki entry. "
+                "For each claim, check if the concept entry's content is consistent with it. "
+                "Judge each as:\n"
+                "- CONSISTENT: The concept entry agrees with or includes this claim\n"
+                "- DRIFTED: The concept entry contradicts or significantly reframes this claim\n"
+                "- ABSENT: The concept entry does not mention this claim at all\n\n"
+                f"{lang_instruction} "
+                'Output ONLY a JSON array: [{"index": 0, "verdict": "consistent|drifted|absent", "explanation": "..."}]'
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Concept entry for '{concept_name}':\n{concept_body[:2000]}\n\n"
+                f"Stored claims:\n{claims_text}"
+            ),
+        },
+    ]
+
+    raw = await provider.chat(messages, json_mode=True)
+    data = _parse_json_array(raw)
+
+    verdict_map = {
+        "consistent": FactVerdict.SUPPORTED,
+        "drifted": FactVerdict.UNSUPPORTED,
+        "absent": FactVerdict.UNVERIFIABLE,
+    }
+
+    checks: list[FactCheck] = []
+    llm_verdicts: dict[int, dict] = {}
+    for item in data:
+        idx = item.get("index", -1)
+        if isinstance(idx, int) and 0 <= idx < len(stored_claims):
+            llm_verdicts[idx] = item
+
+    for i, claim in enumerate(stored_claims):
+        fact = AtomicFact(
+            text=claim["claim"],
+            section="claims.json",
+            concept=concept_name,
+        )
+        if i in llm_verdicts:
+            v = llm_verdicts[i]
+            verdict = verdict_map.get(v.get("verdict", "").lower(), FactVerdict.UNVERIFIABLE)
+            explanation = v.get("explanation", "")
+        else:
+            verdict = FactVerdict.UNVERIFIABLE
+            explanation = ""
+        checks.append(FactCheck(fact=fact, verdict=verdict, explanation=explanation))
+
+    return checks
+
+
+# ── Self-consistency check ──
+
+
+async def self_consistency_check(
+    concept_body: str,
+    concept_name: str,
+    provider: LLMProvider,
+    language: Language = Language.EN,
+    n_samples: int = 3,
+) -> list[FactCheck]:
+    """SelfCheckGPT-inspired: ask the LLM to summarize the same concept
+    multiple times and check if key assertions are consistent across samples.
+
+    Returns FactChecks for assertions that are inconsistent across samples.
+    """
+    if not concept_body.strip():
+        return []
+
+    lang_instruction = "用中文输出。" if language == Language.ZH else "Respond in English."
+
+    # Step 1: Extract key assertions from the concept entry
+    messages_extract = [
+        {
+            "role": "system",
+            "content": (
+                "Extract the 3-5 most important factual assertions from this concept entry. "
+                "Each assertion should be a specific, verifiable claim. "
+                f"{lang_instruction} "
+                'Output ONLY a JSON array: [{"assertion": "..."}]'
+            ),
+        },
+        {"role": "user", "content": f"Concept: {concept_name}\n\n{concept_body[:2000]}"},
+    ]
+
+    raw = await provider.chat(messages_extract, json_mode=True)
+    assertions_data = _parse_json_array(raw)
+    assertions = [a["assertion"] for a in assertions_data if "assertion" in a][:5]
+
+    if not assertions:
+        return []
+
+    # Step 2: Ask the LLM to independently assess each assertion N times
+    # If the LLM "knows" the fact, answers converge; if hallucinated, they diverge
+    assertions_text = "\n".join(f"{i}. {a}" for i, a in enumerate(assertions))
+
+    samples: list[list[str]] = []
+    for _ in range(n_samples):
+        messages_check = [
+            {
+                "role": "system",
+                "content": (
+                    "For each assertion below, respond with TRUE if it is a well-known, "
+                    "generally accepted fact, or FALSE if it seems incorrect, fabricated, "
+                    "or highly specific/unverifiable. "
+                    'Output ONLY a JSON array: [{"index": 0, "verdict": "true|false"}]'
+                ),
+            },
+            {"role": "user", "content": assertions_text},
+        ]
+        raw = await provider.chat(messages_check, json_mode=True)
+        verdicts = _parse_json_array(raw)
+
+        sample_verdicts: list[str] = ["unknown"] * len(assertions)
+        for v in verdicts:
+            idx = v.get("index", -1)
+            if isinstance(idx, int) and 0 <= idx < len(assertions):
+                sample_verdicts[idx] = v.get("verdict", "unknown").lower()
+        samples.append(sample_verdicts)
+
+    # Step 3: Check consistency — if any assertion gets mixed true/false, flag it
+    checks: list[FactCheck] = []
+    for i, assertion in enumerate(assertions):
+        verdicts_for_i = [s[i] for s in samples]
+        true_count = sum(1 for v in verdicts_for_i if v == "true")
+        false_count = sum(1 for v in verdicts_for_i if v == "false")
+
+        fact = AtomicFact(text=assertion, section="self-consistency", concept=concept_name)
+
+        if true_count == n_samples:
+            verdict = FactVerdict.SUPPORTED
+            explanation = f"Consistent across {n_samples} samples (all TRUE)"
+        elif false_count == n_samples:
+            verdict = FactVerdict.UNSUPPORTED
+            explanation = f"Consistent across {n_samples} samples (all FALSE)"
+        else:
+            verdict = FactVerdict.UNVERIFIABLE
+            explanation = f"Inconsistent: {true_count} TRUE, {false_count} FALSE out of {n_samples} samples"
+
+        checks.append(FactCheck(fact=fact, verdict=verdict, explanation=explanation))
+
+    return checks
+
+
 # ── Cache ──
 
 
@@ -770,8 +945,9 @@ async def verify_knowledge_base(
         if fix:
             update_concept_confidence(concept_path, verification)
 
-    # Verify overview (only in deep mode)
-    if depth == "deep":
+    # Deep mode: overview + claims cross-verification + self-consistency
+    if depth == "deep" and provider is not None:
+        # Overview verification
         overview_path = notes_dir / "overview.md"
         if overview_path.exists():
             try:
@@ -783,19 +959,63 @@ async def verify_knowledge_base(
             except (OSError, UnicodeDecodeError):
                 pass
 
+        # Claims cross-verification
+        from neocortex.config import load_claims
+        from neocortex.scanner.profile import normalize_gap_name
+
+        all_claims = load_claims()
+        for cv in report.concept_results:
+            normalized = normalize_gap_name(cv.concept_name)
+            concept_claims = all_claims.get(normalized, [])
+            if not concept_claims:
+                continue
+            # Find concept body
+            slug = cv.concept_name.strip().lower().replace(" ", "-")
+            concept_path = concepts_dir / f"{slug}.md"
+            if not concept_path.exists():
+                continue
+            try:
+                body = extract_concept_body(concept_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                continue
+            checks = await cross_verify_claims(
+                cv.concept_name, body, concept_claims, provider, language,
+            )
+            report.claims_checks.extend(checks)
+
+        # Self-consistency check on low-confidence concepts
+        low_conf = [
+            cv for cv in report.concept_results
+            if cv.total_facts > 0 and cv.supported_ratio < 0.8
+        ]
+        for cv in low_conf[:5]:  # Limit to 5 concepts to control cost
+            slug = cv.concept_name.strip().lower().replace(" ", "-")
+            concept_path = concepts_dir / f"{slug}.md"
+            if not concept_path.exists():
+                continue
+            try:
+                body = extract_concept_body(concept_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                continue
+            checks = await self_consistency_check(
+                body, cv.concept_name, provider, language,
+            )
+            report.consistency_checks.extend(checks)
+
     # Aggregate totals
     for cv in report.concept_results:
         report.supported += cv.supported_count
         report.unsupported += cv.unsupported_count
         report.unverifiable += cv.unverifiable_count
 
-    for oc in report.overview_checks:
-        if oc.verdict == FactVerdict.SUPPORTED:
-            report.supported += 1
-        elif oc.verdict == FactVerdict.UNSUPPORTED:
-            report.unsupported += 1
-        else:
-            report.unverifiable += 1
+    for check_list in (report.overview_checks, report.claims_checks, report.consistency_checks):
+        for oc in check_list:
+            if oc.verdict == FactVerdict.SUPPORTED:
+                report.supported += 1
+            elif oc.verdict == FactVerdict.UNSUPPORTED:
+                report.unsupported += 1
+            else:
+                report.unverifiable += 1
 
     report.total_facts = report.supported + report.unsupported + report.unverifiable
     report.concepts_verified = len(report.concept_results)
