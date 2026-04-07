@@ -374,6 +374,69 @@ class LintReport(BaseModel):
     stats: dict[str, int] = Field(default_factory=dict)
 
 
+# ── Verify ──
+
+class FactVerdict(str, Enum):
+    SUPPORTED = "supported"
+    UNSUPPORTED = "unsupported"
+    UNVERIFIABLE = "unverifiable"
+
+
+class AtomicFact(BaseModel):
+    """从概念条目中分解出的原子事实。"""
+    text: str
+    section: str = ""
+    concept: str = ""
+
+
+class Evidence(BaseModel):
+    """支撑某个原子事实的证据片段。"""
+    source_note: str
+    excerpt: str
+    matched_by: str = "keyword"  # keyword | semantic | llm
+
+
+class FactCheck(BaseModel):
+    """单个事实的验证结果。"""
+    fact: AtomicFact
+    verdict: FactVerdict = FactVerdict.UNVERIFIABLE
+    evidence: list[Evidence] = Field(default_factory=list)
+    explanation: str = ""
+
+
+class ConceptVerification(BaseModel):
+    """单个概念条目的验证结果。"""
+    concept_name: str
+    fact_checks: list[FactCheck] = Field(default_factory=list)
+    supported_count: int = 0
+    unsupported_count: int = 0
+    unverifiable_count: int = 0
+
+    @property
+    def total_facts(self) -> int:
+        return len(self.fact_checks)
+
+    @property
+    def supported_ratio(self) -> float:
+        if not self.fact_checks:
+            return 1.0
+        return self.supported_count / len(self.fact_checks)
+
+
+class VerifyReport(BaseModel):
+    """知识库忠实度验证报告。"""
+    fidelity_score: int = 100
+    concepts_verified: int = 0
+    total_facts: int = 0
+    supported: int = 0
+    unsupported: int = 0
+    unverifiable: int = 0
+    concept_results: list[ConceptVerification] = Field(default_factory=list)
+    overview_checks: list[FactCheck] = Field(default_factory=list)
+    depth: str = "standard"
+    date: str = ""
+
+
 # ── Clip ──
 
 class Clip(BaseModel):

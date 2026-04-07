@@ -13,6 +13,7 @@ from neocortex.i18n import t
 @kb_app.command()
 def compile(
     full: bool = typer.Option(False, "--full", help="Full recompilation (ignore cache)"),
+    verify: bool = typer.Option(False, "--verify", help="Verify fidelity after compile"),
 ) -> None:
     """Compile notes into a linked concept wiki."""
     from neocortex.config import get_notes_dir, load_config, load_profile
@@ -79,5 +80,33 @@ def compile(
         from neocortex.config import append_log
         if result.notes_processed > 0:
             append_log("compile", f"{result.notes_processed} notes, {result.concepts_created + result.concepts_updated} concepts")
+
+        if verify and result.notes_processed > 0:
+            from neocortex.verifier import verify_knowledge_base
+
+            console.print(f"  [bold]{t('verify_title', lang)}[/bold]")
+            console.print()
+
+            v_report = await verify_knowledge_base(
+                notes_dir, provider, language=lang, depth="standard",
+            )
+
+            if v_report.fidelity_score >= 80:
+                score_style = "green"
+            elif v_report.fidelity_score >= 50:
+                score_style = "yellow"
+            else:
+                score_style = "red"
+
+            console.print(
+                f"  [{score_style}]{t('verify_score', lang, score=str(v_report.fidelity_score))}[/{score_style}]"
+            )
+            console.print(
+                f"  [dim]{t('verify_summary', lang, concepts=str(v_report.concepts_verified), facts=str(v_report.total_facts), unsupported=str(v_report.unsupported))}[/dim]"
+            )
+            console.print()
+
+            from neocortex.cmd_verify import _save_verify_report
+            _save_verify_report(notes_dir, v_report)
 
     asyncio.run(_run_compile())

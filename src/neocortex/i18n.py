@@ -919,6 +919,22 @@ STRINGS: dict[str, dict[str, str]] = {
     "lint_decaying": {"en": "Decaying Concepts", "zh": "衰减概念"},
     "complexity_label": {"en": "Knowledge Complexity", "zh": "知识复杂性"},
 
+    # ── Verify ──
+    "verify_title": {"en": "Knowledge Base Fidelity Check", "zh": "知识库忠实度验证"},
+    "verify_checking": {"en": "Verifying compiled concepts...", "zh": "正在验证编译概念..."},
+    "verify_score": {"en": "Fidelity Score: {score}/100", "zh": "忠实度：{score}/100"},
+    "verify_no_concepts": {"en": "No concepts found to verify.", "zh": "没有找到可验证的概念。"},
+    "verify_summary": {
+        "en": "{concepts} concepts, {facts} facts, {unsupported} unsupported",
+        "zh": "{concepts} 个概念，{facts} 条事实，{unsupported} 条无支撑",
+    },
+    "verify_all_supported": {"en": "All facts supported by source notes!", "zh": "所有事实均有源笔记支撑！"},
+    "verify_trend_last": {"en": "last check", "zh": "上次检查"},
+    "verify_unsupported": {"en": "UNSUPPORTED", "zh": "无支撑"},
+    "verify_unverifiable": {"en": "UNVERIFIABLE", "zh": "无法验证"},
+    "verify_overview": {"en": "Overview Cross-Reference", "zh": "综述交叉验证"},
+    "verify_report_saved": {"en": "Report: {path}", "zh": "报告：{path}"},
+
     # ── Visualize ──
     "map_title": {"en": "Concept Map", "zh": "概念图"},
     "map_generating": {"en": "Generating concept map...", "zh": "正在生成概念图..."},

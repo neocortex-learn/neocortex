@@ -30,7 +30,7 @@ neocortex --help          # 查看 CLI 帮助
 ```
 顶层命令（6 个）：read, ask (--chat), review, clip, inbox, daily
 子命令组：
-  kb:       notes, card, compile, lint, map
+  kb:       notes, card, compile, lint, verify, map
   discover: explore, research, feed
   learn:    recommend (--plan), digest, opportunities
   profile:  init, config, scan, import, 默认（查看画像）
@@ -47,6 +47,7 @@ src/neocortex/
 ├── cmd_import.py   # profile 组：import 命令
 ├── cmd_compile.py  # kb 组：compile（概念编译）
 ├── cmd_lint.py     # kb 组：lint（知识库健康检查）
+├── cmd_verify.py   # kb 组：verify（忠实度验证）
 ├── cmd_visualize.py # kb 组：map；learn 组：digest
 ├── cmd_clip.py     # 顶层：clip + inbox
 ├── cmd_daily.py    # 顶层：daily
@@ -60,7 +61,8 @@ src/neocortex/
 ├── discovery.py    # 自动发现本地项目（onboarding 用）
 ├── explorer.py     # 站点探索引擎（扫描作者文章列表并排序）
 ├── feeder.py       # RSS 订阅引擎（获取 feed + gap 智能过滤）
-├── linter.py       # 知识库健康检查（孤岛、断链、陈旧、覆盖盲区、重复、衰减、建议探索共 7 项）
+├── linter.py       # 知识库健康检查（孤岛、断链、陈旧、覆盖盲区、重复、衰减、建议探索、低忠实度共 8 项）
+├── verifier.py     # 忠实度验证引擎（原子事实分解 → 源笔记溯源 → 独立审查判定）
 ├── planner.py      # 学习计划生成器（结构化周计划）
 ├── prober.py       # Socratic Probe 技能校准（生成和评估验证问题）
 ├── researcher.py   # 网络搜索引擎（搜索 gap 相关文章 + LLM 排序）

@@ -340,6 +340,45 @@ def fix_orphan_notes(notes_dir: Path, provider: object | None = None) -> int:
     return 0
 
 
+def check_low_fidelity(notes_dir: Path) -> list[LintIssue]:
+    """Flag concepts with low fidelity from the most recent verify report."""
+    reports_dir = notes_dir / "_reports"
+    if not reports_dir.exists():
+        return []
+
+    reports = sorted(reports_dir.glob("verify-*.md"), reverse=True)
+    if not reports:
+        return []
+
+    latest = reports[0]
+    try:
+        content = latest.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    score_match = re.search(r"^fidelity_score:\s*(\d+)", content, re.MULTILINE)
+    if not score_match:
+        return []
+
+    score = int(score_match.group(1))
+    issues: list[LintIssue] = []
+
+    if score < 50:
+        issues.append(LintIssue(
+            type="low_fidelity",
+            severity="warning",
+            message=f"Knowledge base fidelity score is {score}/100 — run 'kb verify' for details",
+        ))
+    elif score < 70:
+        issues.append(LintIssue(
+            type="low_fidelity",
+            severity="info",
+            message=f"Knowledge base fidelity score is {score}/100",
+        ))
+
+    return issues
+
+
 async def lint_knowledge_base(
     notes_dir: Path,
     profile: Profile,
@@ -355,6 +394,7 @@ async def lint_knowledge_base(
         "coverage_gap": check_coverage_gaps(notes_dir, profile),
         "duplicate": check_duplicate_concepts(notes_dir),
         "decaying": check_decaying_concepts(notes_dir),
+        "low_fidelity": check_low_fidelity(notes_dir),
     }
 
     for check_type, issues in checks.items():
