@@ -81,7 +81,7 @@ neocortex ask "When should I use Raft vs Paxos?"      # Q&A with profile context
 | `neocortex kb notes` | List or search your notes (`--search`) |
 | `neocortex kb card` | Generate a visual PNG card from a note |
 | `neocortex kb compile` | Compile notes into a linked concept wiki (`--verify` to verify after) |
-| `neocortex kb verify` | Verify concept entries are faithful to source notes (anti-hallucination) |
+| `neocortex kb verify` | Verify concept entries are faithful to source notes (`--fix`/`--trend`/`--depth deep`) |
 | `neocortex kb lint` | Run health checks on your knowledge base (8 checks + `--fix`) |
 | `neocortex kb map` | Generate a Mermaid concept map (`--domain`, `--around`) |
 

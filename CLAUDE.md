@@ -204,18 +204,26 @@ neocortex read interview.m4a --focus "关键话题"
 2. **源笔记溯源**：关键词匹配（中文 bigram / 英文分词）在源笔记中定位证据，零 LLM 成本
 3. **独立审查判定**：独立 LLM 调用（不看生成过程）判定每条事实为 SUPPORTED / UNSUPPORTED / UNVERIFIABLE
 4. **Overview 交叉验证**（deep 模式）：验证 overview.md 中的跨概念声明
+5. **Claims 交叉验证**（deep 模式）：对比 claims.json 与概念条目，检测声明漂移
+6. **自一致性检查**（deep 模式）：SelfCheckGPT 思路，对低忠实度概念多次采样检查断言一致性
 
 三级深度：
 - `--depth shallow`：零 LLM 成本，纯关键词匹配，秒出结果
 - `--depth standard`（默认）：每概念 2 次 LLM 调用，完整验证管道
-- `--depth deep`：额外验证 overview.md 的跨概念声明
+- `--depth deep`：标准验证 + overview 交叉验证 + claims 漂移检测 + 自一致性检查
 
 评分公式：`fidelity_score = 100 × (supported + 0.5 × unverifiable) / total`
+
+功能：
+- `--fix`：低忠实度概念自动降低 confidence（<0.5 乘 0.8，<0.8 乘 0.9）
+- `--trend`：ASCII sparkline 展示历史 fidelity score 变化
+- `--full`：忽略缓存，强制验证所有概念
 
 集成点：
 - `kb compile --verify`：编译后自动验证
 - `kb lint` 自动读取最近的 verify 报告，低于 70 分报 info，低于 50 分报 warning
-- 报告存储：`_reports/verify-{date}.md`，保留最近 12 份，支持趋势追踪
+- VerifyCache：基于 SHA256 跳过未变化的概念，`--full` 强制跳过
+- 报告存储：`_reports/verify-{date}.md`，保留最近 12 份
 - 活动日志：自动追加到 `log.md`
 
 ## 外部工具依赖（可选）

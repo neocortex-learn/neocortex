@@ -112,6 +112,8 @@ neocortex ask --chat                                # 多轮对话
 neocortex kb compile [--full] [--verify]           # 概念编译（--verify 编译后自动验证忠实度）
 neocortex kb verify [--depth shallow|standard|deep] # 验证概念条目是否忠于源笔记
 neocortex kb verify --concept "Event Sourcing"     # 只验证指定概念
+neocortex kb verify --fix                          # 验证 + 降低低忠实度概念的信心度
+neocortex kb verify --trend                        # 查看历史忠实度趋势
 neocortex kb lint [--fix]                          # 健康检查（0-100 分）
 neocortex kb map [--domain X] [--around Y]         # Mermaid 概念图
 neocortex kb notes [--search X] [--open]           # 笔记列表/搜索
@@ -121,7 +123,10 @@ neocortex kb card [note.md] [--theme light]        # 生成 PNG 视觉卡片
 `kb verify` 检查 LLM 编译产出是否忠于原始笔记，防止幻觉在知识库中累积：
 - `--depth shallow`：零 LLM 成本，纯关键词匹配，秒出结果
 - `--depth standard`（默认）：原子事实分解 + 独立审查，每概念 2 次 LLM 调用
-- `--depth deep`：额外验证 overview.md 的跨概念声明
+- `--depth deep`：标准验证 + overview 交叉验证 + claims 漂移检测 + 自一致性检查
+- `--fix`：低忠实度概念自动降低信心度
+- `--trend`：ASCII sparkline 展示历史分数变化
+- `--full`：忽略缓存，强制验证所有概念（默认跳过未变化的概念）
 
 ---
 
