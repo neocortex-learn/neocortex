@@ -159,29 +159,51 @@ async def decompose_atomic_facts(
 # ── Stage 2: Source Grounding (keyword matching, zero LLM cost) ──
 
 
+_STOP_WORDS_EN = {
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "can", "shall", "in", "on", "at", "to",
+    "for", "of", "with", "by", "from", "as", "into", "through", "during",
+    "before", "after", "above", "below", "between", "and", "or", "but",
+    "not", "no", "nor", "so", "yet", "both", "either", "neither", "each",
+    "every", "all", "any", "few", "more", "most", "other", "some", "such",
+    "than", "too", "very", "just", "also", "that", "this", "these", "those",
+    "it", "its", "they", "them", "their", "which", "what", "when", "where",
+    "who", "how", "why", "if", "then", "only", "same", "about", "up",
+    "out", "over", "under", "again", "further", "once",
+}
+
+_STOP_CHARS_ZH = set(
+    "的了在是和与或等及对中为以将把被从到而但也还就都不没有可以这那一个"
+    "其它他她它们我你您他们我们你们自己所着过地得很更最能会要让使"
+)
+
+
 def _extract_keywords(text: str) -> list[str]:
-    """Extract significant keywords from a fact for matching."""
-    # Remove common stop words and short words
-    stop_words = {
-        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-        "have", "has", "had", "do", "does", "did", "will", "would", "could",
-        "should", "may", "might", "can", "shall", "in", "on", "at", "to",
-        "for", "of", "with", "by", "from", "as", "into", "through", "during",
-        "before", "after", "above", "below", "between", "and", "or", "but",
-        "not", "no", "nor", "so", "yet", "both", "either", "neither", "each",
-        "every", "all", "any", "few", "more", "most", "other", "some", "such",
-        "than", "too", "very", "just", "also", "that", "this", "these", "those",
-        "it", "its", "they", "them", "their", "which", "what", "when", "where",
-        "who", "how", "why", "if", "then", "only", "same", "about", "up",
-        "out", "over", "under", "again", "further", "once",
-        # Chinese stop words
-        "的", "了", "在", "是", "和", "与", "或", "等", "及", "对", "中",
-        "为", "以", "将", "把", "被", "从", "到", "而", "但", "也", "还",
-        "就", "都", "不", "没", "有", "可以", "这", "那", "一个", "个",
-    }
-    # Split on non-alphanumeric (handles both English and Chinese)
-    words = re.findall(r"[\w\u4e00-\u9fff]{2,}", text.lower())
-    return [w for w in words if w not in stop_words]
+    """Extract significant keywords from a fact for matching.
+
+    For Chinese: split into bigrams (2-char sliding window) after removing
+    stop characters and punctuation, producing overlapping 2-char terms.
+    For English: split on whitespace/punctuation, remove stop words.
+    """
+    # Separate Chinese and English parts
+    chinese_chars = re.findall(r"[\u4e00-\u9fff]", text)
+    english_words = re.findall(r"[a-zA-Z]{2,}", text.lower())
+
+    keywords: list[str] = []
+
+    # English keywords
+    for w in english_words:
+        if w not in _STOP_WORDS_EN:
+            keywords.append(w)
+
+    # Chinese keywords: filter stop chars, then extract bigrams
+    filtered_zh = [c for c in chinese_chars if c not in _STOP_CHARS_ZH]
+    for i in range(len(filtered_zh) - 1):
+        bigram = filtered_zh[i] + filtered_zh[i + 1]
+        keywords.append(bigram)
+
+    return keywords
 
 
 def find_evidence_keyword(
