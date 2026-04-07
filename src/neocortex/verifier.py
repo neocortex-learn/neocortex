@@ -678,10 +678,11 @@ async def self_consistency_check(
 
     # Step 2: Ask the LLM to independently assess each assertion N times
     # If the LLM "knows" the fact, answers converge; if hallucinated, they diverge
-    assertions_text = "\n".join(f"{i}. {a}" for i, a in enumerate(assertions))
+    assertions_text = "\n".join(f"{i + 1}. {a}" for i, a in enumerate(assertions))
 
-    samples: list[list[str]] = []
-    for _ in range(n_samples):
+    import asyncio as _aio
+
+    async def _sample_once() -> list[str]:
         messages_check = [
             {
                 "role": "system",
@@ -689,7 +690,7 @@ async def self_consistency_check(
                     "For each assertion below, respond with TRUE if it is a well-known, "
                     "generally accepted fact, or FALSE if it seems incorrect, fabricated, "
                     "or highly specific/unverifiable. "
-                    'Output ONLY a JSON array: [{"index": 0, "verdict": "true|false"}]'
+                    'Output ONLY a JSON array: [{"index": 1, "verdict": "true|false"}]'
                 ),
             },
             {"role": "user", "content": assertions_text},
@@ -700,9 +701,15 @@ async def self_consistency_check(
         sample_verdicts: list[str] = ["unknown"] * len(assertions)
         for v in verdicts:
             idx = v.get("index", -1)
-            if isinstance(idx, int) and 0 <= idx < len(assertions):
-                sample_verdicts[idx] = v.get("verdict", "unknown").lower()
-        samples.append(sample_verdicts)
+            # Accept both 0-indexed and 1-indexed responses
+            if isinstance(idx, int):
+                if 1 <= idx <= len(assertions):
+                    sample_verdicts[idx - 1] = v.get("verdict", "unknown").lower()
+                elif idx == 0:
+                    sample_verdicts[0] = v.get("verdict", "unknown").lower()
+        return sample_verdicts
+
+    samples = await _aio.gather(*[_sample_once() for _ in range(n_samples)])
 
     # Step 3: Check consistency — if any assertion gets mixed true/false, flag it
     checks: list[FactCheck] = []

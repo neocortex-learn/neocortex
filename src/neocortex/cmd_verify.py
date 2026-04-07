@@ -188,12 +188,13 @@ def verify(
 
     if trend:
         notes_dir = get_notes_dir()
+        lang = load_config().output_settings.language
         scores = _get_all_fidelity_scores(notes_dir)
         console.print()
-        console.print(f"  [bold]{t('verify_trend_title', load_config().output_settings.language)}[/bold]")
+        console.print(f"  [bold]{t('verify_trend_title', lang)}[/bold]")
         console.print()
         if not scores:
-            console.print(f"  [dim]{t('verify_no_reports', load_config().output_settings.language)}[/dim]")
+            console.print(f"  [dim]{t('verify_no_reports', lang)}[/dim]")
         else:
             console.print(_render_trend(scores))
             console.print()
@@ -231,7 +232,6 @@ def verify(
             )
 
         if json_output:
-            import json as json_lib
             console.print(report.model_dump_json(indent=2))
             return
 
