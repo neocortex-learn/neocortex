@@ -460,12 +460,12 @@ neocortex read podcast.mp3
 | 4 | 每个任务产生两个输出（用户答案 + Wiki 更新） | bluewater8008 | ✅ Query 反写 — ask 回答 + insight 编译 |
 | 5 | 开发专属编译工具，query 结果归档回 wiki | xoai | ✅ Neocortex 整体就是这个工具 |
 | 7 | 闭环复利：query 结果存入 notes，下次查询受益 | VictorVVedtion | ✅ insight 编译进概念图 |
+| 3 | "不做内容发明"硬约束 — LLM 是速记员不是代笔 | peas | ✅ `kb verify` — FACTScore 原子事实分解 + Hermes 独立审查，检测概念条目中无源笔记支撑的断言；lint 自动读取 verify 报告标记低忠实度 |
 
 ### 7.2 值得后续跟进的洞察
 
 | # | 留言要点 | 作者 | 价值 | 实施思路 |
 |---|---------|------|------|---------|
-| **3** | "不做内容发明"硬约束 — LLM 是速记员不是代笔 | peas | **高** — 防止知识库被 LLM 幻觉污染 | overview.md 和 insight 反写中标记 `source_type: llm_synthesis`，与 `source_type: user_note` 区分；lint 新增检查项：综合内容占比超过阈值时警告 |
 | **4** | Token 预算分层 L0→L3 — 强制先读索引再读全文 | bluewater8008 | **中高** — 扩展时必要 | 当前 ask 只截取 INDEX.md 前 2000 字符；可改为：先读 INDEX 定位相关概念 → 再读相关概念页 → 必要时读原始笔记。分层检索比暴力截断更精准 |
 | **9** | 发散性检查 — 摄入后自动生成"反面论点与数据空白" | localwolfpackai | **中** — 对抗确认偏误 | 在 `compile_note()` 中可选生成 `## Counterarguments` 段落；或在 lint 中新增检查：某概念所有 source 来自同一立场时建议补充对立来源 |
 | **8** | 反转思路 — 数据进 SQLite，渲染为 Markdown | mpazik | **中** — 扩展到千篇以上时考虑 | 当前 FTS5 + fastembed 已有 SQLite 基础；如果未来笔记量过千，可以考虑 DB-first 架构 |

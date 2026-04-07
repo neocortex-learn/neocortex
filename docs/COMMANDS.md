@@ -109,12 +109,19 @@ neocortex ask --chat                                # 多轮对话
 ## `kb` — 知识库管理
 
 ```bash
-neocortex kb compile [--full]                      # 概念编译（通常自动，不需要手动跑）
+neocortex kb compile [--full] [--verify]           # 概念编译（--verify 编译后自动验证忠实度）
+neocortex kb verify [--depth shallow|standard|deep] # 验证概念条目是否忠于源笔记
+neocortex kb verify --concept "Event Sourcing"     # 只验证指定概念
 neocortex kb lint [--fix]                          # 健康检查（0-100 分）
 neocortex kb map [--domain X] [--around Y]         # Mermaid 概念图
 neocortex kb notes [--search X] [--open]           # 笔记列表/搜索
 neocortex kb card [note.md] [--theme light]        # 生成 PNG 视觉卡片
 ```
+
+`kb verify` 检查 LLM 编译产出是否忠于原始笔记，防止幻觉在知识库中累积：
+- `--depth shallow`：零 LLM 成本，纯关键词匹配，秒出结果
+- `--depth standard`（默认）：原子事实分解 + 独立审查，每概念 2 次 LLM 调用
+- `--depth deep`：额外验证 overview.md 的跨概念声明
 
 ---
 
@@ -185,6 +192,7 @@ neocortex discover research "主题"        # 搜索学习
 ```bash
 neocortex learn digest                   # 本周总结
 neocortex kb lint                        # 健康检查
+neocortex kb verify                      # 忠实度验证
 neocortex kb map                         # 概念图谱
 neocortex inbox --synthesize             # 碎片综合
 ```
@@ -214,10 +222,13 @@ neocortex learn digest --days 30         # 月度反思
 
 ~/Documents/NeocortexNotes/         # 笔记目录（Obsidian vault）
 ├── INDEX.md                       # 知识地图（自动维护）
+├── overview.md                    # 全局综述（compile --full 生成）
+├── log.md                         # 活动日志
 ├── concepts/                      # 概念条目
 ├── insights/                      # 问答沉淀
 ├── clips/                         # 碎片存储
 ├── maps/                          # 概念图
+├── _reports/                      # lint/verify 报告（自动维护，保留最近 12 份）
 ├── web-backend/                   # 按主题分类的笔记
 ├── general/
 ├── .flashcards/                   # 闪卡数据

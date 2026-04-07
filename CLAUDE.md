@@ -195,6 +195,29 @@ neocortex read interview.m4a --focus "关键话题"
 - 盲区提示
 - 建议方向
 
+### 忠实度验证（`neocortex kb verify`）
+借鉴 Karpathy LLM Knowledge Base 的 audit 思路和 jumperz Swarm Agent 的 Hermes 独立审查员模式，
+验证 compile 产出的概念条目是否忠于源笔记，防止 LLM 幻觉在知识库中累积。
+
+核心机制（FACTScore 方法）：
+1. **原子事实分解**：LLM 将概念条目拆解为 3-8 条可验证的原子事实
+2. **源笔记溯源**：关键词匹配（中文 bigram / 英文分词）在源笔记中定位证据，零 LLM 成本
+3. **独立审查判定**：独立 LLM 调用（不看生成过程）判定每条事实为 SUPPORTED / UNSUPPORTED / UNVERIFIABLE
+4. **Overview 交叉验证**（deep 模式）：验证 overview.md 中的跨概念声明
+
+三级深度：
+- `--depth shallow`：零 LLM 成本，纯关键词匹配，秒出结果
+- `--depth standard`（默认）：每概念 2 次 LLM 调用，完整验证管道
+- `--depth deep`：额外验证 overview.md 的跨概念声明
+
+评分公式：`fidelity_score = 100 × (supported + 0.5 × unverifiable) / total`
+
+集成点：
+- `kb compile --verify`：编译后自动验证
+- `kb lint` 自动读取最近的 verify 报告，低于 70 分报 info，低于 50 分报 warning
+- 报告存储：`_reports/verify-{date}.md`，保留最近 12 份，支持趋势追踪
+- 活动日志：自动追加到 `log.md`
+
 ## 外部工具依赖（可选）
 - `wechat-article-to-markdown` — 微信公众号文章抓取，`neocortex read` 自动检测微信 URL 并调用
   安装：`uv tool install wechat-article-to-markdown`

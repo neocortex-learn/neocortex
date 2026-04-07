@@ -80,8 +80,9 @@ neocortex ask "When should I use Raft vs Paxos?"      # Q&A with profile context
 |---------|-------------|
 | `neocortex kb notes` | List or search your notes (`--search`) |
 | `neocortex kb card` | Generate a visual PNG card from a note |
-| `neocortex kb compile` | Compile notes into a linked concept wiki |
-| `neocortex kb lint` | Run health checks on your knowledge base (7 checks + `--fix`) |
+| `neocortex kb compile` | Compile notes into a linked concept wiki (`--verify` to verify after) |
+| `neocortex kb verify` | Verify concept entries are faithful to source notes (anti-hallucination) |
+| `neocortex kb lint` | Run health checks on your knowledge base (8 checks + `--fix`) |
 | `neocortex kb map` | Generate a Mermaid concept map (`--domain`, `--around`) |
 
 ### `learn` — Learning Path & Progress
@@ -178,7 +179,8 @@ Bring your own API key. Your key stays local in `~/.neocortex/config.json`.
 - [x] Personalized reading with 3 depth levels (scan/standard/deep)
 - [x] Concept compilation + knowledge indexing
 - [x] Spaced repetition flashcard review (SM-2)
-- [x] Knowledge base health checks (7 lint rules + auto-fix)
+- [x] Knowledge base health checks (8 lint rules + auto-fix)
+- [x] Fidelity verification (FACTScore decomposition + Hermes independent review)
 - [x] Content discovery (explore, research, RSS feeds)
 - [x] Fragment capture (clip, inbox, daily resurfacing)
 - [x] Knowledge confidence decay model
