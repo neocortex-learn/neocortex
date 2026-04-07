@@ -116,8 +116,9 @@ def _render_bar(ratio: float, width: int = 12) -> str:
 @kb_app.command()
 def verify(
     concept: Optional[list[str]] = typer.Option(None, "--concept", help="Verify specific concept(s)"),
-    full: bool = typer.Option(False, "--full", help="Verify all concepts"),
+    full: bool = typer.Option(False, "--full", help="Verify all concepts (ignore cache)"),
     depth: str = typer.Option("standard", "--depth", help="shallow|standard|deep"),
+    fix: bool = typer.Option(False, "--fix", help="Lower confidence for low-fidelity concepts"),
     json_output: bool = typer.Option(False, "--json", help="JSON output"),
 ) -> None:
     """Verify that compiled concepts are faithful to source notes."""
@@ -141,14 +142,12 @@ def verify(
         from neocortex.verifier import verify_knowledge_base
 
         concept_names = concept if concept else None
-        if not full and not concept_names:
-            # Default: verify all (could limit to recent in the future)
-            concept_names = None
 
         with console.status(f"  {t('verify_checking', lang)}"):
             report = await verify_knowledge_base(
                 notes_dir, provider, language=lang,
                 concept_names=concept_names, depth=depth,
+                force=full, fix=fix,
             )
 
         if json_output:
@@ -162,7 +161,10 @@ def verify(
         console.print()
 
         if report.concepts_verified == 0:
-            console.print(f"  {t('verify_no_concepts', lang)}")
+            if not full and not concept_names:
+                console.print(f"  [dim]{t('verify_cached', lang)}[/dim]")
+            else:
+                console.print(f"  {t('verify_no_concepts', lang)}")
             console.print()
             return
 
@@ -245,6 +247,14 @@ def verify(
             console.print(
                 f"  [dim]{t('verify_summary', lang, concepts=str(report.concepts_verified), facts=str(report.total_facts), unsupported=str(report.unsupported))}[/dim]"
             )
+
+        if fix:
+            penalized = sum(
+                1 for cv in report.concept_results
+                if cv.total_facts > 0 and cv.supported_ratio < 0.8
+            )
+            if penalized > 0:
+                console.print(f"  [yellow]{t('verify_fixed', lang, count=str(penalized))}[/yellow]")
 
         console.print()
 

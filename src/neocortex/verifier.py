@@ -7,8 +7,12 @@ process — only the generated artifact and raw source material.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
+import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from neocortex.llm.base import LLMProvider
@@ -549,6 +553,107 @@ async def verify_overview(
     return checks
 
 
+# ── Cache ──
+
+
+class VerifyCache:
+    """Track verified concept content hashes to skip re-verification."""
+
+    def __init__(self, cache_path: Path) -> None:
+        self._path = cache_path
+        self._data = self._load()
+
+    def _load(self) -> dict[str, str]:
+        if not self._path.exists():
+            return {}
+        try:
+            return json.loads(self._path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def needs_verify(self, concept_path: Path) -> bool:
+        try:
+            content = concept_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return True
+        current_hash = hashlib.sha256(content.encode()).hexdigest()
+        return self._data.get(str(concept_path)) != current_hash
+
+    def mark_verified(self, concept_path: Path) -> None:
+        try:
+            content = concept_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return
+        self._data[str(concept_path)] = hashlib.sha256(content.encode()).hexdigest()
+
+    def save(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=str(self._path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, str(self._path))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+
+# ── Confidence update ──
+
+
+def update_concept_confidence(concept_path: Path, verification: ConceptVerification) -> None:
+    """Lower confidence for concepts with unsupported facts.
+
+    - supported_ratio >= 0.8: no change
+    - supported_ratio < 0.8: confidence *= 0.9
+    - supported_ratio < 0.5: confidence *= 0.8
+    """
+    if verification.total_facts == 0:
+        return
+
+    ratio = verification.supported_ratio
+    if ratio >= 0.8:
+        return
+
+    try:
+        content = concept_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return
+
+    fm_match = re.match(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
+    if not fm_match:
+        return
+
+    fm = fm_match.group(1)
+    conf_match = re.search(r"^confidence:\s*([\d.]+)", fm, re.MULTILINE)
+    if not conf_match:
+        return
+
+    current = float(conf_match.group(1))
+    penalty = 0.8 if ratio < 0.5 else 0.9
+    new_conf = round(max(0.1, current * penalty), 2)
+
+    if new_conf == current:
+        return
+
+    new_fm = fm[:conf_match.start(1)] + str(new_conf) + fm[conf_match.end(1):]
+    new_content = content[:fm_match.start(1)] + new_fm + content[fm_match.end(1):]
+
+    fd, tmp_path = tempfile.mkstemp(dir=str(concept_path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        os.replace(tmp_path, str(concept_path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 # ── Main entry point ──
 
 
@@ -570,15 +675,23 @@ async def verify_knowledge_base(
     language: Language = Language.EN,
     concept_names: list[str] | None = None,
     depth: str = "standard",
+    force: bool = False,
+    fix: bool = False,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> VerifyReport:
     """Main entry point: verify all or specified concepts."""
     from datetime import date
+
+    from neocortex.config import get_data_dir
 
     concepts_dir = notes_dir / "concepts"
     report = VerifyReport(depth=depth, date=date.today().isoformat())
 
     if not concepts_dir.exists():
         return report
+
+    # Cache: skip unchanged concepts
+    cache = VerifyCache(get_data_dir() / "verify_cache.json")
 
     # Collect concept files to verify
     if concept_names:
@@ -593,6 +706,12 @@ async def verify_knowledge_base(
 
     if not concept_files:
         return report
+
+    # Filter by cache (unless forced or specific concepts requested)
+    if not force and not concept_names:
+        concept_files = [cp for cp in concept_files if cache.needs_verify(cp)]
+        if not concept_files:
+            return report
 
     # Collect all note files (source material)
     note_files = [
@@ -612,8 +731,13 @@ async def verify_knowledge_base(
         except (OSError, UnicodeDecodeError):
             pass
 
+    total = len(concept_files)
+
     # Verify each concept
-    for concept_path in concept_files:
+    for idx, concept_path in enumerate(concept_files):
+        if on_progress:
+            on_progress(idx + 1, total)
+
         try:
             concept_content = concept_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -638,6 +762,13 @@ async def verify_knowledge_base(
             provider, language, depth,
         )
         report.concept_results.append(verification)
+
+        # Update cache
+        cache.mark_verified(concept_path)
+
+        # Confidence linkage (--fix mode)
+        if fix:
+            update_concept_confidence(concept_path, verification)
 
     # Verify overview (only in deep mode)
     if depth == "deep":
@@ -669,5 +800,8 @@ async def verify_knowledge_base(
     report.total_facts = report.supported + report.unsupported + report.unverifiable
     report.concepts_verified = len(report.concept_results)
     report.fidelity_score = compute_fidelity_score(report)
+
+    # Persist cache
+    cache.save()
 
     return report

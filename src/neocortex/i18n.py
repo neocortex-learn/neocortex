@@ -917,6 +917,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "lint_suggested": {"en": "Suggested Explorations", "zh": "建议探索"},
     "lint_passed": {"en": "Passed", "zh": "通过"},
     "lint_decaying": {"en": "Decaying Concepts", "zh": "衰减概念"},
+    "lint_low_fidelity": {"en": "Low Fidelity", "zh": "低忠实度"},
     "complexity_label": {"en": "Knowledge Complexity", "zh": "知识复杂性"},
 
     # ── Verify ──
@@ -934,6 +935,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "verify_unverifiable": {"en": "UNVERIFIABLE", "zh": "无法验证"},
     "verify_overview": {"en": "Overview Cross-Reference", "zh": "综述交叉验证"},
     "verify_report_saved": {"en": "Report: {path}", "zh": "报告：{path}"},
+    "verify_fixed": {"en": "Confidence lowered for {count} concepts", "zh": "已降低 {count} 个概念的信心度"},
+    "verify_cached": {"en": "All concepts unchanged since last verify", "zh": "所有概念自上次验证以来未变化"},
 
     # ── Visualize ──
     "map_title": {"en": "Concept Map", "zh": "概念图"},
