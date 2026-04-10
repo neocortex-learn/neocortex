@@ -53,6 +53,7 @@ def read(
     question: str = typer.Option(None, help="Question to answer"),
     audio: bool = typer.Option(False, "--audio", help="Generate audio version"),
     deep: bool = typer.Option(False, "--deep", help="Deep concept anatomy mode (8 dimensions)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip outline confirmation"),
     flashcards: bool = typer.Option(False, "--flashcards", help="Generate flashcards (adds ~30s)"),
     exercises: bool = typer.Option(False, "--exercises", help="Generate exercises (adds ~30s)"),
     compile: bool = typer.Option(False, "--compile", help="Compile into concept graph (adds ~1-3min)"),
@@ -123,14 +124,15 @@ def read(
             console.print(line)
 
         console.print()
-        confirm = Prompt.ask(
-            f"  [bold]?[/bold] {t('read_outline_confirm', lang)}",
-            choices=["y", "n", "Y", "N"],
-            default="y",
-            console=console,
-        )
-        if confirm.lower() == "n":
-            return
+        if not yes:
+            confirm = Prompt.ask(
+                f"  [bold]?[/bold] {t('read_outline_confirm', lang)}",
+                choices=["y", "n", "Y", "N"],
+                default="y",
+                console=console,
+            )
+            if confirm.lower() == "n":
+                return
 
         with console.status(f"  {t('read_generating', lang)}"):
             notes_content = await generate_notes(
