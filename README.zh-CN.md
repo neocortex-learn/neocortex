@@ -51,6 +51,8 @@ neocortex profile config --provider claude --api-key sk-xxx  # 配置 LLM
 
 ```bash
 neocortex clip https://x.com/karpathy/status/123      # 存一条推文——零 LLM 成本
+neocortex clip ~/Desktop/zhihu-screenshot.png          # 存截图——LLM 提取文字
+neocortex clip --paste                                 # 存剪贴板图片或文字
 neocortex clip "Redis Pub/Sub 有顺序保证"               # 存一个想法
 neocortex kb compile                                   # 编译进概念图谱
 neocortex search "redis pub/sub"                       # 搜到
@@ -71,7 +73,7 @@ neocortex learn recommend                             # 学习路径 + 探测验
 
 | 命令 | 说明 |
 |------|------|
-| `neocortex clip <source>` | 存任何东西——URL、推文、想法、书签（默认零 LLM，`--process` 启用 AI 标签） |
+| `neocortex clip <source>` | 存任何东西——URL、推文、想法、截图、书签（`--process` 启用 AI 标签） |
 | `neocortex search <query>` | 搜索所有笔记、碎片、概念、洞察 |
 | `neocortex ask <question>` | 提问——AI 从你的知识库搜索回答（或 `--chat` 对话模式） |
 | `neocortex read <source>` | 深度阅读——URL/PDF/EPUB 个性化笔记 + Mermaid 图表 |
@@ -136,7 +138,7 @@ neocortex learn recommend                             # 学习路径 + 探测验
 
 ### 2. 轻路径：Clip → Compile → Search
 
-**Clip**（零摩擦）：存任何东西——URL、推文、想法。默认不调 LLM，零成本。
+**Clip**（零摩擦）：存任何东西——URL、推文、想法、截图。文字零 LLM 成本，截图用 LLM 提取文字。
 
 **Compile**（`kb compile`）：LLM 批量处理 clips 和笔记——提取概念、生成 wiki 条目、重建搜索索引。攒够几条就跑一次。
 

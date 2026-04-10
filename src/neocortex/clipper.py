@@ -13,12 +13,27 @@ if TYPE_CHECKING:
     from neocortex.models import Language, Profile
 
 
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
+
+
 async def fetch_clip_content(source: str) -> dict:
-    """Fetch content from URL or treat as raw text.
+    """Fetch content from URL, image file, or treat as raw text.
 
     Returns: {title, content, clip_type, source}
     """
+    from pathlib import Path
+
+    # Check if source is a local image file
     if not source.startswith(("http://", "https://")):
+        path = Path(source).expanduser()
+        if path.exists() and path.suffix.lower() in _IMAGE_EXTENSIONS:
+            return {
+                "title": path.stem,
+                "content": "",  # Will be filled by LLM describe_image in cmd_clip
+                "clip_type": "screenshot",
+                "source": str(path),
+                "_image_path": str(path),
+            }
         return {
             "title": "",
             "content": source,

@@ -58,7 +58,7 @@ src/neocortex/
 ├── cmd_explore.py  # discover 组：explore
 ├── cmd_research.py # discover 组：research
 ├── cmd_feed.py     # discover 组：feed
-├── clipper.py      # 碎片捕获处理引擎（clip 轻度 LLM 处理）
+├── clipper.py      # 碎片捕获处理引擎（URL/文本/截图，默认零 LLM）
 ├── compiler.py     # 概念编译引擎（提取、生成、wikilink、索引、语义链接）
 ├── converger.py    # 认知收敛（跨笔记综合高层理解）
 ├── decay.py        # 知识信心衰减（Hidalgo 年衰减 50% 模型）

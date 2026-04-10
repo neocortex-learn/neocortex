@@ -13,6 +13,39 @@ from neocortex.cli import _get_lang, app, console
 from neocortex.i18n import t
 
 
+def _try_paste_image() -> str:
+    """Try to save clipboard image to a temp file. Returns path or empty string."""
+    import tempfile
+    try:
+        # macOS: check if clipboard has image data
+        check = subprocess.run(
+            ["osascript", "-e", "the clipboard as «class PNGf»"],
+            capture_output=True,
+            timeout=5,
+        )
+        if check.returncode != 0:
+            return ""
+
+        # Save clipboard image to temp file
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        tmp.close()
+        subprocess.run(
+            ["osascript", "-e",
+             f'set f to open for access POSIX file "{tmp.name}" with write permission\n'
+             f'write (the clipboard as «class PNGf») to f\n'
+             f'close access f'],
+            capture_output=True,
+            timeout=10,
+        )
+        import os
+        if os.path.getsize(tmp.name) > 0:
+            return tmp.name
+        os.unlink(tmp.name)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ""
+
+
 @app.command()
 def clip(
     source: str = typer.Argument(None, help="URL, text, or file path to clip"),
@@ -29,19 +62,25 @@ def clip(
     lang = _get_lang()
 
     raw_input = ""
+    paste_image_path = ""
     if paste:
-        try:
-            result = subprocess.run(
-                ["pbpaste"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            raw_input = result.stdout.strip()
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+        # Try clipboard image first (macOS: save to temp file via osascript)
+        paste_image_path = _try_paste_image()
+        if not paste_image_path:
+            try:
+                result = subprocess.run(
+                    ["pbpaste"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                raw_input = result.stdout.strip()
+            except (OSError, subprocess.TimeoutExpired):
+                pass
 
-    if not raw_input and source:
+    if paste_image_path:
+        raw_input = paste_image_path
+    elif not raw_input and source:
         raw_input = source
 
     if not raw_input:
@@ -62,6 +101,41 @@ def clip(
         content = fetched["content"]
         clip_type = fetched["clip_type"]
         clip_source = fetched["source"]
+
+        # Image clip: use LLM to describe/OCR the image
+        image_path = fetched.get("_image_path")
+        if image_path and not content:
+            if not cfg.provider or not cfg.api_key:
+                console.print(f"  [red]{t('clip_image_needs_llm', lang)}[/red]")
+                return
+            from neocortex.llm import create_provider
+            provider = create_provider(cfg)
+            from pathlib import Path as _Path
+            img_data = _Path(image_path).read_bytes()
+            suffix = _Path(image_path).suffix.lower()
+            media_types = {
+                ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+            }
+            media_type = media_types.get(suffix, "image/png")
+            with console.status(f"  {t('clip_image_processing', lang)}"):
+                content = await provider.describe_image(
+                    img_data, media_type,
+                    "Please extract ALL text from this screenshot. "
+                    "Transcribe verbatim. Preserve structure (headings, lists, paragraphs). "
+                    "If there are non-text elements (images, charts), briefly describe them. "
+                    "Output clean markdown.",
+                )
+            clip_type = "screenshot"
+
+            # Copy image to notes dir for reference
+            from neocortex.config import get_notes_dir as _get_notes_dir
+            img_dest_dir = _get_notes_dir() / "images"
+            img_dest_dir.mkdir(parents=True, exist_ok=True)
+            import shutil
+            dest = img_dest_dir / _Path(image_path).name
+            if not dest.exists():
+                shutil.copy2(image_path, str(dest))
 
         # 自动检测内容长度，长文章提示升级为 read
         word_count = len(content.split())

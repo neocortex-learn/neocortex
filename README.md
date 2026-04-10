@@ -51,6 +51,8 @@ neocortex profile config --provider claude --api-key sk-xxx  # Set LLM provider
 
 ```bash
 neocortex clip https://x.com/karpathy/status/123      # Save a tweet — zero LLM cost
+neocortex clip ~/Desktop/zhihu-screenshot.png          # Save a screenshot — LLM extracts text
+neocortex clip --paste                                 # Save clipboard image or text
 neocortex clip "Redis Pub/Sub has ordering guarantees" # Save a thought
 neocortex kb compile                                   # Compile into concept graph
 neocortex search "redis pub/sub"                       # Find it instantly
@@ -71,7 +73,7 @@ neocortex learn recommend                             # Learning path with probe
 
 | Command | Description |
 |---------|-------------|
-| `neocortex clip <source>` | Save anything — URL, tweet, thought, bookmark (zero LLM by default, `--process` for AI tagging) |
+| `neocortex clip <source>` | Save anything — URL, tweet, thought, screenshot, bookmark (`--process` for AI tagging) |
 | `neocortex search <query>` | Search across all notes, clips, concepts, and insights |
 | `neocortex ask <question>` | Ask a question — AI answers using your knowledge base (or `--chat` for a session) |
 | `neocortex read <source>` | Deep reading — URL/PDF/EPUB personalized notes with Mermaid diagrams |
@@ -136,7 +138,7 @@ Like a code repository with source, build, and output:
 
 ### 2. Lightweight Path: Clip → Compile → Search
 
-**Clip** (zero friction): Save anything — URLs, tweets, thoughts. No LLM cost by default.
+**Clip** (zero friction): Save anything — URLs, tweets, thoughts, screenshots. Text clips cost zero LLM. Image clips use LLM to OCR/extract text.
 
 **Compile** (`kb compile`): LLM batch-processes your clips and notes — extracts concepts, builds wiki entries, updates the search index. Run it when you've accumulated a few items.
 

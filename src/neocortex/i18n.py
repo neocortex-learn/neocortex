@@ -1082,6 +1082,14 @@ STRINGS: dict[str, dict[str, str]] = {
     "clip_fetching": {"en": "Fetching content...", "zh": "正在获取内容..."},
     "clip_processing": {"en": "Processing...", "zh": "正在处理..."},
     "clip_empty": {"en": "Nothing to clip.", "zh": "没有可捕获的内容。"},
+    "clip_image_needs_llm": {
+        "en": "Image clips require an LLM provider. Configure with: neocortex profile config",
+        "zh": "截图需要 LLM 提取文字。请先配置：neocortex profile config",
+    },
+    "clip_image_processing": {
+        "en": "Extracting text from image...",
+        "zh": "正在从截图提取文字...",
+    },
     "clip_long_detected": {"en": "This content has ~{words} words — looks like a full article.", "zh": "内容约 {words} 字——看起来是一篇完整文章。"},
     "clip_or_read": {"en": "[c] Quick clip  [r] Full read", "zh": "[c] 快速存  [r] 深度读"},
 
