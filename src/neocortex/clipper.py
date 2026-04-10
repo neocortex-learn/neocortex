@@ -189,11 +189,23 @@ def _fallback_process(content: str, title: str, domains: list[str]) -> dict:
     }
 
 
+def _parse_wechat_output(stdout: str):
+    """Extract saved file path from wechat-article-to-markdown stdout."""
+    from pathlib import Path
+    for line in stdout.splitlines():
+        if "已保存:" in line or "已保存：" in line:
+            parts = re.split(r"已保存[:：]\s*", line, maxsplit=1)
+            if len(parts) == 2:
+                candidate = Path(parts[1].strip())
+                if candidate.exists():
+                    return candidate
+    return None
+
+
 async def _fetch_wechat_clip(source: str) -> dict:
     """Fetch WeChat article content using wechat-article-to-markdown tool."""
     import shutil
     import subprocess
-    import tempfile
     from pathlib import Path
 
     if not shutil.which("wechat-article-to-markdown"):
@@ -202,35 +214,35 @@ async def _fetch_wechat_clip(source: str) -> dict:
             "Install: uv tool install wechat-article-to-markdown"
         )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result = subprocess.run(
-            ["wechat-article-to-markdown", source, "--output", tmpdir],
-            capture_output=True,
-            text=True,
-            timeout=120,
+    result = subprocess.run(
+        ["wechat-article-to-markdown", source],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    if result.returncode != 0:
+        error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+        raise ValueError(
+            f"WeChat article fetch failed: {error_msg}\n"
+            "Try: uv tool install --force wechat-article-to-markdown --with 'httpx[socks]'"
         )
 
-        if result.returncode != 0:
-            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-            raise ValueError(
-                f"WeChat article fetch failed: {error_msg}\n"
-                "Try: uv tool install --force wechat-article-to-markdown --with 'httpx[socks]'"
-            )
+    # Parse saved path from stdout: "✅ 已保存: <path>"
+    md_path = _parse_wechat_output(result.stdout)
+    if md_path is None:
+        raise ValueError(
+            "wechat-article-to-markdown produced no output. "
+            "The article may be behind a paywall or login wall."
+        )
 
-        md_files = list(Path(tmpdir).rglob("*.md"))
-        if not md_files:
-            raise ValueError(
-                "wechat-article-to-markdown produced no output. "
-                "The article may be behind a paywall or login wall."
-            )
+    content = md_path.read_text(encoding="utf-8")
+    title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+    title = title_match.group(1).strip() if title_match else source
 
-        content = md_files[0].read_text(encoding="utf-8")
-        title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
-        title = title_match.group(1).strip() if title_match else source
-
-        return {
-            "title": title,
-            "content": content[:2000] if content else source,
-            "clip_type": "bookmark",
-            "source": source,
-        }
+    return {
+        "title": title,
+        "content": content[:2000] if content else source,
+        "clip_type": "bookmark",
+        "source": source,
+    }

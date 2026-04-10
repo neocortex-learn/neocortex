@@ -55,6 +55,22 @@ class Document:
     sections: list[Section] = field(default_factory=list)
 
 
+def _parse_wechat_output_path(stdout: str) -> Path | None:
+    """Extract the saved file path from wechat-article-to-markdown stdout.
+
+    The tool prints: ✅ 已保存: <path>
+    """
+    for line in stdout.splitlines():
+        if "已保存:" in line or "已保存：" in line:
+            # Split on colon after 已保存
+            parts = re.split(r"已保存[:：]\s*", line, maxsplit=1)
+            if len(parts) == 2:
+                candidate = Path(parts[1].strip())
+                if candidate.exists():
+                    return candidate
+    return None
+
+
 class ContentFetcher:
     """Fetch and parse content from various sources."""
 
@@ -182,7 +198,6 @@ class ContentFetcher:
         """Fetch WeChat article using wechat-article-to-markdown tool."""
         import shutil
         import subprocess
-        import tempfile
 
         if not shutil.which("wechat-article-to-markdown"):
             raise ValueError(
@@ -190,57 +205,55 @@ class ContentFetcher:
                 "Install: uv tool install wechat-article-to-markdown"
             )
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            result = subprocess.run(
-                ["wechat-article-to-markdown", url, "--output", tmpdir],
-                capture_output=True,
-                text=True,
-                timeout=120,
+        result = subprocess.run(
+            ["wechat-article-to-markdown", url],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            raise ValueError(
+                f"WeChat article fetch failed: {error_msg}\n"
+                "Try: uv tool install --force wechat-article-to-markdown --with 'httpx[socks]'"
             )
 
-            if result.returncode != 0:
-                error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-                raise ValueError(
-                    f"WeChat article fetch failed: {error_msg}\n"
-                    "Try: uv tool install --force wechat-article-to-markdown --with 'httpx[socks]'"
-                )
-
-            # Find the output markdown file
-            md_files = list(Path(tmpdir).rglob("*.md"))
-            if not md_files:
-                raise ValueError(
-                    "wechat-article-to-markdown produced no output. "
-                    "The article may be behind a paywall or login wall."
-                )
-
-            md_path = md_files[0]
-            content = md_path.read_text(encoding="utf-8")
-
-            # Extract title from first heading
-            title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
-            title = title_match.group(1).strip() if title_match else url
-
-            # Copy images to notes dir if they exist
-            img_dir = md_path.parent / "images"
-            if img_dir.exists():
-                from neocortex.config import get_notes_dir
-                dest_img_dir = get_notes_dir() / "images"
-                dest_img_dir.mkdir(parents=True, exist_ok=True)
-                for img in img_dir.iterdir():
-                    dest = dest_img_dir / img.name
-                    if not dest.exists():
-                        shutil.copy2(str(img), str(dest))
-
-            sections = self._parse_markdown_sections(content)
-            if not sections:
-                sections = [Section(title=title, content=content, level=1)]
-
-            return Document(
-                title=title,
-                content=content,
-                source=url,
-                sections=sections,
+        # Parse saved path from stdout: "✅ 已保存: <path>"
+        md_path = _parse_wechat_output_path(result.stdout)
+        if md_path is None:
+            raise ValueError(
+                "wechat-article-to-markdown produced no output. "
+                "The article may be behind a paywall or login wall."
             )
+
+        content = md_path.read_text(encoding="utf-8")
+
+        # Extract title from first heading
+        title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+        title = title_match.group(1).strip() if title_match else url
+
+        # Copy images to notes dir if they exist
+        img_dir = md_path.parent / "images"
+        if img_dir.exists():
+            from neocortex.config import get_notes_dir
+            dest_img_dir = get_notes_dir() / "images"
+            dest_img_dir.mkdir(parents=True, exist_ok=True)
+            for img in img_dir.iterdir():
+                dest = dest_img_dir / img.name
+                if not dest.exists():
+                    shutil.copy2(str(img), str(dest))
+
+        sections = self._parse_markdown_sections(content)
+        if not sections:
+            sections = [Section(title=title, content=content, level=1)]
+
+        return Document(
+            title=title,
+            content=content,
+            source=url,
+            sections=sections,
+        )
 
     async def _fetch_pdf(self, path: str) -> Document:
         import fitz
