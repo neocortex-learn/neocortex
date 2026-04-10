@@ -53,6 +53,10 @@ def read(
     question: str = typer.Option(None, help="Question to answer"),
     audio: bool = typer.Option(False, "--audio", help="Generate audio version"),
     deep: bool = typer.Option(False, "--deep", help="Deep concept anatomy mode (8 dimensions)"),
+    flashcards: bool = typer.Option(False, "--flashcards", help="Generate flashcards (adds ~30s)"),
+    exercises: bool = typer.Option(False, "--exercises", help="Generate exercises (adds ~30s)"),
+    compile: bool = typer.Option(False, "--compile", help="Compile into concept graph (adds ~1-3min)"),
+    full: bool = typer.Option(False, "--full", help="Enable all: flashcards + exercises + compile"),
 ) -> None:
     """Read a URL/file and generate personalized notes."""
     from neocortex.config import get_data_dir, get_notes_dir, load_config, load_profile, save_profile
@@ -208,64 +212,71 @@ def read(
             rel = note_path.name
         note_index.index_note(rel, doc.title, final_content)
 
-        # Generate flashcards for spaced repetition
-        import uuid as _uuid
-        from neocortex.reader.teacher import generate_flashcards
-        from neocortex.config import save_flashcards
-        from neocortex.models import Flashcard
+        # Optional steps — only run when explicitly requested
+        do_flashcards = flashcards or full
+        do_exercises = exercises or full
+        do_compile = compile or full
 
-        try:
-            with console.status(f"  {t('flashcard_generating', lang)}"):
-                raw_cards = await generate_flashcards(doc, outline, notes_content, prof, provider)
-            if raw_cards:
-                cards = [Flashcard(
-                    id=str(_uuid.uuid4())[:8],
-                    source_note=note_path.name,
-                    question=c["question"],
-                    answer=c["answer"],
-                    concept=c.get("concept", ""),
-                    difficulty=c.get("difficulty", "medium"),
-                    knowledge_layer=c.get("knowledge_layer", "conceptual"),
-                    next_review=date.today().isoformat(),
-                ) for c in raw_cards]
-                save_flashcards(notes_dir, note_path.stem, cards)
-                console.print(f"  [green]{t('flashcard_created', lang, count=str(len(cards)))}[/green]")
-        except Exception:
-            pass
+        if do_flashcards:
+            import uuid as _uuid
+            from neocortex.reader.teacher import generate_flashcards
+            from neocortex.config import save_flashcards
+            from neocortex.models import Flashcard
 
-        try:
-            from neocortex.reader.teacher import generate_exercises
-            with console.status(f"  {t('exercise_generating', lang)}"):
-                exercises_content = await generate_exercises(doc, outline, notes_content, prof, provider)
-            if exercises_content and exercises_content.strip():
-                exercises_path = note_path.with_suffix(".exercises.md")
-                ex_content = (
-                    f"---\ntype: exercise\nsource: \"{doc.title}\"\ndate: {date.today().isoformat()}\n---\n\n"
-                    f"# Exercises: {doc.title}\n\n{exercises_content}"
-                )
-                exercises_path.write_text(ex_content, encoding="utf-8")
-                console.print(f"  [green]{t('exercise_created', lang, path=exercises_path.name)}[/green]")
-        except Exception:
-            pass
+            try:
+                with console.status(f"  {t('flashcard_generating', lang)}"):
+                    raw_cards = await generate_flashcards(doc, outline, notes_content, prof, provider)
+                if raw_cards:
+                    cards = [Flashcard(
+                        id=str(_uuid.uuid4())[:8],
+                        source_note=note_path.name,
+                        question=c["question"],
+                        answer=c["answer"],
+                        concept=c.get("concept", ""),
+                        difficulty=c.get("difficulty", "medium"),
+                        knowledge_layer=c.get("knowledge_layer", "conceptual"),
+                        next_review=date.today().isoformat(),
+                    ) for c in raw_cards]
+                    save_flashcards(notes_dir, note_path.stem, cards)
+                    console.print(f"  [green]{t('flashcard_created', lang, count=str(len(cards)))}[/green]")
+            except Exception:
+                pass
 
-        try:
-            from neocortex.compiler import compile_note
-            with console.status(f"  {t('compile_updating', lang)}"):
-                compile_result = await compile_note(note_path, notes_dir, prof, provider, lang)
-            if compile_result.concepts_created + compile_result.concepts_updated > 0:
-                console.print(f"  [green]{t('compile_done', lang, created=str(compile_result.concepts_created), updated=str(compile_result.concepts_updated))}[/green]")
-            if compile_result.conflicts:
-                for conflict in compile_result.conflicts:
-                    conflict_type = conflict.get("type", "genuine")
-                    type_key = f"conflict_{conflict_type}"
-                    type_label = t(type_key, lang)
-                    console.print(f"  [yellow]\u26a1 {t('conflict_detected', lang)}: {type_label}[/yellow]")
-                    console.print(f"    {conflict.get('explanation', '')}")
-                    hint = conflict.get("resolution_hint", "")
-                    if hint:
-                        console.print(f"    [dim]{hint}[/dim]")
-        except Exception:
-            pass
+        if do_exercises:
+            try:
+                from neocortex.reader.teacher import generate_exercises
+                with console.status(f"  {t('exercise_generating', lang)}"):
+                    exercises_content = await generate_exercises(doc, outline, notes_content, prof, provider)
+                if exercises_content and exercises_content.strip():
+                    exercises_path = note_path.with_suffix(".exercises.md")
+                    ex_content = (
+                        f"---\ntype: exercise\nsource: \"{doc.title}\"\ndate: {date.today().isoformat()}\n---\n\n"
+                        f"# Exercises: {doc.title}\n\n{exercises_content}"
+                    )
+                    exercises_path.write_text(ex_content, encoding="utf-8")
+                    console.print(f"  [green]{t('exercise_created', lang, path=exercises_path.name)}[/green]")
+            except Exception:
+                pass
+
+        if do_compile:
+            try:
+                from neocortex.compiler import compile_note
+                with console.status(f"  {t('compile_updating', lang)}"):
+                    compile_result = await compile_note(note_path, notes_dir, prof, provider, lang)
+                if compile_result.concepts_created + compile_result.concepts_updated > 0:
+                    console.print(f"  [green]{t('compile_done', lang, created=str(compile_result.concepts_created), updated=str(compile_result.concepts_updated))}[/green]")
+                if compile_result.conflicts:
+                    for conflict in compile_result.conflicts:
+                        conflict_type = conflict.get("type", "genuine")
+                        type_key = f"conflict_{conflict_type}"
+                        type_label = t(type_key, lang)
+                        console.print(f"  [yellow]\u26a1 {t('conflict_detected', lang)}: {type_label}[/yellow]")
+                        console.print(f"    {conflict.get('explanation', '')}")
+                        hint = conflict.get("resolution_hint", "")
+                        if hint:
+                            console.print(f"    [dim]{hint}[/dim]")
+            except Exception:
+                pass
 
         if audio:
             from neocortex.tts import prepare_text_for_speech, text_to_speech

@@ -217,13 +217,6 @@ def clip(
                     rel = note_path.name
                 note_index.index_note(rel, doc.title, full_content)
 
-                try:
-                    from neocortex.compiler import compile_note
-                    with console.status(f"  {t('compile_updating', lang)}"):
-                        await compile_note(note_path, notes_dir, profile, provider, lang)
-                except Exception:
-                    pass
-
                 console.print()
                 return
 
