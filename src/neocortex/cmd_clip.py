@@ -86,12 +86,8 @@ def clip(
                         text=True,
                         timeout=5,
                     )
-                    text = result.stdout.strip()
-                    # Strip non-printable chars from clipboard
-                    raw_input = "".join(
-                        c for c in text
-                        if c in ("\n", "\r", "\t") or (ord(c) >= 32 and ord(c) != 127)
-                    )
+                    from neocortex.clipper import _sanitize_text
+                    raw_input = _sanitize_text(result.stdout.strip())
                 except (OSError, subprocess.TimeoutExpired):
                     pass
 

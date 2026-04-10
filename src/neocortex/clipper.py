@@ -17,12 +17,23 @@ _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", 
 
 
 def _sanitize_text(text: str) -> str:
-    """Remove non-printable characters that break YAML/XML serialization."""
-    # Keep newlines, tabs, and printable chars; strip null bytes and control chars
-    return "".join(
-        c for c in text
-        if c in ("\n", "\r", "\t") or (ord(c) >= 32 and ord(c) != 127)
-    )
+    """Remove characters that break XML/API serialization.
+
+    Strips: C0 control chars (except tab/newline/CR), DEL, C1 control chars (0x7F-0x9F),
+    surrogates, and non-characters. These cause errors in Anthropic/OpenAI SDKs.
+    """
+    def _valid(c: str) -> bool:
+        cp = ord(c)
+        if cp <= 0x1F:
+            return cp in (0x9, 0xA, 0xD)  # tab, newline, carriage return
+        if 0x7F <= cp <= 0x9F:
+            return False  # DEL + C1 control characters
+        if 0xD800 <= cp <= 0xDFFF:
+            return False  # surrogates
+        if cp in (0xFFFE, 0xFFFF):
+            return False  # non-characters
+        return True
+    return "".join(c for c in text if _valid(c))
 
 
 async def fetch_clip_content(source: str) -> dict:
