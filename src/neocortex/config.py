@@ -245,7 +245,11 @@ def save_gap_progress(progress: dict[str, GapProgress]) -> None:
 
 
 def update_gap_status(gap_name: str, profile: Profile) -> str:
-    """Update gap status after reading related content. Returns new status."""
+    """Update gap status after reading related content. Returns new status.
+
+    Status flow: gap → learning → (probe verification) → verified → (delayed retest) → known
+    Reading alone moves gap → learning. Further promotion requires probe verification.
+    """
     from datetime import date as _date
     from neocortex.scanner.profile import normalize_gap_name
     gap_name = normalize_gap_name(gap_name)
@@ -263,14 +267,40 @@ def update_gap_status(gap_name: str, profile: Profile) -> str:
 
     if entry.status == "gap":
         entry.status = "learning"
-    elif entry.status == "learning" and entry.reads >= 3:
-        entry.status = "known"
-        for domain in profile.skills.domains.values():
-            if gap_name in domain.gaps:
-                domain.gaps.remove(gap_name)
-        for integration in profile.skills.integrations.values():
-            if gap_name in integration.gaps:
-                integration.gaps.remove(gap_name)
+    # learning / verified: stay as-is on read alone — probe verification required
+
+    progress[gap_name] = entry
+    save_gap_progress(progress)
+    return entry.status
+
+
+def verify_gap(gap_name: str, profile: Profile) -> str:
+    """Promote a gap after successful probe verification. Returns new status.
+
+    - learning (reads >= 2) + probe passed → verified
+    - verified (7+ days since verified_at) + probe passed → known
+    """
+    from datetime import date as _date
+    from neocortex.scanner.profile import normalize_gap_name
+    gap_name = normalize_gap_name(gap_name)
+    progress = load_gap_progress()
+    entry = progress.get(gap_name)
+    if entry is None:
+        return "gap"
+
+    if entry.status == "learning" and entry.reads >= 2:
+        entry.status = "verified"
+        entry.verified_at = _date.today().isoformat()
+    elif entry.status == "verified" and entry.verified_at:
+        verified_date = _date.fromisoformat(entry.verified_at)
+        if (_date.today() - verified_date).days >= 7:
+            entry.status = "known"
+            for domain in profile.skills.domains.values():
+                if gap_name in domain.gaps:
+                    domain.gaps.remove(gap_name)
+            for integration in profile.skills.integrations.values():
+                if gap_name in integration.gaps:
+                    integration.gaps.remove(gap_name)
 
     progress[gap_name] = entry
     save_gap_progress(progress)

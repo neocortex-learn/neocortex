@@ -191,10 +191,12 @@ class Resource(BaseModel):
 
 class GapProgress(BaseModel):
     """单个技能 gap 的学习进度"""
-    status: str = "gap"  # gap / learning / known
+    status: str = "gap"  # gap / learning / verified / known
     reads: int = 0
     first_seen: str = ""
     last_read: str | None = None
+    verified_at: str | None = None
+    calibration_history: list[dict] = Field(default_factory=list)
 
 
 class RecommendationRecord(BaseModel):

@@ -146,7 +146,7 @@ class TestClosedLoopE2E:
 
         # Persist recommendations
         from uuid import uuid4
-        from datetime import date
+        from datetime import date, timedelta
         records = []
         for rec in recs:
             records.append(RecommendationRecord(
@@ -185,13 +185,26 @@ class TestClosedLoopE2E:
         assert progress["pytest_fixtures"].status == "learning"
         assert progress["pytest_fixtures"].reads == 1
 
-        # ── Step 4: Simulate reading 2 more articles (gap → known) ──
-        update_gap_status("pytest_fixtures", profile)
-        update_gap_status("pytest_fixtures", profile)
+        # ── Step 4: Read more + probe verification (learning → verified → known) ──
+        update_gap_status("pytest_fixtures", profile)  # reads=2
+        update_gap_status("pytest_fixtures", profile)  # reads=3, still learning
 
         progress = load_gap_progress()
-        assert progress["pytest_fixtures"].status == "known"
+        assert progress["pytest_fixtures"].status == "learning"
         assert progress["pytest_fixtures"].reads == 3
+
+        # Probe verification promotes learning → verified
+        from neocortex.config import verify_gap
+        status = verify_gap("pytest_fixtures", profile)
+        assert status == "verified"
+
+        # Simulate delayed retest (patch verified_at to 8 days ago)
+        progress = load_gap_progress()
+        progress["pytest_fixtures"].verified_at = (date.today() - timedelta(days=8)).isoformat()
+        save_gap_progress(progress)
+
+        status = verify_gap("pytest_fixtures", profile)
+        assert status == "known"
 
         # Gap should be removed from profile
         assert "pytest_fixtures" not in profile.skills.domains["testing"].gaps

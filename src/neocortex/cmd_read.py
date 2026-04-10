@@ -313,6 +313,7 @@ def _match_and_update_recommendations(
 ) -> None:
     """Match current read against pending recommendations and update status."""
     from neocortex.config import (
+        load_gap_progress,
         load_recommendations,
         save_profile,
         save_recommendations,
@@ -361,8 +362,13 @@ def _match_and_update_recommendations(
 
     for gap_name in matched.related_gaps:
         new_status = update_gap_status(gap_name, prof)
-        status_label = {"gap": "gap", "learning": "learning", "known": "known \u2713"}
+        status_label = {"gap": "gap", "learning": "learning", "verified": "verified \u2713", "known": "known \u2713\u2713"}
         console.print(f"  [dim]{t('recommend_gap_updated', lang, gap=gap_name, status=status_label.get(new_status, new_status))}[/dim]")
+        if new_status == "learning":
+            gap_progress = load_gap_progress()
+            entry = gap_progress.get(gap_name)
+            if entry and entry.reads >= 2:
+                console.print(f"  [yellow]{t('gap_needs_verification', lang, gap=gap_name)}[/yellow]")
 
     save_recommendations(all_records)
     if matched.related_gaps:

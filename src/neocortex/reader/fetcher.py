@@ -198,11 +198,20 @@ class ContentFetcher:
                 timeout=120,
             )
 
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+                raise ValueError(
+                    f"WeChat article fetch failed: {error_msg}\n"
+                    "Try: uv tool install --force wechat-article-to-markdown --with 'httpx[socks]'"
+                )
+
             # Find the output markdown file
             md_files = list(Path(tmpdir).rglob("*.md"))
             if not md_files:
-                # Fallback to normal URL fetch
-                return await self._fetch_url(url)
+                raise ValueError(
+                    "wechat-article-to-markdown produced no output. "
+                    "The article may be behind a paywall or login wall."
+                )
 
             md_path = md_files[0]
             content = md_path.read_text(encoding="utf-8")

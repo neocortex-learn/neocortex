@@ -215,7 +215,8 @@ class TestUpdateGapStatus:
             status = update_gap_status("pytest_fixtures", prof)
             assert status == "learning"
 
-    def test_learning_to_known_at_3_reads(self, tmp_path: Path):
+    def test_learning_stays_learning_without_probe(self, tmp_path: Path):
+        """Reading alone no longer promotes to known — probe verification required."""
         from neocortex.config import update_gap_status, save_gap_progress
 
         with patch("neocortex.config.get_data_dir", return_value=tmp_path):
@@ -224,6 +225,37 @@ class TestUpdateGapStatus:
             })
             prof = Profile(skills=Skills(domains={"testing": DomainSkill(gaps=["pytest_fixtures"])}))
             status = update_gap_status("pytest_fixtures", prof)
+            assert status == "learning"
+            assert "pytest_fixtures" in prof.skills.domains["testing"].gaps
+
+    def test_verify_gap_learning_to_verified(self, tmp_path: Path):
+        """Probe verification promotes learning → verified when reads >= 2."""
+        from neocortex.config import verify_gap, save_gap_progress, load_gap_progress
+
+        with patch("neocortex.config.get_data_dir", return_value=tmp_path):
+            save_gap_progress({
+                "pytest_fixtures": GapProgress(status="learning", reads=2, first_seen="2026-03-21"),
+            })
+            prof = Profile(skills=Skills(domains={"testing": DomainSkill(gaps=["pytest_fixtures"])}))
+            status = verify_gap("pytest_fixtures", prof)
+            assert status == "verified"
+            progress = load_gap_progress()
+            assert progress["pytest_fixtures"].verified_at is not None
+            assert "pytest_fixtures" in prof.skills.domains["testing"].gaps
+
+    def test_verify_gap_verified_to_known_after_delay(self, tmp_path: Path):
+        """Delayed retest (7+ days) promotes verified → known."""
+        from neocortex.config import verify_gap, save_gap_progress
+
+        with patch("neocortex.config.get_data_dir", return_value=tmp_path):
+            save_gap_progress({
+                "pytest_fixtures": GapProgress(
+                    status="verified", reads=3, first_seen="2026-03-21",
+                    verified_at="2026-03-22",
+                ),
+            })
+            prof = Profile(skills=Skills(domains={"testing": DomainSkill(gaps=["pytest_fixtures"])}))
+            status = verify_gap("pytest_fixtures", prof)
             assert status == "known"
             assert "pytest_fixtures" not in prof.skills.domains["testing"].gaps
 

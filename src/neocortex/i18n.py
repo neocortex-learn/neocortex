@@ -399,6 +399,26 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "{skill} confidence: {conf}",
         "zh": "{skill} 置信度：{conf}",
     },
+    "probe_type_label": {
+        "en": "Probe type: {type}",
+        "zh": "探测类型：{type}",
+    },
+    "calibration_predict": {
+        "en": "Before we start — how well do you know {skill}?  1=not at all  2=basics  3=solid  4=expert",
+        "zh": "开始前——你觉得自己对 {skill} 的掌握程度如何？  1=完全不会  2=知道基础  3=扎实  4=专家",
+    },
+    "calibration_result": {
+        "en": "Calibration: predicted {predicted}/4, actual {actual}/4 (gap: {gap:+d})",
+        "zh": "元认知校准：自评 {predicted}/4，实际 {actual}/4（偏差：{gap:+d}）",
+    },
+    "gap_needs_verification": {
+        "en": "Gap \"{gap}\" ready for verification — run `recommend` to verify with a probe",
+        "zh": "盲区「{gap}」已可验证——运行 recommend 通过探测来验证",
+    },
+    "gap_verified": {
+        "en": "Gap \"{gap}\" → {status}",
+        "zh": "盲区「{gap}」→ {status}",
+    },
 
     # ── Card ──
     "card_generating": {

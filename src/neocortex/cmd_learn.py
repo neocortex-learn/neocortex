@@ -55,8 +55,8 @@ def recommend(
         raise typer.Exit(1)
 
     # Probe low-confidence skills before recommending
-    from neocortex.config import save_profile
-    from neocortex.prober import generate_probe, evaluate_response, get_low_confidence_skills, update_skill_confidence
+    from neocortex.config import save_profile, verify_gap
+    from neocortex.prober import generate_probe, evaluate_response, get_low_confidence_skills, update_skill_confidence, select_probe_type
 
     low_conf = get_low_confidence_skills(prof, threshold=0.5)
 
@@ -66,9 +66,12 @@ def recommend(
         console.print()
         console.print(f"  [bold]{t('probe_intro', lang, skill=target['name'])}[/bold]")
 
+        probe_type = select_probe_type(target["confidence"])
+
         async def _run_probe() -> dict:
             return await generate_probe(
                 target["name"], target["type"], target["level"], prof, provider, lang,
+                probe_type=probe_type,
             )
 
         probe = asyncio.run(_run_probe())
@@ -76,7 +79,24 @@ def recommend(
         if probe.get("questions"):
             if probe.get("context"):
                 console.print(f"  [dim]{probe['context']}[/dim]")
+            if probe_type != "understanding":
+                console.print(f"  [dim]{t('probe_type_label', lang, type=probe_type)}[/dim]")
             console.print()
+
+            # Metacognition calibration: ask user to predict before answering
+            from neocortex.prober import record_calibration
+            predicted = None
+            if sys.stdout.isatty():
+                pred_input = Prompt.ask(
+                    f"  [bold]?[/bold] {t('calibration_predict', lang, skill=target['name'])}  [dim](1-4, skip)[/dim]",
+                    default="skip",
+                    console=console,
+                )
+                if pred_input.isdigit() and 1 <= int(pred_input) <= 4:
+                    predicted = int(pred_input)
+                console.print()
+
+            probe_passed = False
 
             for q in probe["questions"]:
                 console.print(f"  [bold]?[/bold] {q}")
@@ -89,6 +109,7 @@ def recommend(
                 async def _run_eval() -> dict:
                     return await evaluate_response(
                         target["name"], q, answer, target["level"], provider, lang,
+                        probe_type=probe_type,
                     )
 
                 result = asyncio.run(_run_eval())
@@ -98,6 +119,31 @@ def recommend(
                 if result.get("feedback"):
                     console.print(f"  [dim]{result['feedback']}[/dim]")
                 console.print(f"  [dim]{t('probe_confidence', lang, skill=target['name'], conf=f'{new_conf:.0%}')}[/dim]")
+
+                understanding = result.get("understanding", "surface")
+                if understanding in ("solid", "deep"):
+                    probe_passed = True
+
+                # Record calibration if user predicted
+                if predicted is not None:
+                    cal = record_calibration(target["name"], predicted, understanding)
+                    if cal["gap"] != 0:
+                        console.print(f"  [dim]{t('calibration_result', lang, predicted=cal['predicted'], actual=cal['actual'], gap=cal['gap'])}[/dim]")
+
+            # Verify related gaps if probe passed
+            if probe_passed:
+                skill_map = {
+                    "domain": prof.skills.domains,
+                    "integration": prof.skills.integrations,
+                }
+                skill_dict = skill_map.get(target["type"], {})
+                skill_obj = skill_dict.get(target["name"])
+                if skill_obj and hasattr(skill_obj, "gaps"):
+                    for gap_name in skill_obj.gaps:
+                        new_gap_status = verify_gap(gap_name, prof)
+                        if new_gap_status in ("verified", "known"):
+                            status_label = {"verified": "verified \u2713", "known": "known \u2713\u2713"}
+                            console.print(f"  [green]{t('gap_verified', lang, gap=gap_name, status=status_label.get(new_gap_status, new_gap_status))}[/green]")
 
             save_profile(prof)
             console.print()

@@ -1,4 +1,11 @@
-"""Socratic Probe — verify skill levels by asking contextual questions about the developer's own code."""
+"""Socratic Probe — verify skill levels by asking contextual questions about the developer's own code.
+
+Probe types (aligned with Bloom's taxonomy):
+- understanding: Edge cases, failure modes, design decisions (Comprehension)
+- error_detection: Find errors in AI-generated explanations (Analysis)
+- design_tradeoff: Evaluate two approaches, justify preference (Evaluation)
+- prediction: Predict behavior of code/system given input (Application)
+"""
 
 from __future__ import annotations
 
@@ -8,36 +15,119 @@ from datetime import date
 from neocortex.llm.base import LLMProvider
 from neocortex.models import Language, Profile
 
+PROBE_TYPES = ("understanding", "error_detection", "design_tradeoff", "prediction")
 
-async def generate_probe(
+
+def _parse_json(text: str) -> dict | None:
+    """Best-effort JSON extraction from LLM response."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start >= 0 and end > start:
+            try:
+                return json.loads(text[start:end])
+            except json.JSONDecodeError:
+                return None
+        return None
+
+
+def select_probe_type(confidence: float) -> str:
+    """Select probe type based on current confidence level.
+
+    Low confidence → understanding (basics first).
+    Medium confidence → error_detection or prediction (verify deeper).
+    High confidence → design_tradeoff (expert-level judgment).
+    """
+    if confidence < 0.3:
+        return "understanding"
+    if confidence < 0.5:
+        return "prediction"
+    if confidence < 0.7:
+        return "error_detection"
+    return "design_tradeoff"
+
+
+def _build_probe_prompt(
     skill_name: str,
     skill_type: str,
     skill_level: str,
-    profile: Profile,
-    provider: LLMProvider,
-    language: Language = Language.EN,
-) -> dict:
-    """Generate 1-2 verification questions for a specific skill.
-
-    Returns: {"questions": ["q1", "q2"], "context": "brief context about what was found"}
-    """
-    lang_inst = "用中文回答。" if language == Language.ZH else "Answer in English."
-
-    # Build context about the developer's projects
-    project_names = []
-    for lang_skill in profile.skills.languages.values():
-        project_names.extend(lang_skill.projects)
-    projects_str = ", ".join(sorted(set(project_names))[:5]) if project_names else "unknown projects"
-
-    prompt = f"""\
-You are assessing a developer's REAL understanding of a technology.
-
+    projects_str: str,
+    role: str,
+    experience: str,
+    probe_type: str,
+    lang_inst: str,
+) -> str:
+    """Build the LLM prompt for each probe type."""
+    base_context = f"""\
 Developer info:
-- Role: {profile.persona.role.value if profile.persona.role else 'unknown'}
-- Experience: {profile.persona.experience_years.value if profile.persona.experience_years else 'unknown'} years
+- Role: {role}
+- Experience: {experience} years
 - Projects: {projects_str}
 
-Scanned skill: {skill_name} (type: {skill_type}, scan-detected level: {skill_level})
+Scanned skill: {skill_name} (type: {skill_type}, scan-detected level: {skill_level})"""
+
+    if probe_type == "error_detection":
+        return f"""\
+You are testing whether a developer can spot errors in AI-generated technical explanations.
+
+{base_context}
+
+Generate a short (3-5 sentence) technical explanation about {skill_name} that contains exactly 1 subtle but real error.
+The error should NOT be a typo — it should be a conceptual mistake, a wrong assumption, or an incorrect technical claim
+that someone with solid understanding of {skill_name} would catch.
+
+Then generate 1 question asking the developer to identify what's wrong.
+
+Output valid JSON:
+{{
+  "questions": ["Here is an explanation about {skill_name}:\\n\\n<your flawed explanation>\\n\\nWhat is wrong with this explanation?"],
+  "context": "one line about the embedded error (for internal evaluation use)"
+}}
+
+{lang_inst}"""
+
+    if probe_type == "design_tradeoff":
+        return f"""\
+You are testing a developer's ability to evaluate and compare technical approaches.
+
+{base_context}
+
+Present two realistic approaches to a common problem in {skill_name}.
+Both approaches should be valid but with different tradeoffs (performance vs readability, consistency vs flexibility, etc.).
+Ask the developer which they'd choose and why.
+
+Output valid JSON:
+{{
+  "questions": ["<describe approach A vs approach B for a specific scenario>\\n\\nWhich approach would you choose, and what are the tradeoffs?"],
+  "context": "one line about what the key tradeoff is"
+}}
+
+{lang_inst}"""
+
+    if probe_type == "prediction":
+        return f"""\
+You are testing whether a developer can mentally execute code and predict behavior.
+
+{base_context}
+
+Create a short, realistic code snippet or system scenario involving {skill_name} (3-8 lines of code or a brief config/architecture description).
+Ask the developer to predict what happens when it runs, especially in an edge case or non-obvious scenario.
+
+Output valid JSON:
+{{
+  "questions": ["<code snippet or scenario>\\n\\nWhat happens when this runs? What will the output/behavior be?"],
+  "context": "one line about the expected behavior"
+}}
+
+{lang_inst}"""
+
+    # Default: understanding (original behavior)
+    return f"""\
+You are assessing a developer's REAL understanding of a technology.
+
+{base_context}
 
 Generate exactly 2 short verification questions to check if the developer truly understands this technology,
 or if it was just AI-generated code they didn't fully comprehend.
@@ -56,28 +146,48 @@ Output valid JSON:
 
 {lang_inst}"""
 
+
+async def generate_probe(
+    skill_name: str,
+    skill_type: str,
+    skill_level: str,
+    profile: Profile,
+    provider: LLMProvider,
+    language: Language = Language.EN,
+    probe_type: str = "understanding",
+) -> dict:
+    """Generate verification questions for a specific skill.
+
+    Returns: {"questions": ["q1", ...], "context": "brief context"}
+    """
+    lang_inst = "用中文回答。" if language == Language.ZH else "Answer in English."
+
+    project_names = []
+    for lang_skill in profile.skills.languages.values():
+        project_names.extend(lang_skill.projects)
+    projects_str = ", ".join(sorted(set(project_names))[:5]) if project_names else "unknown projects"
+
+    prompt = _build_probe_prompt(
+        skill_name, skill_type, skill_level, projects_str,
+        role=profile.persona.role.value if profile.persona.role else "unknown",
+        experience=profile.persona.experience_years.value if profile.persona.experience_years else "unknown",
+        probe_type=probe_type,
+        lang_inst=lang_inst,
+    )
+
     messages = [
         {"role": "system", "content": "You are a technical interviewer. Output valid JSON only."},
         {"role": "user", "content": prompt},
     ]
 
     response = await provider.chat(messages, json_mode=True)
+    data = _parse_json(response)
+    if data is None:
+        return {"questions": [], "context": ""}
 
-    try:
-        data = json.loads(response)
-    except json.JSONDecodeError:
-        start = response.find("{")
-        end = response.rfind("}") + 1
-        if start >= 0 and end > start:
-            try:
-                data = json.loads(response[start:end])
-            except json.JSONDecodeError:
-                return {"questions": [], "context": ""}
-        else:
-            return {"questions": [], "context": ""}
-
+    max_q = 1 if probe_type != "understanding" else 2
     return {
-        "questions": data.get("questions", [])[:2],
+        "questions": data.get("questions", [])[:max_q],
         "context": data.get("context", ""),
     }
 
@@ -89,6 +199,7 @@ async def evaluate_response(
     current_level: str,
     provider: LLMProvider,
     language: Language = Language.EN,
+    probe_type: str = "understanding",
 ) -> dict:
     """Evaluate a developer's answer to a probe question.
 
@@ -96,12 +207,40 @@ async def evaluate_response(
     """
     lang_inst = "用中文回答。" if language == Language.ZH else "Answer in English."
 
+    type_instructions = {
+        "error_detection": (
+            "The question asked the developer to find an error in a technical explanation.\n"
+            "- 'deep': Correctly identified the error AND explained why it's wrong with technical depth\n"
+            "- 'solid': Correctly identified the error\n"
+            "- 'surface': Pointed at the right area but didn't pinpoint the actual error\n"
+            "- 'none': Failed to find the error or identified a non-error as the problem"
+        ),
+        "design_tradeoff": (
+            "The question asked the developer to compare two technical approaches.\n"
+            "- 'deep': Chose an approach with nuanced reasoning, mentioned context-dependent factors\n"
+            "- 'solid': Made a reasonable choice with clear tradeoff analysis\n"
+            "- 'surface': Chose an approach but reasoning is shallow or one-sided\n"
+            "- 'none': No meaningful analysis or completely missed the tradeoffs"
+        ),
+        "prediction": (
+            "The question asked the developer to predict code/system behavior.\n"
+            "- 'deep': Correct prediction with explanation of WHY, including edge case awareness\n"
+            "- 'solid': Correct prediction with reasonable explanation\n"
+            "- 'surface': Partially correct or correct but no explanation\n"
+            "- 'none': Wrong prediction"
+        ),
+    }
+
+    extra = type_instructions.get(probe_type, "")
+
     prompt = f"""\
 Evaluate this developer's answer to a skill verification question.
 
 Skill: {skill_name} (scan-detected level: {current_level})
 Question: {question}
 Developer's answer: {answer}
+
+{extra}
 
 Evaluate their understanding level:
 - "none": Cannot answer at all, or answer is completely wrong
@@ -131,19 +270,9 @@ Guidelines for confidence_delta:
     ]
 
     response = await provider.chat(messages, json_mode=True)
-
-    try:
-        data = json.loads(response)
-    except json.JSONDecodeError:
-        start = response.find("{")
-        end = response.rfind("}") + 1
-        if start >= 0 and end > start:
-            try:
-                data = json.loads(response[start:end])
-            except json.JSONDecodeError:
-                return {"understanding": "surface", "confidence_delta": 0.0, "feedback": ""}
-        else:
-            return {"understanding": "surface", "confidence_delta": 0.0, "feedback": ""}
+    data = _parse_json(response)
+    if data is None:
+        return {"understanding": "surface", "confidence_delta": 0.0, "feedback": ""}
 
     delta = data.get("confidence_delta", 0.0)
     try:
@@ -157,6 +286,34 @@ Guidelines for confidence_delta:
         "confidence_delta": delta,
         "feedback": data.get("feedback", ""),
     }
+
+
+def record_calibration(skill_name: str, predicted: int, actual_understanding: str) -> dict:
+    """Record a metacognition calibration entry. Returns {predicted, actual, gap}.
+
+    predicted: user's self-assessment (1-4)
+    actual_understanding: probe evaluation result (none/surface/solid/deep)
+    gap > 0 means overconfident, gap < 0 means underconfident.
+    """
+    from neocortex.config import load_gap_progress, save_gap_progress
+
+    actual_scores = {"none": 1, "surface": 2, "solid": 3, "deep": 4}
+    actual = actual_scores.get(actual_understanding, 2)
+    gap = predicted - actual
+
+    # Try to record in related gap entries
+    progress = load_gap_progress()
+    for gap_name, entry in progress.items():
+        if entry.status in ("learning", "verified") and skill_name.lower() in gap_name.lower():
+            entry.calibration_history.append({
+                "date": date.today().isoformat(),
+                "predicted": predicted,
+                "actual": actual,
+                "gap": gap,
+            })
+    save_gap_progress(progress)
+
+    return {"predicted": predicted, "actual": actual, "gap": gap}
 
 
 def update_skill_confidence(
