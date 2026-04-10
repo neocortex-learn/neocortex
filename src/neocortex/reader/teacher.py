@@ -50,9 +50,8 @@ def _style_instruction(profile: Profile, doc_title: str = "") -> str:
         return ""
     mapping = {
         LearningStyle.CODE_EXAMPLES: (
-            "Use real code examples to illustrate concepts when the content is about programming or technical implementation. "
-            "For non-technical content (methodology, psychology, management, workflows), use concrete real-world scenarios "
-            "and step-by-step procedures instead of code. Adapt the illustration style to match the content type."
+            "Only include code if the original content contains code. "
+            "Do NOT generate code examples to illustrate non-code concepts."
         ),
         LearningStyle.THEORY_FIRST: "Start with theory and principles. Explain the 'why' before showing any implementation.",
         LearningStyle.JUST_DO_IT: "Be concise and actionable. Skip lengthy explanations, focus on what to do and how.",
@@ -202,33 +201,29 @@ The reader is reading the following content (section: {chunk.position}):
 {focus_instruction}
 {question_instruction}
 
-Generate personalized study notes for this section.
+Generate concise notes for this section. The notes should be SHORTER than the original content — a distillation, not an expansion.
 
 Content requirements:
-1. Skip concepts the reader already masters — don't waste space on them
-2. For areas the reader has experience in, use analogies from their own projects
-3. Expand on the reader's knowledge gaps (the "gaps" in their profile)
-4. If this is a deep-dive section, include Action Items: specific, actionable improvements for the reader's own projects
-5. Keep difficulty at the reader's current level +1 to +2 — stretch but don't overwhelm
-6. NEVER describe or summarize the reader's profile back to them — they know who they are. The profile is for YOUR reference only, to calibrate depth and choose analogies. Do not start with "As a full-stack developer with 5+ years..." or any similar introduction
+1. Extract the core arguments and key insights — what's actually new or important
+2. Skip what the reader already knows (use their profile to judge)
+3. For knowledge gaps: note them briefly ("this connects to X which you haven't explored"), don't write a tutorial
+4. Add brief personal commentary where relevant: "this contradicts...", "this validates...", "worth trying..."
+5. NO code examples unless the original content contains code
+6. NO Action Items or project-specific suggestions — the reader will decide what to act on
+7. NEVER describe the reader's profile back to them
 
-Writing principles (non-negotiable):
-- Colloquial test: would you explain it this way to a friend? If not, rewrite
-- Zero jargon first: explain in plain language, THEN mention the technical term
-- Show reasoning: simulate the process of figuring it out, not the result of having figured it out. "Since A is B, could C also be D?" — walk the reader through the logic
-- Transform, don't define: to explain the relationship between A and B, morph A into B step by step. "Turn LSTM into ResNet" is 10x better than "LSTM and ResNet are dual"
-- Land on actionable: end with "this means you can ___", not "this makes us rethink ___"
+Writing principles:
 - One idea per sentence. Short words over long words. Cut filler
-- Be honest: if the content has flaws, say so. If something is unclear, say so
+- Preserve the author's key phrases and memorable lines verbatim (quote them)
+- Be honest: if the content has flaws or gaps, say so briefly
+- Land on the takeaway, not a summary of the summary
 
-Visual diagrams (Mermaid):
-- Use ```mermaid code blocks (the reader's Markdown tool renders them)
-- mindmap for topic overviews, flowchart for processes, sequenceDiagram for interactions, classDiagram for structures, stateDiagram-v2 for lifecycles
-- Place each diagram RIGHT AFTER its related text (spatial contiguity)
-- Every diagram must serve a purpose — no decorative diagrams
-- Deep-dive sections: aim for 1-2 diagrams. Brief sections: optional
+Visual diagrams (Mermaid) — use sparingly:
+- Only for content that is genuinely structural (processes, relationships, hierarchies)
+- At most 1 diagram per section. Zero is fine for most sections
+- No decorative mindmaps. No diagrams that just restate the text
 
-Output format: Markdown with clear heading hierarchy and Mermaid diagrams. Suitable for future review.
+Output format: Markdown. Aim for roughly 30-50% of the original content length.
 
 {lang_inst}"""
 
