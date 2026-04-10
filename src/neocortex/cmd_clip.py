@@ -48,42 +48,54 @@ def _try_paste_image() -> str:
 
 @app.command()
 def clip(
-    source: str = typer.Argument(None, help="URL, text, or file path to clip"),
+    sources: list[str] = typer.Argument(None, help="URL, text, or file paths to clip (multiple images merged)"),
     paste: bool = typer.Option(False, "--paste", help="Clip from clipboard"),
     process: bool = typer.Option(False, "--process", "-p", help="Run LLM processing (summarize, tag, relate)"),
 ) -> None:
     """Capture a fragment to your knowledge base.
 
     By default saves with zero LLM cost. Use --process for AI-powered tagging.
+    Pass multiple image files to merge them into one clip.
     """
     from neocortex.config import get_notes_dir, load_config, load_profile, save_clip
     from neocortex.models import Clip
 
     lang = _get_lang()
+    source = sources[0] if sources and len(sources) == 1 else None
 
     raw_input = ""
     paste_image_path = ""
-    if paste:
-        # Try clipboard image first (macOS: save to temp file via osascript)
-        paste_image_path = _try_paste_image()
-        if not paste_image_path:
-            try:
-                result = subprocess.run(
-                    ["pbpaste"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                raw_input = result.stdout.strip()
-            except (OSError, subprocess.TimeoutExpired):
-                pass
+    multi_images: list[str] = []
 
-    if paste_image_path:
-        raw_input = paste_image_path
-    elif not raw_input and source:
-        raw_input = source
+    # Check for multiple image files
+    if sources and len(sources) > 1:
+        from pathlib import Path as _P
+        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
+        imgs = [s for s in sources if _P(s).expanduser().exists() and _P(s).suffix.lower() in image_exts]
+        if imgs:
+            multi_images = [str(_P(s).expanduser()) for s in imgs]
 
-    if not raw_input:
+    if not multi_images:
+        if paste:
+            paste_image_path = _try_paste_image()
+            if not paste_image_path:
+                try:
+                    result = subprocess.run(
+                        ["pbpaste"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    raw_input = result.stdout.strip()
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+
+        if paste_image_path:
+            raw_input = paste_image_path
+        elif not raw_input and source:
+            raw_input = source
+
+    if not raw_input and not multi_images:
         console.print(f"  [dim]{t('clip_empty', lang)}[/dim]")
         raise typer.Exit(0)
 
@@ -94,15 +106,58 @@ def clip(
     async def _run() -> None:
         from neocortex.clipper import fetch_clip_content, process_clip
 
-        with console.status(f"  {t('clip_fetching', lang)}"):
-            fetched = await fetch_clip_content(raw_input)
+        # Multi-image clip: OCR each image sequentially, merge into one clip
+        if multi_images:
+            if not cfg.provider or not cfg.api_key:
+                console.print(f"  [red]{t('clip_image_needs_llm', lang)}[/red]")
+                return
+            from neocortex.llm import create_provider
+            from pathlib import Path as _Path
+            provider = create_provider(cfg)
+            media_types = {
+                ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+            }
+            parts: list[str] = []
+            for idx, img_path in enumerate(multi_images, 1):
+                with console.status(f"  {t('clip_image_processing_n', lang, n=str(idx), total=str(len(multi_images)))}"):
+                    img_data = _Path(img_path).read_bytes()
+                    suffix = _Path(img_path).suffix.lower()
+                    media_type = media_types.get(suffix, "image/png")
+                    part = await provider.describe_image(
+                        img_data, media_type,
+                        "Please extract ALL text from this screenshot. "
+                        "Transcribe verbatim. Preserve structure (headings, lists, paragraphs). "
+                        "If there are non-text elements (images, charts), briefly describe them. "
+                        "Output clean markdown.",
+                    )
+                    parts.append(part)
+
+                # Copy image to notes dir
+                from neocortex.config import get_notes_dir as _get_notes_dir
+                img_dest_dir = _get_notes_dir() / "images"
+                img_dest_dir.mkdir(parents=True, exist_ok=True)
+                import shutil
+                dest = img_dest_dir / _Path(img_path).name
+                if not dest.exists():
+                    shutil.copy2(img_path, str(dest))
+
+            content = "\n\n".join(parts)
+            title = _Path(multi_images[0]).stem
+            clip_type = "screenshot"
+            clip_source = ", ".join(_Path(p).name for p in multi_images)
+            # Skip to saving
+            fetched = {"title": title, "content": content, "clip_type": clip_type, "source": clip_source}
+        else:
+            with console.status(f"  {t('clip_fetching', lang)}"):
+                fetched = await fetch_clip_content(raw_input)
 
         title = fetched["title"]
         content = fetched["content"]
         clip_type = fetched["clip_type"]
         clip_source = fetched["source"]
 
-        # Image clip: use LLM to describe/OCR the image
+        # Single image clip: use LLM to describe/OCR the image
         image_path = fetched.get("_image_path")
         if image_path and not content:
             if not cfg.provider or not cfg.api_key:

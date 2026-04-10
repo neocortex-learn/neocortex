@@ -1090,6 +1090,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Extracting text from image...",
         "zh": "正在从截图提取文字...",
     },
+    "clip_image_processing_n": {
+        "en": "Extracting text from image {n}/{total}...",
+        "zh": "正在提取第 {n}/{total} 张截图...",
+    },
     "clip_long_detected": {"en": "This content has ~{words} words — looks like a full article.", "zh": "内容约 {words} 字——看起来是一篇完整文章。"},
     "clip_or_read": {"en": "[c] Quick clip  [r] Full read", "zh": "[c] 快速存  [r] 深度读"},
 
