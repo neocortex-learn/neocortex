@@ -124,13 +124,19 @@ def clip(
                     img_data = _Path(img_path).read_bytes()
                     suffix = _Path(img_path).suffix.lower()
                     media_type = media_types.get(suffix, "image/png")
-                    part = await provider.describe_image(
-                        img_data, media_type,
-                        "Please extract ALL text from this screenshot. "
-                        "Transcribe verbatim. Preserve structure (headings, lists, paragraphs). "
-                        "If there are non-text elements (images, charts), briefly describe them. "
-                        "Output clean markdown.",
-                    )
+                    try:
+                        part = await provider.describe_image(
+                            img_data, media_type,
+                            "Please extract ALL text from this screenshot. "
+                            "Transcribe verbatim. Preserve structure (headings, lists, paragraphs). "
+                            "If there are non-text elements (images, charts), briefly describe them. "
+                            "Output clean markdown.",
+                        )
+                    except Exception as e:
+                        if "image_url" in str(e) or "image" in str(e).lower() and "unsupported" in str(e).lower():
+                            console.print(f"  [red]{t('clip_image_no_vision', lang)}[/red]")
+                            return
+                        raise
                     parts.append(part)
 
                 # Copy image to notes dir
@@ -174,13 +180,19 @@ def clip(
             }
             media_type = media_types.get(suffix, "image/png")
             with console.status(f"  {t('clip_image_processing', lang)}"):
-                content = await provider.describe_image(
-                    img_data, media_type,
-                    "Please extract ALL text from this screenshot. "
-                    "Transcribe verbatim. Preserve structure (headings, lists, paragraphs). "
-                    "If there are non-text elements (images, charts), briefly describe them. "
-                    "Output clean markdown.",
-                )
+                try:
+                    content = await provider.describe_image(
+                        img_data, media_type,
+                        "Please extract ALL text from this screenshot. "
+                        "Transcribe verbatim. Preserve structure (headings, lists, paragraphs). "
+                        "If there are non-text elements (images, charts), briefly describe them. "
+                        "Output clean markdown.",
+                    )
+                except Exception as e:
+                    if "image_url" in str(e) or "image" in str(e).lower() and "unsupported" in str(e).lower():
+                        console.print(f"  [red]{t('clip_image_no_vision', lang)}[/red]")
+                        return
+                    raise
             clip_type = "screenshot"
 
             # Copy image to notes dir for reference

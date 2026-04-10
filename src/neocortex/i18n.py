@@ -1090,6 +1090,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Extracting text from image...",
         "zh": "正在从截图提取文字...",
     },
+    "clip_image_no_vision": {
+        "en": "Your LLM provider does not support image input. Use Claude, GPT-4o, or Gemini for screenshot clips.",
+        "zh": "当前 LLM 不支持图片输入。截图需要 Claude、GPT-4o 或 Gemini。",
+    },
     "clip_image_processing_n": {
         "en": "Extracting text from image {n}/{total}...",
         "zh": "正在提取第 {n}/{total} 张截图...",
