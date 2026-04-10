@@ -16,6 +16,15 @@ if TYPE_CHECKING:
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
 
 
+def _sanitize_text(text: str) -> str:
+    """Remove non-printable characters that break YAML/XML serialization."""
+    # Keep newlines, tabs, and printable chars; strip null bytes and control chars
+    return "".join(
+        c for c in text
+        if c in ("\n", "\r", "\t") or (ord(c) >= 32 and ord(c) != 127)
+    )
+
+
 async def fetch_clip_content(source: str) -> dict:
     """Fetch content from URL, image file, or treat as raw text.
 
@@ -40,7 +49,7 @@ async def fetch_clip_content(source: str) -> dict:
             }
         return {
             "title": "",
-            "content": source,
+            "content": _sanitize_text(source),
             "clip_type": "thought",
             "source": "manual",
         }

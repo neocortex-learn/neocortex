@@ -86,7 +86,12 @@ def clip(
                         text=True,
                         timeout=5,
                     )
-                    raw_input = result.stdout.strip()
+                    text = result.stdout.strip()
+                    # Strip non-printable chars from clipboard
+                    raw_input = "".join(
+                        c for c in text
+                        if c in ("\n", "\r", "\t") or (ord(c) >= 32 and ord(c) != 127)
+                    )
                 except (OSError, subprocess.TimeoutExpired):
                     pass
 
