@@ -2,26 +2,32 @@
 
 English | [中文](README.zh-CN.md)
 
-> AI-powered developer skill analyzer & personalized learning assistant.
+> AI-powered personal knowledge base for developers.
 >
-> Scan your projects, build your skill profile, learn what matters to **you**.
+> Clip anything, compile into concepts, find it when you need it.
 
-Neocortex analyzes your actual code — not your resume — to understand what you know, how deep you know it, and what you're missing. Then when you feed it a book, article, or documentation, it delivers personalized notes that skip what you already know and focus on what you need.
+Neocortex manages your knowledge like a code repository — with intake, compilation, indexing, and health checks. Save tweets, articles, and ideas with zero friction. The LLM compiles them into a linked concept graph. When you need something, search or ask — it finds what you saved.
+
+Inspired by Karpathy's ["LLM Knowledge Bases"](https://karpathy.ai/) workflow: raw materials → compiled knowledge → searchable output.
 
 ## Why Neocortex?
 
-Every developer learns differently. A senior engineer with 3 production-grade real-time messaging systems doesn't need "What is a WebSocket?" — they need "Your Redis Pub/Sub architecture has a dual-write consistency gap, here's how to fix it."
+Your bookmarks, saved tweets, and read-later lists are graveyards. You save things and never find them again.
 
-Existing tools fail here:
+Neocortex fixes this with a three-layer architecture:
 
-| Tool | Knows the content | Knows you | Personalized |
-|------|:-:|:-:|:-:|
-| NotebookLM | Yes | No | No |
-| ChatGPT / Claude | Yes | Barely | No |
-| Coursera / Udemy | Yes | No | No |
-| **Neocortex** | **Yes** | **Yes** | **Yes** |
+```
+clip (save anything)  →  compile (LLM organizes)  →  search/ask (find it)
+```
 
-The secret: Neocortex reads your code to build a real skill profile, then uses it to teach you at exactly the right level — your [Zone of Proximal Development](https://en.wikipedia.org/wiki/Zone_of_proximal_development).
+It also understands **you** — scan your projects to build a skill profile, then get personalized notes that skip what you already know.
+
+| Tool | Saves easily | Organizes automatically | Finds when needed | Knows you |
+|------|:-:|:-:|:-:|:-:|
+| Pocket / Instapaper | Yes | No | Barely | No |
+| Obsidian | Manual | Manual | Plugin | No |
+| NotebookLM | No | Yes | Yes | No |
+| **Neocortex** | **Yes** | **Yes** | **Yes** | **Yes** |
 
 ## Quick Start
 
@@ -41,14 +47,22 @@ neocortex profile init                                # First-time setup (30 sec
 neocortex profile config --provider claude --api-key sk-xxx  # Set LLM provider
 ```
 
-### Scan & Learn
+### Save & Search (lightweight path)
+
+```bash
+neocortex clip https://x.com/karpathy/status/123      # Save a tweet — zero LLM cost
+neocortex clip "Redis Pub/Sub has ordering guarantees" # Save a thought
+neocortex kb compile                                   # Compile into concept graph
+neocortex search "redis pub/sub"                       # Find it instantly
+neocortex ask "What did I save about message ordering?" # AI answers from your KB
+```
+
+### Scan & Learn (deep mode)
 
 ```bash
 neocortex profile scan ~/projects/my-app              # Build skill profile
-neocortex profile                                     # View your profile
-neocortex read https://ddia.vonng.com/ch8/            # Personalized notes
-neocortex learn recommend                             # Learning path
-neocortex ask "When should I use Raft vs Paxos?"      # Q&A with profile context
+neocortex read https://ddia.vonng.com/ch8/            # Personalized deep notes
+neocortex learn recommend                             # Learning path with probes
 ```
 
 ## Commands
@@ -57,12 +71,13 @@ neocortex ask "When should I use Raft vs Paxos?"      # Q&A with profile context
 
 | Command | Description |
 |---------|-------------|
-| `neocortex read <source>` | Read a URL/PDF/EPUB and generate personalized notes |
-| `neocortex ask <question>` | Ask a question (or `--chat` for a session) with profile context |
+| `neocortex clip <source>` | Save anything — URL, tweet, thought, bookmark (zero LLM by default, `--process` for AI tagging) |
+| `neocortex search <query>` | Search across all notes, clips, concepts, and insights |
+| `neocortex ask <question>` | Ask a question — AI answers using your knowledge base (or `--chat` for a session) |
+| `neocortex read <source>` | Deep reading — URL/PDF/EPUB personalized notes with Mermaid diagrams |
 | `neocortex review` | Spaced repetition flashcard review (SM-2) |
-| `neocortex clip <source>` | Capture a fragment (tweet, thought, bookmark) to your knowledge base |
 | `neocortex inbox` | Manage captured clips (`--process`, `--auto`, `--synthesize`) |
-| `neocortex daily` | Daily briefing — resurfaced clips + due reviews |
+| `neocortex daily` | Daily briefing — resurfaced clips + due reviews + compile reminders |
 
 ### `profile` — Profile Management
 
@@ -105,50 +120,49 @@ For detailed usage of each command, see [docs/COMMANDS.md](docs/COMMANDS.md).
 
 ## How It Works
 
-### 1. Smart Project Scanning
+### 1. Three-Layer Knowledge Architecture
 
-Neocortex doesn't feed your entire codebase to the LLM. It extracts key signals efficiently:
+Like a code repository with source, build, and output:
 
 ```
-Project Directory
-    ↓
-1. Config Detection     → package.json, requirements.txt, go.mod, build.gradle
-2. Code Statistics      → Lines by language, file count, project structure
-3. Key File Sampling    → Models, handlers, routes, schemas, tests
-4. Architecture Signals → Design patterns, integrations, infrastructure
-    ↓
-Structured Summary (~2K tokens per project)
-    ↓
-LLM Analysis → Skill Profile (JSON)
+~/Documents/Neocortex/          (your knowledge vault)
+├── clips/                      ← Raw intake (tweets, bookmarks, thoughts)
+├── general/                    ← Deep notes from `read`
+├── concepts/                   ← Compiled knowledge (auto-generated wiki)
+├── insights/                   ← Saved Q&A from `ask`
+├── INDEX.md                    ← Auto-maintained knowledge map
+└── .search.db                  ← FTS5 + vector search index
 ```
 
-This keeps costs low — scanning a project typically costs less than $0.05.
+### 2. Lightweight Path: Clip → Compile → Search
 
-### 2. Personalized Reading (Two-Stage Pipeline)
+**Clip** (zero friction): Save anything — URLs, tweets, thoughts. No LLM cost by default.
 
-**Stage 1 — Outline Analysis** (fast, low cost):
-1. Fetches and parses the content (URL, PDF, EPUB, WeChat articles)
-2. Maps each section against your profile: `✓ skip` / `△ brief` / `★ deep dive`
-3. Shows you a personalized outline for confirmation
+**Compile** (`kb compile`): LLM batch-processes your clips and notes — extracts concepts, builds wiki entries, updates the search index. Run it when you've accumulated a few items.
 
-**Stage 2 — Note Generation**:
-4. Generates notes at your level with Mermaid diagrams
-5. Uses your projects as reference points for analogies
-6. Extracts flashcards for spaced repetition
-7. Triggers incremental concept compilation
+**Search/Ask**: `search` does full-text + semantic hybrid search across everything. `ask` automatically searches your knowledge base and injects relevant context into the AI's response.
 
-Three reading depths: `--scan` (quick triage), default (standard), `--deep` (8-dimension anatomy).
+### 3. Deep Path: Read → Probe → Review
 
-### 3. Knowledge Compilation
+For content you want to deeply understand:
 
-Notes are raw material; concepts are knowledge assets. After each reading:
+**Read** generates personalized notes at your level — maps each section against your skill profile (`skip` / `brief` / `deep`), embeds Mermaid diagrams, uses your projects as analogies.
 
-- **Concept extraction** — LLM identifies concepts from notes
-- **Wiki generation** — Each concept gets a dedicated entry with sources, relationships, and open questions
-- **Wikilink insertion** — Notes are enriched with `[[concept]]` links (Obsidian-compatible)
-- **INDEX.md** — LLM-maintained knowledge map with coverage and mastery levels
+**Probe** verifies real understanding with four question types (edge cases, error detection, design tradeoffs, behavior prediction). Gap status only advances through verification — reading alone doesn't count as "learned."
 
-### 4. Knowledge Confidence Decay
+**Review** uses SM-2 spaced repetition with interleaved flashcards.
+
+### 4. Smart Project Scanning
+
+Neocortex extracts key signals from your codebase efficiently (~2K tokens per project, <$0.05):
+
+```
+Config detection → Code statistics → Key file sampling → Architecture signals
+    ↓
+LLM Analysis → Skill Profile (level + confidence per skill)
+```
+
+### 5. Knowledge Confidence Decay
 
 Based on Hidalgo's research (~50% annual decay rate), concept confidence decays over time. The system resurfaces decaying concepts through reviews, daily briefings, and lint reports.
 
@@ -173,26 +187,36 @@ Bring your own API key. Your key stays local in `~/.neocortex/config.json`.
 
 ## Roadmap
 
-- [x] CLI framework (6 top-level commands + 4 subcommand groups)
+**Knowledge Base (lightweight path)**
+- [x] Zero-LLM clip capture (tweets, URLs, thoughts)
+- [x] Hybrid search (FTS5 + vector) across all content types
+- [x] Standalone `search` command
+- [x] Dynamic knowledge-base context in `ask`/`chat`
+- [x] Concept compilation + knowledge indexing
+- [x] Knowledge base health checks (8 lint rules + auto-fix)
+- [x] Fidelity verification (FACTScore + Hermes independent review)
+- [x] Daily briefing with clip resurfacing + compile reminders
+- [x] Knowledge confidence decay (Hidalgo model)
+
+**Deep Learning (opt-in)**
+- [x] Personalized reading with 3 depth levels (scan/standard/deep)
+- [x] Socratic Probe — 4 question types aligned with Bloom's taxonomy
+- [x] Metacognition calibration (predict vs actual)
+- [x] Gap verification gates (reading alone ≠ learned)
+- [x] Spaced repetition flashcard review (SM-2)
+- [x] Learning path recommendations + opportunity matching
+
+**Infrastructure**
+- [x] CLI framework (7 top-level commands + 4 subcommand groups)
 - [x] Multi-LLM provider support (Claude, OpenAI, Gemini, OpenAI-compat)
 - [x] Project scanning (local + GitHub, 12 languages)
-- [x] Personalized reading with 3 depth levels (scan/standard/deep)
-- [x] Concept compilation + knowledge indexing
-- [x] Spaced repetition flashcard review (SM-2)
-- [x] Knowledge base health checks (8 lint rules + auto-fix)
-- [x] Fidelity verification (FACTScore decomposition + Hermes independent review)
 - [x] Content discovery (explore, research, RSS feeds)
-- [x] Fragment capture (clip, inbox, daily resurfacing)
-- [x] Knowledge confidence decay model
-- [x] Micro-reflections after reading
-- [x] Skill probing & calibration (Socratic Probe)
 - [x] Chat history import (ChatGPT / Claude)
-- [x] Learning path recommendations + opportunity matching
 - [x] Visual concept maps + learning digests
 - [x] Audio output / TTS
 - [x] Localization (English, Chinese)
 - [ ] Plugin system — community-contributed skill extractors
-- [ ] Web/App version (student edition)
+- [ ] Web/App version
 
 ## Contributing
 
