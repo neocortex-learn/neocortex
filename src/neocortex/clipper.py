@@ -65,6 +65,16 @@ async def fetch_clip_content(source: str) -> dict:
             "source": "manual",
         }
 
+    # A real URL is a single line with no whitespace — if it contains newlines,
+    # it's pasted text that happens to start with a URL (e.g. Zhihu copy includes URL + article)
+    if "\n" in source or "\r" in source:
+        return {
+            "title": "",
+            "content": _sanitize_text(source),
+            "clip_type": "thought",
+            "source": "manual",
+        }
+
     import httpx
     from markdownify import markdownify as md
     from readability import Document as ReadabilityDoc
