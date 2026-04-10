@@ -1,7 +1,11 @@
 # Neocortex 开发规范
 
 ## 项目概述
-Neocortex 是一个 AI 驱动的开发者技能分析和个性化学习助手。Python CLI 工具。
+Neocortex 是一个 AI 驱动的个人知识库工具。Python CLI。
+
+核心理念：把知识库当代码仓库管——有 intake（clip），有 compile（概念提取），有 search（检索），有 health check（lint/verify）。
+- **轻路径（默认）**：clip（零 LLM 存入）→ compile（批量整理）→ ask/search（搜到）
+- **重路径（可选）**：read（深度笔记）→ probe（验证）→ review（复习）
 
 ## 技术栈
 - Python 3.10+, Typer + Rich + InquirerPy (CLI), Pydantic (数据模型)
@@ -28,7 +32,7 @@ neocortex --help          # 查看 CLI 帮助
 
 ## CLI 命令结构
 ```
-顶层命令（6 个）：read, ask (--chat), review, clip, inbox, daily
+顶层命令（7 个）：clip, search, ask (--chat), read, review, inbox, daily
 子命令组：
   kb:       notes, card, compile, lint, verify, map
   discover: explore, research, feed
