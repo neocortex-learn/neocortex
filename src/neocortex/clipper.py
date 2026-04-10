@@ -23,10 +23,14 @@ async def fetch_clip_content(source: str) -> dict:
     """
     from pathlib import Path
 
-    # Check if source is a local image file
-    if not source.startswith(("http://", "https://")):
-        path = Path(source).expanduser()
-        if path.exists() and path.suffix.lower() in _IMAGE_EXTENSIONS:
+    # Check if source is a local image file (guard against long text being treated as path)
+    if not source.startswith(("http://", "https://")) and len(source) < 500:
+        try:
+            path = Path(source).expanduser()
+            is_image = path.exists() and path.suffix.lower() in _IMAGE_EXTENSIONS
+        except OSError:
+            is_image = False
+        if is_image:
             return {
                 "title": path.stem,
                 "content": "",  # Will be filled by LLM describe_image in cmd_clip
