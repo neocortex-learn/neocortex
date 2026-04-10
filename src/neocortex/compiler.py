@@ -679,6 +679,20 @@ def _save_concept_entry(concepts_dir: Path, name: str, content: str) -> None:
         raise
 
 
+def _update_compiled_clip_status(compiled_files: list[Path]) -> None:
+    """Update clip files' status from 'inbox' to 'reference' after compile."""
+    for f in compiled_files:
+        if "clips" not in f.parts:
+            continue
+        try:
+            content = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if "status: inbox" in content:
+            updated = content.replace("status: inbox", "status: reference", 1)
+            f.write_text(updated, encoding="utf-8")
+
+
 def _patch_frontmatter_confidence(content: str, confidence: float, updated: str) -> str:
     """Replace confidence and last_updated values in frontmatter via regex."""
     content = re.sub(
@@ -1285,6 +1299,9 @@ async def compile_all(
 
     cache.save()
 
+    # Mark compiled clips as "reference" (no longer inbox)
+    _update_compiled_clip_status(changed_files)
+
     all_concepts = collect_all_concepts(concepts_dir)
     index_content = generate_index(notes_dir, all_concepts, profile, language)
     index_path = notes_dir / "INDEX.md"
@@ -1300,6 +1317,14 @@ async def compile_all(
             pass
         raise
     result.index_updated = True
+
+    # Rebuild search index so new content is immediately searchable
+    try:
+        from neocortex.search import NoteIndex
+        search_index = NoteIndex(notes_dir / ".search.db")
+        search_index.index_all(notes_dir)
+    except Exception:
+        pass
 
     # Generate overview.md — narrative synthesis of the entire knowledge base
     try:

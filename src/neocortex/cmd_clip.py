@@ -17,8 +17,12 @@ from neocortex.i18n import t
 def clip(
     source: str = typer.Argument(None, help="URL, text, or file path to clip"),
     paste: bool = typer.Option(False, "--paste", help="Clip from clipboard"),
+    process: bool = typer.Option(False, "--process", "-p", help="Run LLM processing (summarize, tag, relate)"),
 ) -> None:
-    """Capture a fragment to your knowledge base."""
+    """Capture a fragment to your knowledge base.
+
+    By default saves with zero LLM cost. Use --process for AI-powered tagging.
+    """
     from neocortex.config import get_notes_dir, load_config, load_profile, save_clip
     from neocortex.models import Clip
 
@@ -157,7 +161,7 @@ def clip(
             "topic": "general",
         }
 
-        if cfg.provider and cfg.api_key:
+        if process and cfg.provider and cfg.api_key:
             try:
                 from neocortex.llm import create_provider
 

@@ -420,6 +420,24 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "盲区「{gap}」→ {status}",
     },
 
+    # ── Search ──
+    "search_no_index": {
+        "en": "No search index found.",
+        "zh": "搜索索引不存在。",
+    },
+    "search_build_hint": {
+        "en": "Run `neocortex kb notes --search <query>` or `neocortex kb compile` to build the index.",
+        "zh": "运行 `neocortex kb compile` 或 `neocortex kb notes --search <query>` 来构建索引。",
+    },
+    "search_no_results": {
+        "en": "No results for \"{query}\".",
+        "zh": "未找到与「{query}」相关的内容。",
+    },
+    "search_found": {
+        "en": "Found {count} results for \"{query}\":",
+        "zh": "找到 {count} 条与「{query}」相关的内容：",
+    },
+
     # ── Card ──
     "card_generating": {
         "en": "Generating visual card...",
@@ -1109,6 +1127,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "daily_cluster": {
         "en": "Cluster: {count} clips about [[{concept}]]",
         "zh": "聚类：{count} 条碎片关于 [[{concept}]]",
+    },
+    "daily_uncompiled": {
+        "en": "{count} items not yet compiled into your knowledge graph",
+        "zh": "{count} 条内容尚未编译进知识图谱",
     },
 
     # ── Explore ──

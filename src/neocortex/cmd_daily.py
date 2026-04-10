@@ -50,6 +50,7 @@ def daily() -> None:
         console.print()
 
     _detect_clusters(all_clips, lang)
+    _check_uncompiled(notes_dir, lang)
 
 
 def _get_context_updates(surfacing: list, notes_dir, lang) -> list[dict]:
@@ -197,4 +198,34 @@ def _detect_clusters(all_clips: list, lang) -> None:
                 f"  \U0001f517 {t('daily_cluster', lang, concept=concept, count=str(len(clips_in_cluster)))}"
             )
         console.print("     \u2192 neocortex inbox --synthesize")
+        console.print()
+
+
+def _check_uncompiled(notes_dir, lang) -> None:
+    """Detect uncompiled clips/notes and suggest running compile."""
+    import json as _json
+    from neocortex.config import get_data_dir
+
+    cache_path = get_data_dir() / "compile_cache.json"
+    compiled_files: set[str] = set()
+    if cache_path.exists():
+        try:
+            data = _json.loads(cache_path.read_text(encoding="utf-8"))
+            compiled_files = set(data.get("files", {}).keys())
+        except (OSError, _json.JSONDecodeError, TypeError):
+            pass
+
+    # Count md files that haven't been compiled
+    uncompiled = 0
+    for md_file in notes_dir.rglob("*.md"):
+        if any(p in md_file.parts for p in ("concepts", "insights", "diagrams")):
+            continue
+        if md_file.name in ("INDEX.md", "overview.md", "log.md"):
+            continue
+        if md_file.name not in compiled_files and str(md_file) not in compiled_files:
+            uncompiled += 1
+
+    if uncompiled >= 3:
+        console.print(f"  \U0001f4e6 {t('daily_uncompiled', lang, count=str(uncompiled))}")
+        console.print("     \u2192 neocortex kb compile")
         console.print()

@@ -12,16 +12,29 @@ from neocortex.llm.base import LLMProvider
 from neocortex.models import Language, Profile
 
 _CHARS_PER_TOKEN_ESTIMATE = 3
-_KNOWLEDGE_CONTEXT_LIMIT = 2000
+_KNOWLEDGE_CONTEXT_LIMIT = 3000
+_SEARCH_RESULT_LIMIT = 5
 
 
-def _load_knowledge_context(language: Language) -> str:
-    """Load INDEX.md as context for Q&A."""
+def _load_knowledge_context(language: Language, query: str = "") -> str:
+    """Build knowledge context by searching the user's knowledge base.
+
+    If a query is provided, uses hybrid search (FTS5 + vector) to find relevant
+    content from notes, clips, concepts, and insights. Falls back to INDEX.md
+    when no query is given or search yields no results.
+    """
     from neocortex.config import get_notes_dir
 
     notes_dir = get_notes_dir()
-    index_path = notes_dir / "INDEX.md"
 
+    # Dynamic search: find content relevant to the user's question
+    if query:
+        context = _search_knowledge_base(notes_dir, query, language)
+        if context:
+            return context
+
+    # Fallback: static INDEX.md
+    index_path = notes_dir / "INDEX.md"
     if not index_path.exists():
         return ""
 
@@ -38,6 +51,72 @@ def _load_knowledge_context(language: Language) -> str:
 
     label = "用户的知识库索引" if language == Language.ZH else "User's knowledge base index"
     return f"\n\n{label}:\n{content}"
+
+
+def _search_knowledge_base(notes_dir: Path, query: str, language: Language) -> str:
+    """Search across all content types and build a context string."""
+    from neocortex.search import NoteIndex
+
+    db_path = notes_dir / ".search.db"
+    index = NoteIndex(db_path)
+
+    if not index.has_index():
+        return ""
+
+    results = index.hybrid_search(query, limit=_SEARCH_RESULT_LIMIT)
+    if not results:
+        return ""
+
+    # Build context from search results
+    chunks: list[str] = []
+    total_chars = 0
+
+    for r in results:
+        filename = r["filename"]
+        filepath = notes_dir / filename
+        if not filepath.exists():
+            continue
+
+        try:
+            content = filepath.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        # Extract title
+        title = filepath.stem
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("# "):
+                title = stripped[2:].strip()
+                break
+
+        # Determine content type from path
+        parts = Path(filename).parts
+        if "clips" in parts:
+            content_type = "clip"
+        elif "concepts" in parts:
+            content_type = "concept"
+        elif "insights" in parts:
+            content_type = "insight"
+        else:
+            content_type = "note"
+
+        # Truncate long content, keep most relevant part
+        snippet = r.get("snippet", "")
+        if len(content) > 800:
+            content = content[:800]
+
+        chunk = f"[{content_type}] {title}\n{content}"
+        if total_chars + len(chunk) > _KNOWLEDGE_CONTEXT_LIMIT:
+            break
+        chunks.append(chunk)
+        total_chars += len(chunk)
+
+    if not chunks:
+        return ""
+
+    label = "从用户知识库中搜索到的相关内容" if language == Language.ZH else "Relevant content from user's knowledge base"
+    return f"\n\n{label}:\n\n" + "\n\n---\n\n".join(chunks)
 
 
 def _build_system_prompt(
@@ -179,7 +258,7 @@ async def ask_question(
     provider: LLMProvider,
     language: Language = Language.EN,
 ) -> str:
-    knowledge_context = _load_knowledge_context(language)
+    knowledge_context = _load_knowledge_context(language, query=question)
     system_prompt = _build_system_prompt(profile, language, knowledge_context)
 
     messages = [
@@ -200,11 +279,12 @@ class ChatSession:
         language: Language = Language.EN,
     ) -> None:
         self._provider = provider
+        self._profile = profile
         self._language = language
-        knowledge_context = _load_knowledge_context(language)
+        self._base_system = _build_system_prompt(profile, language)
         self._system_message: dict[str, str] = {
             "role": "system",
-            "content": _build_system_prompt(profile, language, knowledge_context),
+            "content": self._base_system,
         }
         self._history: list[dict[str, str]] = [self._system_message]
         self._max_context = provider.max_context_tokens()
@@ -214,6 +294,11 @@ class ChatSession:
         return list(self._history)
 
     async def send(self, message: str) -> str:
+        # Update system prompt with search results relevant to current message
+        knowledge_context = _load_knowledge_context(self._language, query=message)
+        self._system_message["content"] = self._base_system + knowledge_context
+        self._history[0] = self._system_message
+
         self._history.append({"role": "user", "content": message})
         self._trim_history()
         response = await self._provider.chat(self._history)
