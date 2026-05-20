@@ -1,6 +1,6 @@
 # Mac 客户端 + 产品重新定位 提案
 
-> 状态：草稿 v0.6（2026-05-20）
+> 状态：草稿 v0.7（2026-05-20）—— **Sprint 0 已授权启动 GUI**（self-test 通过 + #1/#4/#5 已修）
 > 用途：捋清"为什么要做客户端"+"它和 Neocortex 现状的关系"+"下一步动作"。**会持续迭代**，所有想法先进这里，不直接动代码。
 > 维护：每次讨论后追加 changelog，不要静默覆盖。
 
@@ -421,6 +421,37 @@
 
 ---
 
+## 9.5 自测验证报告（2026-05-20）
+
+12 条多样化样本 + 1 次中途 `kb compile`，clips 16→25 (+9 成功，3 拒收)，concepts 128→201 (+73)。
+
+### ✅ 工作良好
+- X/Twitter via x-tweet-fetcher：dotey 推文真内容真概念真增长
+- 失败 URL 拒收：2 个 404 被红 ⚠ 拒绝，零污染
+- Rich 概念名转义：`[[asyncio.gather-并发协程]]` 全部完整显示
+- `llm_status` 透传：没出现一次神秘"skipped"
+- 📈 已有主题增长：后期几乎每条 +1 列表，是最直接"长大"反馈
+- 🔗 相关笔记召回：OpenClaw 笔记在多主题被反复召回，"累积感"物证
+- 跨领域（C3 儿童拼音）：LLM 正确标注"与你技术领域无关"但仍抽 3 个概念
+- **意外亮点**：compile 后命名自我修复——下一条 asyncio 主题直接锚定到 `python-asyncio.gather` 不再造 `asyncio`
+
+### 🛠️ 发现 6 个问题（3 修 3 留）
+
+| # | 严重度 | 现象 | 状态 |
+|---|---|---|---|
+| 1 | 高 | 🌱 播下 "asyncio" 实际不会变成 `asyncio.md`，compile 造的是 `python-asyncio.gather.md` 等精细名，用户被误导 | ✅ 修：`_compute_new_or_pending` 加 substring fuzzy match（双向 ≥4 字符）+ 改 hint 文案"compile 后可能合并到更精细的概念页" |
+| 4 | 中 | 9 条新 clip 里 4 条 frontmatter `title:` 是空字符串，影响 inbox/search/wiki link | ✅ 修：cmd_clip 构造 Clip 时若 title 空，按优先级填 summary[:40] / content 首行[:40] / clip.id |
+| 5 | 低 | 截图遇到不支持 vision 的 provider 只提示"不支持"，无切换指引 | ✅ 修：i18n 加 "运行 `neocortex profile config` 切换 provider" |
+| 2 | 中 | concept 命名长度不均（4~17 字符），含 `.` / `-`，wikilink 引用易拼错 | ⏳ 留：需改 compile 的 extract_concepts prompt，单独 sprint |
+| 3 | 低 | A2"前端首屏优化"被关联到`[[一键部署]]`——弱关联，LLM 噪音 | ⏳ 留：`kb verify` 兜底，不动 |
+| 6 | 中（长期） | 20 篇笔记产 83 个概念 = 4+/笔记，会爆炸 | ⏳ 留：需 compile 加去重/合并步骤，独立 ADR |
+
+### 🎯 客户端决策结论
+
+CLI 修完后**桌面深度剪藏场景真的能用了**。但用户最早的痛点（"浏览器一堆标签想存"）本质是**移动 + 跨 app 场景**，CLI 解决不了。**Sprint 0 启动 SwiftUI GUI 客户端**，按 §7 路线图执行。
+
+---
+
 ## 9. 立刻可做的最小一步
 
 不论上面怎么定，**§5.1 `clip` 反馈闭环升级**是地基，所有方向都需要它。建议：
@@ -435,6 +466,13 @@
 
 ## Changelog
 
+- **v0.7 (2026-05-20)**：12 条样本自测 + 修 #1/#4/#5。
+  - 新增 §9.5 自测验证报告：6 个问题清单 + 状态
+  - #1 命名错位：`_compute_new_or_pending` 加双向 substring fuzzy match（≥4 字符门槛防误杀），改 hint 措辞
+  - #4 空标题：cmd_clip 加 title 兜底（summary → content head → id）
+  - #5 vision provider 提示加切换指引
+  - 状态行：**Sprint 0 已授权启动 GUI 客户端**（用户判定 CLI 桌面场景能用 + 移动/跨 app 场景需要 GUI 解决）
+  - Q14 / Q11 等所有 §8 决策保持锁定状态
 - **v0.6 (2026-05-20)**：第五轮 review 修正（P1 真 bug + P2 默认行为缺口）。
   - P1：`clipper.py:process_clip` 之前在 LLM 异常时静默返回 fallback，导致 cmd_clip 永远显示 `llm_status=ok`，破坏"禁止静默失败"承诺。修法：`process_clip` 返回字典加 `_llm_status` (`ok`/`failed`) + `_llm_error`；cmd_clip 改为 `processed.pop("_llm_status", "ok")` 读取真实状态，不再无条件设 ok
   - P2：Q11 决策"默认开启"实际还没实施。本轮落地：`AppConfig.clip_default_process: bool = True`；`clip` 命令 `--process/--no-process` 三态（None=默认按 config / True=强制开 / False=强制关）；`neocortex clip "..."` 直接触发 LLM 反馈

@@ -359,12 +359,23 @@ def clip(
                     llm_status = "failed"
                     llm_error = str(exc) or exc.__class__.__name__
 
+        # Problem #4 fix: plain-text clips return title="" from fetch.
+        # Generate a fallback so inbox/search/concept refs aren't blank.
+        effective_title = title
+        if not effective_title:
+            summary = processed.get("summary", "").strip()
+            if summary:
+                effective_title = summary[:40] + ("…" if len(summary) > 40 else "")
+            elif content:
+                first_line = content.strip().split("\n", 1)[0]
+                effective_title = first_line[:40] + ("…" if len(first_line) > 40 else "")
+
         today = date.today()
         clip_obj = Clip(
             id=uuid.uuid4().hex[:8],
             source=clip_source,
             content=content,
-            title=title,
+            title=effective_title,
             clip_type=clip_type,
             auto_tags=processed.get("auto_tags", []),
             related_concepts=processed.get("related_concepts", []),
@@ -870,20 +881,40 @@ def _link_clip_to_concepts(notes_dir: Path, clip_obj) -> list:
 
 
 def _compute_new_or_pending(notes_dir: Path, related_concepts: list[str]) -> list[str]:
-    """Return concepts that don't yet have a concepts/<slug>.md page.
+    """Return concepts that don't yet have a related concepts/<slug>.md page.
 
     Per Q14 decision (CLIENT_PROPOSAL.md v0.5), clip never auto-creates stub
     concept pages — these names are surfaced to the UI as "new topics waiting
     for kb compile" so the user gets seeding feedback on a cold-start vault.
+
+    Fuzzy match (problem #1 from 2026-05-20 self-test): compile produces
+    refined names like ``python-asyncio.gather`` from a "asyncio" hint, so
+    exact slug match falsely flags "asyncio" as pending. We treat a concept
+    as already-existing if any existing slug contains the queried slug as a
+    substring (or vice versa), provided both are >= 4 chars to avoid noise.
     """
     concepts_dir = notes_dir / "concepts"
+    if not concepts_dir.exists():
+        return [c for c in related_concepts if c.strip()]
+
+    existing_slugs = [p.stem for p in concepts_dir.glob("*.md")]
+
     pending: list[str] = []
     for concept_name in related_concepts:
         slug = concept_name.strip().lower().replace(" ", "-")
         if not slug:
             continue
-        if not (concepts_dir / f"{slug}.md").exists():
-            pending.append(concept_name)
+        # Exact match
+        if slug in existing_slugs:
+            continue
+        # Fuzzy substring match (both ≥4 chars to avoid e.g. "ai" matching
+        # "ai-driven-development" or "上下" matching everything).
+        if len(slug) >= 4 and any(
+            (len(es) >= 4 and (slug in es or es in slug))
+            for es in existing_slugs
+        ):
+            continue
+        pending.append(concept_name)
     return pending
 
 

@@ -481,6 +481,66 @@ class TestClipHelpers:
 
         assert _compute_new_or_pending(tmp_path, []) == []
 
+    def test_compute_new_or_pending_fuzzy_match(self, tmp_path):
+        """Problem #1: compile renames 'asyncio' → 'python-asyncio.gather'.
+        Exact match would falsely flag 'asyncio' as pending; substring match
+        recognises the relation and excludes it from the seeded list."""
+        from neocortex.cmd_clip import _compute_new_or_pending
+
+        concepts_dir = tmp_path / "concepts"
+        concepts_dir.mkdir()
+        # compile-produced refined names
+        (concepts_dir / "python-asyncio.gather.md").write_text("---\n---\n", encoding="utf-8")
+        (concepts_dir / "harness-engineering.md").write_text("---\n---\n", encoding="utf-8")
+
+        result = _compute_new_or_pending(
+            tmp_path,
+            ["asyncio", "harness", "totally-new-topic"],
+        )
+        # asyncio matched python-asyncio.gather (substring), harness matched
+        # harness-engineering — both excluded; only the genuinely new one remains.
+        assert "asyncio" not in result
+        assert "harness" not in result
+        assert "totally-new-topic" in result
+
+    def test_compute_new_or_pending_short_slug_no_false_match(self, tmp_path):
+        """Avoid '上下' (2 chars) eating everything via substring noise."""
+        from neocortex.cmd_clip import _compute_new_or_pending
+
+        concepts_dir = tmp_path / "concepts"
+        concepts_dir.mkdir()
+        (concepts_dir / "上下文管理.md").write_text("---\n---\n", encoding="utf-8")
+
+        # 短 slug (<4 chars) 不参与 fuzzy match → 仍算 pending
+        result = _compute_new_or_pending(tmp_path, ["上下"])
+        assert "上下" in result
+
+
+class TestClipTitleFallback:
+    """Problem #4: 纯文字 clip 之前 title='', inbox/search/wiki link 都受影响."""
+
+    def test_title_falls_back_to_summary(self, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+        from neocortex.cli import app
+        from neocortex.config import load_clips
+
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        runner = CliRunner()
+        # No --process → no LLM summary → falls back to content head
+        result = runner.invoke(
+            app,
+            ["clip", "--no-process", "这是一条无 LLM 处理的纯文字想法用来验证标题兜底"],
+        )
+        assert result.exit_code == 0
+
+        clips = load_clips(tmp_path)
+        assert clips
+        latest = clips[-1]
+        assert latest.title != "", "title should not be empty after fix #4"
+        assert "纯文字想法" in latest.title or "这是一条" in latest.title
+
     def test_link_clip_to_concepts_returns_deltas(self, tmp_path):
         from neocortex.cmd_clip import _link_clip_to_concepts
 

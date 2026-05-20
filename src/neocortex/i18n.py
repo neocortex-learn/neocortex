@@ -1091,8 +1091,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "正在从截图提取文字...",
     },
     "clip_image_no_vision": {
-        "en": "Your LLM provider does not support image input. Use Claude, GPT-4o, or Gemini for screenshot clips.",
-        "zh": "当前 LLM 不支持图片输入。截图需要 Claude、GPT-4o 或 Gemini。",
+        "en": "Your LLM provider does not support image input. Use Claude, GPT-4o, or Gemini for screenshot clips. Switch via: neocortex profile config",
+        "zh": "当前 LLM 不支持图片输入。截图需要 Claude / GPT-4o / Gemini。运行 `neocortex profile config` 切换 provider。",
     },
     "clip_image_processing_n": {
         "en": "Extracting text from image {n}/{total}...",
@@ -1105,7 +1105,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "clip_llm_skipped_opt_out": {"en": "LLM skipped — re-run with --process for AI tagging.", "zh": "本次未启用 LLM，加 --process 可启用 AI 即时关联。"},
     "clip_growing": {"en": "Growing topics", "zh": "已有主题增长"},
     "clip_seeded": {"en": "New topics seeded", "zh": "播下新主题"},
-    "clip_seeded_hint": {"en": "(waiting for `kb compile` to grow concept pages)", "zh": "（等 `kb compile` 长成概念页）"},
+    "clip_seeded_hint": {
+        "en": "(may merge into refined concept pages after `kb compile` — names can differ)",
+        "zh": "（`kb compile` 后可能合并到更精细的概念页，命名可能不一致）",
+    },
     "clip_related_notes": {"en": "Related notes in your vault", "zh": "vault 中的相关笔记"},
     "clip_fetch_failed": {
         "en": "Fetch failed: {error}",
