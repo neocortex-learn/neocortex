@@ -288,6 +288,8 @@ def clip(
                 console.print()
                 return
 
+        from neocortex.models import ClipResult
+
         processed = {
             "summary": "",
             "relevance": "",
@@ -296,22 +298,31 @@ def clip(
             "topic": "general",
         }
 
-        if process and cfg.provider and cfg.api_key:
-            try:
-                from neocortex.llm import create_provider
+        # Track LLM status explicitly per Q11/§5.1 — no more silent swallowing.
+        llm_status = "skipped_user_opt_out"
+        llm_error: str | None = None
 
-                provider = create_provider(cfg)
-                with console.status(f"  {t('clip_processing', lang)}"):
-                    processed = await process_clip(
-                        content,
-                        title,
-                        profile,
-                        provider,
-                        lang,
-                        notes_dir=notes_dir,
-                    )
-            except (ValueError, Exception):
-                pass
+        if process:
+            if not (cfg.provider and cfg.api_key):
+                llm_status = "skipped_no_key"
+            else:
+                try:
+                    from neocortex.llm import create_provider
+
+                    provider = create_provider(cfg)
+                    with console.status(f"  {t('clip_processing', lang)}"):
+                        processed = await process_clip(
+                            content,
+                            title,
+                            profile,
+                            provider,
+                            lang,
+                            notes_dir=notes_dir,
+                        )
+                    llm_status = "ok"
+                except Exception as exc:
+                    llm_status = "failed"
+                    llm_error = str(exc) or exc.__class__.__name__
 
         today = date.today()
         clip_obj = Clip(
@@ -347,26 +358,29 @@ def clip(
         except Exception:
             pass
 
-        # Link clip to concept pages (boost evidence_count)
+        # Link clip to concept pages (boost evidence_count) and capture deltas.
+        existing_cluster_delta = []
+        new_or_pending_clusters: list[str] = []
+        related_notes = []
         if clip_obj.related_concepts:
-            _link_clip_to_concepts(notes_dir, clip_obj)
+            existing_cluster_delta = _link_clip_to_concepts(notes_dir, clip_obj)
+            new_or_pending_clusters = _compute_new_or_pending(notes_dir, clip_obj.related_concepts)
+            related_notes = _find_related_notes(notes_dir, clip_obj, saved_path=saved_path)
 
         from neocortex.config import append_log
         append_log("clip", clip_obj.title or raw_input[:50])
 
-        console.print()
-        console.print(f"  [green]{t('clip_saved', lang)}[/green]")
-        console.print()
-        console.print(f"  [bold]{clip_obj.title or raw_input[:50]}[/bold]")
-        if clip_obj.summary:
-            console.print(f"  [dim]{t('clip_summary', lang)}:[/dim] {clip_obj.summary}")
-        if clip_obj.related_concepts:
-            concepts_str = ", ".join(f"[[{c}]]" for c in clip_obj.related_concepts)
-            console.print(f"  [dim]{t('clip_related', lang)}:[/dim] {concepts_str}")
-        if clip_obj.relevance:
-            console.print(f"  [dim]{t('clip_relevance', lang)}:[/dim] {clip_obj.relevance}")
-        console.print(f"  [dim]{t('clip_topic', lang)}:[/dim] {clip_obj.topic}")
-        console.print()
+        result = ClipResult(
+            saved_path=str(saved_path),
+            clip=clip_obj,
+            llm_status=llm_status,
+            llm_error=llm_error,
+            existing_cluster_delta=existing_cluster_delta,
+            new_or_pending_clusters=new_or_pending_clusters,
+            related_notes=related_notes,
+        )
+
+        _print_clip_result(result, lang, fallback_title=raw_input[:50])
 
     asyncio.run(_run())
 
@@ -662,20 +676,83 @@ def _inbox_synthesize(all_clips: list, notes_dir, lang) -> None:
     asyncio.run(_run())
 
 
-def _link_clip_to_concepts(notes_dir: Path, clip_obj) -> None:
+def _print_clip_result(result, lang: str, fallback_title: str = "") -> None:
+    """Render a ClipResult to the console (structured feedback per §5.1)."""
+    clip_obj = result.clip
+    display_title = clip_obj.title or fallback_title or clip_obj.id
+
+    console.print()
+    console.print(f"  [green]{t('clip_saved', lang)}[/green]")
+    console.print()
+    console.print(f"  [bold]{display_title}[/bold]")
+    if clip_obj.summary:
+        console.print(f"  [dim]{t('clip_summary', lang)}:[/dim] {clip_obj.summary}")
+    if clip_obj.related_concepts:
+        concepts_str = ", ".join(f"[[{c}]]" for c in clip_obj.related_concepts)
+        console.print(f"  [dim]{t('clip_related', lang)}:[/dim] {concepts_str}")
+    if clip_obj.relevance:
+        console.print(f"  [dim]{t('clip_relevance', lang)}:[/dim] {clip_obj.relevance}")
+    if clip_obj.topic:
+        console.print(f"  [dim]{t('clip_topic', lang)}:[/dim] {clip_obj.topic}")
+
+    if result.existing_cluster_delta:
+        deltas_str = ", ".join(
+            f"[[{d.concept}]] +1 ({d.count_before}→{d.count_after})"
+            for d in result.existing_cluster_delta
+        )
+        console.print(f"  [green]📈 {t('clip_growing', lang)}:[/green] {deltas_str}")
+
+    if result.new_or_pending_clusters:
+        seeds_str = ", ".join(f"[[{c}]]" for c in result.new_or_pending_clusters)
+        hint = t("clip_seeded_hint", lang)
+        console.print(
+            f"  [cyan]🌱 {t('clip_seeded', lang)} ({len(result.new_or_pending_clusters)}):[/cyan] {seeds_str} [dim]{hint}[/dim]"
+        )
+
+    if result.related_notes:
+        console.print(f"  [magenta]🔗 {t('clip_related_notes', lang)}:[/magenta]")
+        for note in result.related_notes:
+            snippet = note.snippet.strip().replace("\n", " ")
+            if len(snippet) > 80:
+                snippet = snippet[:80] + "…"
+            label = note.title or note.filename
+            line = f"     · [bold]{label}[/bold]"
+            if snippet:
+                line += f" [dim]— {snippet}[/dim]"
+            console.print(line)
+
+    if result.llm_status == "failed":
+        console.print(
+            f"  [yellow]⚠ {t('clip_llm_failed', lang, error=result.llm_error or '')}[/yellow]"
+        )
+    elif result.llm_status == "skipped_no_key":
+        console.print(f"  [yellow]ℹ {t('clip_llm_skipped_no_key', lang)}[/yellow]")
+    elif result.llm_status == "skipped_user_opt_out":
+        console.print(f"  [dim]{t('clip_llm_skipped_opt_out', lang)}[/dim]")
+
+    console.print()
+
+
+def _link_clip_to_concepts(notes_dir: Path, clip_obj) -> list:
     """Link a clip's related_concepts to existing concept pages.
 
-    For each concept that already has a page, append the clip as a
-    source reference and bump evidence_count.
+    Bumps evidence_count and appends source reference. Returns a list of
+    ClusterDelta describing concepts whose count actually changed (used to
+    feed structured feedback). Concepts without a page are silently skipped
+    here — caller should pair this with _compute_new_or_pending() to surface
+    those as new/pending clusters.
     """
     import os
     import re
     import tempfile
     from datetime import date as _date
 
+    from neocortex.models import ClusterDelta
+
+    deltas: list[ClusterDelta] = []
     concepts_dir = notes_dir / "concepts"
     if not concepts_dir.exists():
-        return
+        return deltas
 
     for concept_name in clip_obj.related_concepts:
         slug = concept_name.strip().lower().replace(" ", "-")
@@ -695,11 +772,12 @@ def _link_clip_to_concepts(notes_dir: Path, clip_obj) -> None:
 
         # Bump evidence_count
         ec_match = re.search(r"^evidence_count:\s*(\d+)", content, re.MULTILINE)
+        old_count = int(ec_match.group(1)) if ec_match else 0
+        new_count = old_count + 1
         if ec_match:
-            old_count = int(ec_match.group(1))
             content = re.sub(
                 r"^evidence_count:\s*\d+",
-                f"evidence_count: {old_count + 1}",
+                f"evidence_count: {new_count}",
                 content,
                 count=1,
                 flags=re.MULTILINE,
@@ -726,12 +804,97 @@ def _link_clip_to_concepts(notes_dir: Path, clip_obj) -> None:
             content = content[:sn_match.start()] + f"source_notes: [{new_list}]" + content[sn_match.end():]
 
         fd, tmp_path = tempfile.mkstemp(dir=str(concepts_dir), suffix=".tmp")
+        wrote = False
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)
             os.replace(tmp_path, str(concept_path))
+            wrote = True
         except Exception:
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
+
+        if wrote and ec_match:
+            deltas.append(ClusterDelta(
+                concept=concept_name,
+                count_before=old_count,
+                count_after=new_count,
+            ))
+
+    return deltas
+
+
+def _compute_new_or_pending(notes_dir: Path, related_concepts: list[str]) -> list[str]:
+    """Return concepts that don't yet have a concepts/<slug>.md page.
+
+    Per Q14 decision (CLIENT_PROPOSAL.md v0.5), clip never auto-creates stub
+    concept pages — these names are surfaced to the UI as "new topics waiting
+    for kb compile" so the user gets seeding feedback on a cold-start vault.
+    """
+    concepts_dir = notes_dir / "concepts"
+    pending: list[str] = []
+    for concept_name in related_concepts:
+        slug = concept_name.strip().lower().replace(" ", "-")
+        if not slug:
+            continue
+        if not (concepts_dir / f"{slug}.md").exists():
+            pending.append(concept_name)
+    return pending
+
+
+def _find_related_notes(
+    notes_dir: Path,
+    clip_obj,
+    saved_path: Path | None = None,
+    limit: int = 5,
+) -> list:
+    """Find existing notes related to this clip via FTS5 over concept names.
+
+    Best-effort: returns empty list if the index isn't available or there
+    are no concepts to query against. saved_path is used to exclude the
+    freshly-saved clip itself from results.
+    """
+    from neocortex.config import get_data_dir
+    from neocortex.models import RelatedNoteRef
+    from neocortex.search import NoteIndex
+
+    if not clip_obj.related_concepts:
+        return []
+
+    try:
+        index = NoteIndex(get_data_dir() / "neocortex.sqlite")
+        if not index.has_index():
+            return []
+    except Exception:
+        return []
+
+    own_filename = ""
+    if saved_path is not None:
+        try:
+            own_filename = str(saved_path.relative_to(notes_dir))
+        except ValueError:
+            own_filename = saved_path.name
+
+    seen: dict[str, RelatedNoteRef] = {}
+    for concept_name in clip_obj.related_concepts:
+        try:
+            hits = index.search(concept_name, limit=limit)
+        except Exception:
+            continue
+        for hit in hits:
+            fname = hit.get("filename", "")
+            if not fname or fname == own_filename:
+                continue
+            if fname in seen:
+                continue
+            seen[fname] = RelatedNoteRef(
+                filename=fname,
+                title=hit.get("title", "") or fname,
+                snippet=hit.get("snippet", ""),
+                reason=f"matched: {concept_name}",
+            )
+            if len(seen) >= limit:
+                return list(seen.values())
+    return list(seen.values())

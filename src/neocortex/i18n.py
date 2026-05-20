@@ -1100,6 +1100,13 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "clip_long_detected": {"en": "This content has ~{words} words — looks like a full article.", "zh": "内容约 {words} 字——看起来是一篇完整文章。"},
     "clip_or_read": {"en": "[c] Quick clip  [r] Full read", "zh": "[c] 快速存  [r] 深度读"},
+    "clip_llm_failed": {"en": "LLM call failed: {error}", "zh": "LLM 调用失败：{error}"},
+    "clip_llm_skipped_no_key": {"en": "LLM skipped — no provider/key configured. Run `neocortex profile config` to enable AI tagging.", "zh": "未配置 LLM，跳过即时关联。运行 `neocortex profile config` 启用 AI 标签。"},
+    "clip_llm_skipped_opt_out": {"en": "LLM skipped — re-run with --process for AI tagging.", "zh": "本次未启用 LLM，加 --process 可启用 AI 即时关联。"},
+    "clip_growing": {"en": "Growing topics", "zh": "已有主题增长"},
+    "clip_seeded": {"en": "New topics seeded", "zh": "播下新主题"},
+    "clip_seeded_hint": {"en": "(waiting for `kb compile` to grow concept pages)", "zh": "（等 `kb compile` 长成概念页）"},
+    "clip_related_notes": {"en": "Related notes in your vault", "zh": "vault 中的相关笔记"},
 
     # ── Inbox ──
     "inbox_title": {"en": "Inbox", "zh": "收件箱"},

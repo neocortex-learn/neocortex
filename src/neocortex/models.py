@@ -461,3 +461,33 @@ class Clip(BaseModel):
     promoted_to: str | None = None
     next_surface: str = ""
     surface_count: int = 0
+
+
+class ClusterDelta(BaseModel):
+    """已有概念页的 evidence_count 增长记录。"""
+    concept: str
+    count_before: int
+    count_after: int
+
+
+class RelatedNoteRef(BaseModel):
+    """指向 vault 中已有笔记的相关性引用。"""
+    filename: str
+    title: str
+    snippet: str = ""
+    reason: str = ""
+
+
+class ClipResult(BaseModel):
+    """clip 操作的结构化结果，供 CLI / GUI 统一消费。
+
+    Q14 决策：new_or_pending_clusters 只是标记，不在 clip 阶段生成 stub concepts/*.md。
+    """
+    saved_path: str
+    clip: Clip
+    # ok | skipped_no_key | skipped_user_opt_out | failed
+    llm_status: str = "skipped_user_opt_out"
+    llm_error: str | None = None
+    existing_cluster_delta: list[ClusterDelta] = Field(default_factory=list)
+    new_or_pending_clusters: list[str] = Field(default_factory=list)
+    related_notes: list[RelatedNoteRef] = Field(default_factory=list)
