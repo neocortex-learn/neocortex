@@ -73,6 +73,8 @@ async def fetch_clip_content(source: str) -> dict:
             "content": _sanitize_text(source),
             "clip_type": "thought",
             "source": "manual",
+            "_fetch_status": "ok",
+            "_fetch_error": None,
         }
 
     import httpx
@@ -85,41 +87,107 @@ async def fetch_clip_content(source: str) -> dict:
     is_wechat = "mp.weixin.qq.com" in lower
 
     if is_wechat:
-        return await _fetch_wechat_clip(source)
+        try:
+            result = await _fetch_wechat_clip(source)
+            result.setdefault("_fetch_status", "ok")
+            result.setdefault("_fetch_error", None)
+            return result
+        except Exception as exc:
+            return _failed_fetch_payload(source, str(exc) or exc.__class__.__name__)
+
+    if is_tweet:
+        result = await _fetch_tweet_clip(source)
+        if result.get("_fetch_status") == "ok":
+            return result
+        # fall through to generic httpx as best-effort backup; if that also
+        # produces garbage, _check_content_quality below will mark it failed.
 
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=20.0) as client:
             resp = await client.get(source, headers={"User-Agent": "Mozilla/5.0"})
             resp.raise_for_status()
             html = resp.text
-    except (httpx.HTTPError, OSError):
-        return {
-            "title": source,
-            "content": source,
-            "clip_type": "bookmark",
-            "source": source,
-        }
+    except (httpx.HTTPError, OSError) as exc:
+        return _failed_fetch_payload(source, f"HTTP fetch failed: {exc}")
 
     if is_tweet or is_weibo:
         doc = ReadabilityDoc(html)
         title = doc.short_title() or source
         text = md(doc.summary(), strip=["img", "a"]).strip()
-        return {
+        payload = {
             "title": title,
             "content": text[:2000] if text else source,
             "clip_type": "tweet",
             "source": source,
         }
+        return _annotate_quality(payload, text, source)
 
     doc = ReadabilityDoc(html)
     title = doc.short_title() or source
     text = md(doc.summary(), strip=["img"]).strip()
-    return {
+    payload = {
         "title": title,
         "content": text[:2000] if text else source,
         "clip_type": "bookmark",
         "source": source,
     }
+    return _annotate_quality(payload, text, source)
+
+
+# ── Fetch quality / failure helpers ──
+
+_FETCH_ERROR_MARKERS = (
+    "login required",
+    "please enable javascript",
+    "javascript is not available",
+    "404 not found",
+    "page not found",
+    "please log in",
+    "rate limit exceeded",
+    "access denied",
+    "请先登录",
+    "需要登录",
+    "页面不存在",
+)
+
+
+def _failed_fetch_payload(source: str, error: str) -> dict:
+    """Build a dict signalling fetch failure — caller must refuse to save."""
+    return {
+        "title": source,
+        "content": "",
+        "clip_type": "bookmark",
+        "source": source,
+        "_fetch_status": "failed",
+        "_fetch_error": error,
+    }
+
+
+def _annotate_quality(payload: dict, extracted_text: str, source: str) -> dict:
+    """Detect obvious fetch garbage (empty / login wall / error page).
+
+    Source URLs that resolve to less than ~100 chars of real content or that
+    contain known error markers are flagged as failed so the caller can
+    refuse to save and stop the LLM from hallucinating about an error page.
+    """
+    payload.setdefault("_fetch_status", "ok")
+    payload.setdefault("_fetch_error", None)
+    text = (extracted_text or "").strip()
+    text_lower = text.lower()
+    if not text or len(text) < 100:
+        if source.startswith(("http://", "https://")):
+            payload["_fetch_status"] = "failed"
+            payload["_fetch_error"] = (
+                f"extracted content too short ({len(text)} chars) — "
+                "likely a login wall / JS-only page / empty article"
+            )
+        return payload
+    for marker in _FETCH_ERROR_MARKERS:
+        if marker in text_lower:
+            payload["_fetch_status"] = "failed"
+            payload["_fetch_error"] = f"page contains error marker: {marker!r}"
+            return payload
+    return payload
 
 
 def _get_concepts(notes_dir: Path) -> list[str]:
@@ -285,4 +353,55 @@ async def _fetch_wechat_clip(source: str) -> dict:
         "content": content[:2000] if content else source,
         "clip_type": "bookmark",
         "source": source,
+    }
+
+
+async def _fetch_tweet_clip(source: str) -> dict:
+    """Fetch X/Twitter content via x-tweet-fetcher (zero-deps FxTwitter mode).
+
+    Returns a payload dict with _fetch_status='ok' on success.
+    On any failure (tool not installed, subprocess error, empty output)
+    returns a failed payload so the caller can fall back to generic httpx.
+    """
+    import shutil
+    import subprocess
+
+    if not shutil.which("x-tweet-fetcher"):
+        return _failed_fetch_payload(
+            source,
+            "x-tweet-fetcher not installed. "
+            "Install: uv tool install git+https://github.com/ythx-101/x-tweet-fetcher",
+        )
+
+    try:
+        result = subprocess.run(
+            ["x-tweet-fetcher", "--url", source, "--text-only"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return _failed_fetch_payload(source, "x-tweet-fetcher timed out (>30s)")
+    except OSError as exc:
+        return _failed_fetch_payload(source, f"x-tweet-fetcher launch failed: {exc}")
+
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "").strip() or "unknown error"
+        return _failed_fetch_payload(source, f"x-tweet-fetcher exit {result.returncode}: {err[:200]}")
+
+    text = (result.stdout or "").strip()
+    if not text:
+        return _failed_fetch_payload(source, "x-tweet-fetcher produced empty output")
+
+    # First line is usually "@user: <first part>"; use as title fallback
+    first_line = text.splitlines()[0].strip() if text else source
+    title = first_line[:80] if first_line else source
+
+    return {
+        "title": title,
+        "content": text[:2000],
+        "clip_type": "tweet",
+        "source": source,
+        "_fetch_status": "ok",
+        "_fetch_error": None,
     }

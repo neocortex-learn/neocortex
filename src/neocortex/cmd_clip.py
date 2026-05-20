@@ -166,6 +166,17 @@ def clip(
             with console.status(f"  {t('clip_fetching', lang)}"):
                 fetched = await fetch_clip_content(raw_input)
 
+        # A: refuse to save when fetch produced garbage; otherwise LLM will
+        # hallucinate concepts about the error page and pollute the graph.
+        if fetched.get("_fetch_status") == "failed":
+            from rich.markup import escape as _esc
+            err = fetched.get("_fetch_error") or "unknown"
+            console.print()
+            console.print(f"  [red]⚠ {t('clip_fetch_failed', lang, error=_esc(err))}[/red]")
+            console.print(f"  [dim]{t('clip_fetch_failed_hint', lang)}[/dim]")
+            console.print()
+            return
+
         title = fetched["title"]
         content = fetched["content"]
         clip_type = fetched["clip_type"]

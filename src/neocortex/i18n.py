@@ -1107,6 +1107,14 @@ STRINGS: dict[str, dict[str, str]] = {
     "clip_seeded": {"en": "New topics seeded", "zh": "播下新主题"},
     "clip_seeded_hint": {"en": "(waiting for `kb compile` to grow concept pages)", "zh": "（等 `kb compile` 长成概念页）"},
     "clip_related_notes": {"en": "Related notes in your vault", "zh": "vault 中的相关笔记"},
+    "clip_fetch_failed": {
+        "en": "Fetch failed: {error}",
+        "zh": "抓取失败：{error}",
+    },
+    "clip_fetch_failed_hint": {
+        "en": "Not saved — would have polluted the concept graph with hallucinated tags. Copy the page text and re-run: neocortex clip \"<paste>\"",
+        "zh": "未保存——若强存会让 LLM 基于错误页编出概念污染知识图谱。建议复制正文后运行：neocortex clip \"<粘贴内容>\"",
+    },
 
     # ── Inbox ──
     "inbox_title": {"en": "Inbox", "zh": "收件箱"},

@@ -306,6 +306,118 @@ class TestClipCommand:
         assert result.exit_code == 0
 
 
+class TestFetchFailureDetection:
+    """A: 抓取失败时必须明确标记，让 caller 拒收（否则 LLM 会基于错误页编概念）."""
+
+    @pytest.mark.asyncio
+    async def test_httpx_error_marks_failed(self):
+        import httpx
+        from neocortex.clipper import fetch_clip_content
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(side_effect=httpx.HTTPError("connection refused"))
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            result = await fetch_clip_content("https://broken.example.com/")
+
+            assert result["_fetch_status"] == "failed"
+            assert "HTTP fetch failed" in result["_fetch_error"]
+
+    @pytest.mark.asyncio
+    async def test_short_content_marks_failed(self):
+        from neocortex.clipper import fetch_clip_content
+
+        # Mock a 200 response with near-empty HTML (login wall stub)
+        mock_resp = MagicMock()
+        mock_resp.text = "<html><body>x</body></html>"
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            result = await fetch_clip_content("https://stub.example.com/")
+
+            assert result["_fetch_status"] == "failed"
+            assert "too short" in result["_fetch_error"]
+
+    @pytest.mark.asyncio
+    async def test_normal_content_marks_ok(self):
+        from neocortex.clipper import fetch_clip_content
+
+        # >100 chars of real content
+        body = "<html><body><article>" + ("This is a real article with substantive content. " * 5) + "</article></body></html>"
+        mock_resp = MagicMock()
+        mock_resp.text = body
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            result = await fetch_clip_content("https://real.example.com/article")
+
+            assert result["_fetch_status"] == "ok"
+            assert result["_fetch_error"] is None
+
+
+class TestTweetFetcher:
+    """C: x-tweet-fetcher 集成路径."""
+
+    @pytest.mark.asyncio
+    async def test_tweet_fetcher_success(self):
+        from neocortex.clipper import _fetch_tweet_clip
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "@dotey: 这是一条推文\n\n详细内容在这里"
+        mock_result.stderr = ""
+
+        with patch("shutil.which", return_value="/usr/local/bin/x-tweet-fetcher"), \
+             patch("subprocess.run", return_value=mock_result):
+            result = await _fetch_tweet_clip("https://x.com/dotey/status/123")
+
+        assert result["_fetch_status"] == "ok"
+        assert result["clip_type"] == "tweet"
+        assert "dotey" in result["title"]
+        assert "推文" in result["content"]
+
+    @pytest.mark.asyncio
+    async def test_tweet_fetcher_not_installed(self):
+        from neocortex.clipper import _fetch_tweet_clip
+
+        with patch("shutil.which", return_value=None):
+            result = await _fetch_tweet_clip("https://x.com/dotey/status/123")
+
+        assert result["_fetch_status"] == "failed"
+        assert "not installed" in result["_fetch_error"]
+
+    @pytest.mark.asyncio
+    async def test_tweet_fetcher_subprocess_error(self):
+        from neocortex.clipper import _fetch_tweet_clip
+
+        mock_result = MagicMock()
+        mock_result.returncode = 2
+        mock_result.stdout = ""
+        mock_result.stderr = "tweet not found"
+
+        with patch("shutil.which", return_value="/usr/local/bin/x-tweet-fetcher"), \
+             patch("subprocess.run", return_value=mock_result):
+            result = await _fetch_tweet_clip("https://x.com/x/status/0")
+
+        assert result["_fetch_status"] == "failed"
+        assert "exit 2" in result["_fetch_error"]
+
+
 class TestProcessClipStatus:
     """process_clip 必须透传 _llm_status 让 caller 检测 LLM 失败 (P1 fix)."""
 
