@@ -408,6 +408,67 @@ class TestClipHelpers:
         # concepts/ 不存在 → 返回空 delta（冷启动场景）
         assert _link_clip_to_concepts(tmp_path, clip_obj) == []
 
+    def test_print_clip_result_escapes_rich_markup(self):
+        """Regression: Rich 把 [[redis]] 这种小写 ASCII 内容当 style tag 吃成 []。
+
+        概念名 redis / abc / postgres 等小写词必须用 rich.markup.escape 保护，
+        否则用户会看到 '📈 [] +1' 这种像数据坏掉的输出，但实际数据是好的。
+        """
+        from io import StringIO
+        from rich.console import Console
+        from neocortex import cmd_clip
+        from neocortex.models import (
+            Clip,
+            ClipResult,
+            ClusterDelta,
+            Language,
+            RelatedNoteRef,
+        )
+
+        clip = Clip(
+            id="t1",
+            source="manual",
+            content="x",
+            title="Demo",
+            related_concepts=["redis", "abc", "上下文管理"],
+            summary="s",
+            relevance="r",
+            topic="backend",
+        )
+        result = ClipResult(
+            saved_path="/tmp/x.md",
+            clip=clip,
+            llm_status="ok",
+            existing_cluster_delta=[
+                ClusterDelta(concept="redis", count_before=1, count_after=2),
+            ],
+            new_or_pending_clusters=["postgres", "上下文管理"],
+            related_notes=[
+                RelatedNoteRef(filename="x.md", title="abc note", snippet="hello"),
+            ],
+        )
+
+        buf = StringIO()
+        # 用 force_terminal=False 拿干净的渲染文本（不带 ANSI 颜色码）
+        test_console = Console(file=buf, force_terminal=False, width=200)
+        cmd_clip.console = test_console
+        try:
+            cmd_clip._print_clip_result(result, Language.ZH)
+        finally:
+            # 恢复原 console，避免污染其他测试
+            from neocortex.cli import console as real_console
+            cmd_clip.console = real_console
+
+        out = buf.getvalue()
+        # 关键断言：渲染后必须能看到完整的 [[redis]] 等字面文本
+        assert "[[redis]]" in out, f"redis 被 Rich 吃了，输出={out!r}"
+        assert "[[abc note]]" not in out  # title 不在 [[..]] 里
+        assert "abc note" in out
+        assert "[[postgres]]" in out
+        assert "[[上下文管理]]" in out
+        # 增长行也要完整
+        assert "[[redis]] +1 (1→2)" in out
+
     def test_link_clip_skips_already_referenced(self, tmp_path):
         from neocortex.cmd_clip import _link_clip_to_concepts
 

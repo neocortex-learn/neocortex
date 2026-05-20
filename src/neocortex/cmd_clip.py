@@ -701,33 +701,41 @@ def _inbox_synthesize(all_clips: list, notes_dir, lang) -> None:
 
 
 def _print_clip_result(result, lang: str, fallback_title: str = "") -> None:
-    """Render a ClipResult to the console (structured feedback per §5.1)."""
+    """Render a ClipResult to the console (structured feedback per §5.1).
+
+    NB: all LLM-derived / user-content strings (concept names, titles, snippets)
+    must go through ``rich.markup.escape`` — Rich treats ``[name]`` as a style
+    tag and silently drops short ASCII tokens like ``[redis]`` / ``[abc]``,
+    making the output look like the data is corrupted when it isn't.
+    """
+    from rich.markup import escape
+
     clip_obj = result.clip
     display_title = clip_obj.title or fallback_title or clip_obj.id
 
     console.print()
     console.print(f"  [green]{t('clip_saved', lang)}[/green]")
     console.print()
-    console.print(f"  [bold]{display_title}[/bold]")
+    console.print(f"  [bold]{escape(display_title)}[/bold]")
     if clip_obj.summary:
-        console.print(f"  [dim]{t('clip_summary', lang)}:[/dim] {clip_obj.summary}")
+        console.print(f"  [dim]{t('clip_summary', lang)}:[/dim] {escape(clip_obj.summary)}")
     if clip_obj.related_concepts:
-        concepts_str = ", ".join(f"[[{c}]]" for c in clip_obj.related_concepts)
+        concepts_str = ", ".join(escape(f"[[{c}]]") for c in clip_obj.related_concepts)
         console.print(f"  [dim]{t('clip_related', lang)}:[/dim] {concepts_str}")
     if clip_obj.relevance:
-        console.print(f"  [dim]{t('clip_relevance', lang)}:[/dim] {clip_obj.relevance}")
+        console.print(f"  [dim]{t('clip_relevance', lang)}:[/dim] {escape(clip_obj.relevance)}")
     if clip_obj.topic:
-        console.print(f"  [dim]{t('clip_topic', lang)}:[/dim] {clip_obj.topic}")
+        console.print(f"  [dim]{t('clip_topic', lang)}:[/dim] {escape(clip_obj.topic)}")
 
     if result.existing_cluster_delta:
         deltas_str = ", ".join(
-            f"[[{d.concept}]] +1 ({d.count_before}→{d.count_after})"
+            f"{escape(f'[[{d.concept}]]')} +1 ({d.count_before}→{d.count_after})"
             for d in result.existing_cluster_delta
         )
         console.print(f"  [green]📈 {t('clip_growing', lang)}:[/green] {deltas_str}")
 
     if result.new_or_pending_clusters:
-        seeds_str = ", ".join(f"[[{c}]]" for c in result.new_or_pending_clusters)
+        seeds_str = ", ".join(escape(f"[[{c}]]") for c in result.new_or_pending_clusters)
         hint = t("clip_seeded_hint", lang)
         console.print(
             f"  [cyan]🌱 {t('clip_seeded', lang)} ({len(result.new_or_pending_clusters)}):[/cyan] {seeds_str} [dim]{hint}[/dim]"
@@ -740,14 +748,14 @@ def _print_clip_result(result, lang: str, fallback_title: str = "") -> None:
             if len(snippet) > 80:
                 snippet = snippet[:80] + "…"
             label = note.title or note.filename
-            line = f"     · [bold]{label}[/bold]"
+            line = f"     · [bold]{escape(label)}[/bold]"
             if snippet:
-                line += f" [dim]— {snippet}[/dim]"
+                line += f" [dim]— {escape(snippet)}[/dim]"
             console.print(line)
 
     if result.llm_status == "failed":
         console.print(
-            f"  [yellow]⚠ {t('clip_llm_failed', lang, error=result.llm_error or '')}[/yellow]"
+            f"  [yellow]⚠ {t('clip_llm_failed', lang, error=escape(result.llm_error or ''))}[/yellow]"
         )
     elif result.llm_status == "skipped_no_key":
         console.print(f"  [yellow]ℹ {t('clip_llm_skipped_no_key', lang)}[/yellow]")
