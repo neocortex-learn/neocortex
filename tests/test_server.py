@@ -192,6 +192,91 @@ class TestClipEndpoint:
             assert key in body, f"ClipResult missing field {key}"
 
 
+class TestDeleteNoteEndpoint:
+    """POST /api/notes/delete — trash a note + reverse concept refs."""
+
+    def test_delete_no_auth(self, client):
+        r = client.post(
+            "/api/notes/delete",
+            headers={"Content-Type": "application/json"},
+            json={"path": "x.md"},
+        )
+        assert r.status_code == 401
+
+    def test_delete_nonexistent(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+        r = client.post(
+            "/api/notes/delete",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"path": "does-not-exist.md"},
+        )
+        assert r.status_code == 404
+
+    def test_delete_path_escape_rejected(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+        # Create a file outside the vault
+        outside = tmp_path.parent / "outside.md"
+        outside.write_text("---\nid: x\n---\nbody", encoding="utf-8")
+        try:
+            r = client.post(
+                "/api/notes/delete",
+                headers={
+                    "Authorization": f"Bearer {TOKEN}",
+                    "Content-Type": "application/json",
+                },
+                json={"path": str(outside)},
+            )
+            assert r.status_code == 400
+            assert outside.exists(), "outside-vault file must NOT be deleted"
+        finally:
+            if outside.exists():
+                outside.unlink()
+
+    def test_delete_clip_reverses_concept_ec(self, client, tmp_path, monkeypatch):
+        """Real flow: trashing a clip with related_concepts decrements
+        the corresponding concept page evidence_count."""
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        # Set up: a concept page that references our clip
+        concepts = tmp_path / "concepts"
+        concepts.mkdir()
+        (concepts / "transformer.md").write_text(
+            "---\nevidence_count: 5\nsource_notes: [\"clip:abc\"]\n---\nbody\n",
+            encoding="utf-8",
+        )
+        # Set up: the clip itself
+        clips = tmp_path / "clips"
+        clips.mkdir()
+        clip_file = clips / "2026-05-20-test.md"
+        clip_file.write_text(
+            "---\nid: abc\nrelated_concepts: [\"Transformer\"]\n---\nbody\n",
+            encoding="utf-8",
+        )
+
+        r = client.post(
+            "/api/notes/delete",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"path": str(clip_file)},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert "Transformer" in body["reversed_concepts"]
+        # Concept page evidence_count decremented
+        updated = (concepts / "transformer.md").read_text(encoding="utf-8")
+        assert "evidence_count: 4" in updated
+        # And the clip:abc reference is gone
+        assert "clip:abc" not in updated
+
+
 class TestRuntimeFiles:
     def test_provision_writes_files(self, tmp_path, monkeypatch):
         """runtime.provision_runtime writes pid/port/token to ~/.neocortex/."""

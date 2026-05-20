@@ -235,6 +235,66 @@ def _get_concepts(notes_dir: Path) -> list[str]:
     return [f.stem for f in sorted(concepts_dir.glob("*.md"))]
 
 
+def _chinese_ratio(text: str) -> float:
+    """Fraction of characters that look Chinese / CJK. Used to decide
+    whether a body needs translation. Includes basic CJK + extension A."""
+    if not text:
+        return 0.0
+    cjk = 0
+    counted = 0
+    for ch in text:
+        cp = ord(ch)
+        # Skip whitespace + punctuation from the denominator so a paragraph
+        # of English with two Chinese chars doesn't get falsely classified.
+        if ch.isspace() or not ch.isalnum() and cp < 0x4E00:
+            continue
+        counted += 1
+        if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF:
+            cjk += 1
+    return cjk / counted if counted else 0.0
+
+
+async def maybe_translate_to_chinese(
+    content: str,
+    provider: LLMProvider,
+    *,
+    threshold: float = 0.20,
+    max_input_chars: int = 30_000,
+) -> str | None:
+    """If ``content`` is mostly non-Chinese, return a Chinese translation;
+    otherwise None.
+
+    Conservative defaults:
+        - Skip if CJK ratio >= 20% (already partially Chinese — likely a
+          tweet that quotes English; translating would be noisy).
+        - Skip if content too long (>30K chars; protects token cost).
+
+    Returns plain translation string (caller appends to original body).
+    """
+    if not content or len(content) > max_input_chars:
+        return None
+    if _chinese_ratio(content) >= threshold:
+        return None
+
+    prompt = (
+        "请把下面的文本翻译成简体中文。保留原文的 Markdown 结构（标题层级、"
+        "列表、引用块、代码块、链接、加粗 / 斜体）。专有名词（人名、产品名、"
+        "公司名、技术术语）保留英文不译。直接输出译文，不要加任何解释或前言。\n\n"
+        "原文：\n"
+        f"{content}"
+    )
+    try:
+        translated = await provider.chat([{"role": "user", "content": prompt}])
+        translated = translated.strip()
+        # Sanity: if the model returned something that's still mostly non-Chinese
+        # (refusal / echo), drop it rather than save garbage.
+        if _chinese_ratio(translated) < 0.3:
+            return None
+        return translated
+    except Exception:
+        return None
+
+
 async def process_clip(
     content: str,
     title: str,
@@ -258,7 +318,15 @@ async def process_clip(
 
     concepts = _get_concepts(notes_dir) if notes_dir else []
 
-    lang_hint = "用中文回答" if language.value == "zh" else "Answer in English"
+    if language.value == "zh":
+        lang_hint = (
+            "All string values in the JSON response (summary, relevance, "
+            "related_concepts, auto_tags) MUST be in Simplified Chinese (中文)"
+            "，无论原文是什么语言。即使原文是英文 / 日文 / 任何语言，"
+            "summary 和 relevance 必须翻译成中文。topic 仍是英文标识符。"
+        )
+    else:
+        lang_hint = "All string values in the JSON response must be in English."
     domains_str = ", ".join(domains) if domains else "general"
     gaps_str = ", ".join(gaps[:20]) if gaps else "(none)"
     concepts_str = ", ".join(concepts[:30]) if concepts else "(none)"
@@ -277,7 +345,7 @@ async def process_clip(
         '  "auto_tags": ["tag1", "tag2", "tag3"],\n'
         '  "topic": "best matching domain from the user\'s domain list, or general"\n'
         "}\n\n"
-        f"{lang_hint}."
+        f"{lang_hint}"
     )
 
     try:

@@ -48,6 +48,8 @@ def create_app(token: str, port: int) -> FastAPI:
 
     # Resource routers
     from neocortex.server.routes.clip import make_router as _clip_router
+    from neocortex.server.routes.notes import make_router as _notes_router
     app.include_router(_clip_router(require_token))
+    app.include_router(_notes_router(require_token))
 
     return app

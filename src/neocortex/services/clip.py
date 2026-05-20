@@ -125,6 +125,16 @@ async def clip_text(
                 )
                 llm_status = processed.pop("_llm_status", "ok")
                 llm_error = processed.pop("_llm_error", None)
+                # If the body is mostly non-Chinese and the user prefers
+                # Chinese, run a translation pass and append it so the user
+                # can read foreign-language clips without context-switching.
+                if lang.value == "zh" and llm_status == "ok":
+                    from neocortex.clipper import maybe_translate_to_chinese
+                    translation = await maybe_translate_to_chinese(content, provider)
+                    if translation:
+                        content = (
+                            f"{content}\n\n---\n\n## 中文译文\n\n{translation}"
+                        )
             except Exception as exc:
                 llm_status = "failed"
                 llm_error = str(exc) or exc.__class__.__name__
