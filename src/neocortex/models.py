@@ -276,6 +276,8 @@ class AppConfig(BaseModel):
     github_token: str | None = None
     scan_settings: ScanSettings = Field(default_factory=ScanSettings)
     output_settings: OutputSettings = Field(default_factory=OutputSettings)
+    # Q11: 配置了 LLM key 时 `neocortex clip` 默认走即时关联；设 False 退回零 LLM 路径。
+    clip_default_process: bool = True
 
 
 # ── Reader models ──

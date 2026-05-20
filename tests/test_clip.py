@@ -304,3 +304,120 @@ class TestClipCommand:
         runner = CliRunner()
         result = runner.invoke(app, ["clip"])
         assert result.exit_code == 0
+
+
+class TestProcessClipStatus:
+    """process_clip 必须透传 _llm_status 让 caller 检测 LLM 失败 (P1 fix)."""
+
+    @pytest.mark.asyncio
+    async def test_success_status_ok(self):
+        from neocortex.clipper import process_clip
+
+        profile = Profile(skills=Skills(domains={"backend": DomainSkill(gaps=["caching"])}))
+        provider = AsyncMock()
+        provider.chat = AsyncMock(return_value=json.dumps({
+            "summary": "x", "relevance": "y",
+            "related_concepts": ["c1"], "auto_tags": ["t1"], "topic": "backend",
+        }))
+
+        result = await process_clip("content", "title", profile, provider, Language.EN)
+
+        assert result["_llm_status"] == "ok"
+        assert result["_llm_error"] is None
+
+    @pytest.mark.asyncio
+    async def test_failure_status_propagates(self):
+        from neocortex.clipper import process_clip
+
+        profile = Profile(skills=Skills(domains={"backend": DomainSkill(gaps=["caching"])}))
+        provider = AsyncMock()
+        provider.chat = AsyncMock(side_effect=RuntimeError("LLM down"))
+
+        result = await process_clip("content", "title", profile, provider, Language.EN)
+
+        assert result["_llm_status"] == "failed"
+        assert "LLM down" in (result["_llm_error"] or "")
+        # 仍然回填 fallback 数据，不丢内容
+        assert isinstance(result["auto_tags"], list)
+
+
+class TestClipHelpers:
+    """新增 ClipResult 路径的针对性测试 (reviewer 指出的 residual gap)."""
+
+    def test_compute_new_or_pending_no_concepts_dir(self, tmp_path):
+        from neocortex.cmd_clip import _compute_new_or_pending
+
+        # concepts/ 不存在 → 所有 related_concepts 都是 pending
+        result = _compute_new_or_pending(tmp_path, ["Transformer", "Attention"])
+        assert result == ["Transformer", "Attention"]
+
+    def test_compute_new_or_pending_partial(self, tmp_path):
+        from neocortex.cmd_clip import _compute_new_or_pending
+
+        concepts_dir = tmp_path / "concepts"
+        concepts_dir.mkdir()
+        (concepts_dir / "transformer.md").write_text("---\n---\n", encoding="utf-8")
+
+        result = _compute_new_or_pending(tmp_path, ["Transformer", "Attention", "RNN"])
+        # 只有 transformer.md 存在；Attention / RNN 仍是 pending
+        assert "Transformer" not in result
+        assert "Attention" in result
+        assert "RNN" in result
+
+    def test_compute_new_or_pending_empty_input(self, tmp_path):
+        from neocortex.cmd_clip import _compute_new_or_pending
+
+        assert _compute_new_or_pending(tmp_path, []) == []
+
+    def test_link_clip_to_concepts_returns_deltas(self, tmp_path):
+        from neocortex.cmd_clip import _link_clip_to_concepts
+
+        concepts_dir = tmp_path / "concepts"
+        concepts_dir.mkdir()
+        (concepts_dir / "transformer.md").write_text(
+            "---\n"
+            "evidence_count: 5\n"
+            "last_updated: 2026-01-01\n"
+            "source_notes: []\n"
+            "---\n"
+            "body\n",
+            encoding="utf-8",
+        )
+
+        clip_obj = Clip(
+            id="abcd1234",
+            source="manual",
+            content="x",
+            related_concepts=["Transformer", "Attention"],  # Attention 没页 → 跳过
+        )
+
+        deltas = _link_clip_to_concepts(tmp_path, clip_obj)
+
+        assert len(deltas) == 1
+        assert deltas[0].concept == "Transformer"
+        assert deltas[0].count_before == 5
+        assert deltas[0].count_after == 6
+        # 概念页 evidence_count 实际写回
+        updated = (concepts_dir / "transformer.md").read_text(encoding="utf-8")
+        assert "evidence_count: 6" in updated
+
+    def test_link_clip_to_concepts_no_dir(self, tmp_path):
+        from neocortex.cmd_clip import _link_clip_to_concepts
+
+        clip_obj = Clip(id="x", source="m", content="x", related_concepts=["Anything"])
+        # concepts/ 不存在 → 返回空 delta（冷启动场景）
+        assert _link_clip_to_concepts(tmp_path, clip_obj) == []
+
+    def test_link_clip_skips_already_referenced(self, tmp_path):
+        from neocortex.cmd_clip import _link_clip_to_concepts
+
+        concepts_dir = tmp_path / "concepts"
+        concepts_dir.mkdir()
+        (concepts_dir / "transformer.md").write_text(
+            "---\nevidence_count: 5\nsource_notes: [\"clip:abcd1234\"]\n---\nbody\n",
+            encoding="utf-8",
+        )
+        clip_obj = Clip(id="abcd1234", source="m", content="x", related_concepts=["Transformer"])
+
+        # 已经引用过这条 clip → 不重复 +1，delta 为空
+        assert _link_clip_to_concepts(tmp_path, clip_obj) == []

@@ -192,9 +192,15 @@ async def process_clip(
             "related_concepts": data.get("related_concepts", [])[:3],
             "auto_tags": data.get("auto_tags", [])[:5],
             "topic": data.get("topic", "general"),
+            # Status metadata for caller (禁止静默失败 — see CLIENT_PROPOSAL §5.1)
+            "_llm_status": "ok",
+            "_llm_error": None,
         }
-    except Exception:
-        return _fallback_process(content, title, domains)
+    except Exception as exc:
+        fallback = _fallback_process(content, title, domains)
+        fallback["_llm_status"] = "failed"
+        fallback["_llm_error"] = str(exc) or exc.__class__.__name__
+        return fallback
 
 
 def _fallback_process(content: str, title: str, domains: list[str]) -> dict:

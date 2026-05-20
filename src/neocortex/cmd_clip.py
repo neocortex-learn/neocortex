@@ -50,11 +50,18 @@ def _try_paste_image() -> str:
 def clip(
     sources: list[str] = typer.Argument(None, help="URL, text, or file paths to clip (multiple images merged)"),
     paste: bool = typer.Option(False, "--paste", help="Clip from clipboard"),
-    process: bool = typer.Option(False, "--process", "-p", help="Run LLM processing (summarize, tag, relate)"),
+    process: bool | None = typer.Option(
+        None,
+        "--process/--no-process",
+        "-p",
+        help="LLM 即时关联（默认：配置了 LLM key 时自动开启；--no-process 强制关闭）",
+    ),
 ) -> None:
     """Capture a fragment to your knowledge base.
 
-    By default saves with zero LLM cost. Use --process for AI-powered tagging.
+    Default behavior (Q11): if an LLM key is configured, runs immediate
+    LLM tagging/relating; otherwise saves without LLM. Use --no-process
+    to force-skip, or set ``clip_default_process=false`` in config.json.
     Pass multiple image files to merge them into one clip.
     """
     from neocortex.config import get_notes_dir, load_config, load_profile, save_clip
@@ -298,11 +305,22 @@ def clip(
             "topic": "general",
         }
 
-        # Track LLM status explicitly per Q11/§5.1 — no more silent swallowing.
+        # Resolve effective LLM intent per Q11:
+        #   process=True  → user explicitly opted in
+        #   process=False → user explicitly opted out (--no-process)
+        #   process=None  → config-driven default (clip_default_process)
+        if process is True:
+            user_wants_llm = True
+        elif process is False:
+            user_wants_llm = False
+        else:
+            user_wants_llm = cfg.clip_default_process
+
+        # Track LLM status explicitly per §5.1 — no silent swallowing.
         llm_status = "skipped_user_opt_out"
         llm_error: str | None = None
 
-        if process:
+        if user_wants_llm:
             if not (cfg.provider and cfg.api_key):
                 llm_status = "skipped_no_key"
             else:
@@ -319,8 +337,14 @@ def clip(
                             lang,
                             notes_dir=notes_dir,
                         )
-                    llm_status = "ok"
+                    # process_clip swallows provider/JSON errors internally and
+                    # returns a fallback dict with _llm_status='failed'; read
+                    # that here instead of assuming success.
+                    llm_status = processed.pop("_llm_status", "ok")
+                    llm_error = processed.pop("_llm_error", None)
                 except Exception as exc:
+                    # Anything that escaped process_clip (e.g. create_provider
+                    # raising on bad config) is also a real failure.
                     llm_status = "failed"
                     llm_error = str(exc) or exc.__class__.__name__
 

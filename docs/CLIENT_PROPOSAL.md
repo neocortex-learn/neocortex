@@ -1,6 +1,6 @@
 # Mac 客户端 + 产品重新定位 提案
 
-> 状态：草稿 v0.4（2026-05-20）
+> 状态：草稿 v0.6（2026-05-20）
 > 用途：捋清"为什么要做客户端"+"它和 Neocortex 现状的关系"+"下一步动作"。**会持续迭代**，所有想法先进这里，不直接动代码。
 > 维护：每次讨论后追加 changelog，不要静默覆盖。
 
@@ -414,7 +414,7 @@
 | Q8 | 技能成长模式 | ✅ **默认不启用**。默认 vault 是 kb 模式；profile scan / learn / probe 只在显式开启 skill-growth 的 vault 出现 |
 | Q9 | v1 内容类型 | ✅ **文字 + URL + 图片 OCR**，视频不做。图片 OCR 已有路径，覆盖截图/微博/公众号卡片真实场景 |
 | Q10 | 重命名方向 | ✅ **偏个人/家庭，不极客向**；命名原则：温暖、可长期积累、支持家庭/孩子，但不能像儿童教育单点产品。**不在 v1 拍最终名字** |
-| Q11 | clip 默认 process | ✅ **默认开启**，配 key 时自动跑；`clip_default_process=false` 可关；**必须显示 `llm_status`，禁止静默失败** |
+| Q11 | clip 默认 process | ✅ **已实施**（commit TBD）。`AppConfig.clip_default_process=True` 默认开启，配 key 时 `neocortex clip "..."` 自动跑 LLM；`--no-process` 强制关闭；`clip_default_process=false` 全局关闭。`process_clip` 已透传 `_llm_status` / `_llm_error` 防静默失败 |
 | Q12 | 迁移触发时机 | ✅ **首次命令启动前检测**；**只自动执行安全迁移**（copy+校验+原子切换）；检测到冲突/目标 vault 已存在/权限异常 → 停止迁移、继续旧布局、明确报错，**不强行改** |
 | ~~Q13~~ | ~~one-way vs symlink~~ | 已被 Q5 实质覆盖：不删原 root，用"双份数据 + marker 切换"达到过渡期共存效果 |
 | Q14 | clip 时是否生成 stub 概念页（evidence_count 立刻 0→1） | ✅ **否**。clip 阶段只返回 `new_or_pending_clusters` 给 UI 做播种感反馈；正式 `concepts/*.md` 仅由 `kb compile` 生成，避免污染概念图谱和 `kb verify` 结果 |
@@ -435,6 +435,11 @@
 
 ## Changelog
 
+- **v0.6 (2026-05-20)**：第五轮 review 修正（P1 真 bug + P2 默认行为缺口）。
+  - P1：`clipper.py:process_clip` 之前在 LLM 异常时静默返回 fallback，导致 cmd_clip 永远显示 `llm_status=ok`，破坏"禁止静默失败"承诺。修法：`process_clip` 返回字典加 `_llm_status` (`ok`/`failed`) + `_llm_error`；cmd_clip 改为 `processed.pop("_llm_status", "ok")` 读取真实状态，不再无条件设 ok
+  - P2：Q11 决策"默认开启"实际还没实施。本轮落地：`AppConfig.clip_default_process: bool = True`；`clip` 命令 `--process/--no-process` 三态（None=默认按 config / True=强制开 / False=强制关）；`neocortex clip "..."` 直接触发 LLM 反馈
+  - §8 Q11 标注从"决策"升级为"已实施"
+  - tests/test_clip.py 新增 8 个针对性测试覆盖 reviewer 指出的 residual gap：`_llm_status` 成功/失败两路、`_compute_new_or_pending` 三种场景、`_link_clip_to_concepts` 返回 delta + 冷启动 + 已引用跳过
 - **v0.5 (2026-05-20)**：第四轮 review 修正 + Q14 落定。
   - 文档头：状态从 v0.2 → v0.4 → **v0.5**
   - §7 Sprint 0 第 6 条：CLI 行为表述按 Q7/§5.3 对齐，删除"优先连 server"措辞，改为"默认直调 / 显式开关或 server 在跑才走 HTTP / 失败 fallback"
