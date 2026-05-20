@@ -37,10 +37,20 @@ dependencies = [
 
     # Embedding / Semantic Search
     "fastembed>=0.4.0",
+
+    # Local HTTP server (Sprint 0 — for GUI clients via loopback API)
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
 ]
 
 [project.scripts]
 neocortex = "neocortex.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
 
 [build-system]
 requires = ["hatchling"]
