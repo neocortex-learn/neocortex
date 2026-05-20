@@ -92,6 +92,28 @@ class TestClipTextFetchFailure:
         clips_dir = tmp_path / "clips"
         assert not clips_dir.exists() or not list(clips_dir.glob("*.md"))
 
+    @pytest.mark.asyncio
+    async def test_image_path_aborted_until_service_supports_ocr(self, tmp_path):
+        from neocortex.services.clip import clip_text
+
+        image_path = tmp_path / "screenshot.png"
+        image_path.write_bytes(b"not a real png, fetcher only checks path/ext")
+
+        result = await clip_text(
+            str(image_path),
+            process=False,
+            notes_dir=tmp_path,
+            cfg=_make_cfg(),
+            profile=_make_profile(),
+            lang=Language.EN,
+        )
+
+        assert result.aborted is True
+        assert "image OCR is not supported" in (result.abort_reason or "")
+        assert result.saved_path == ""
+        clips_dir = tmp_path / "clips"
+        assert not clips_dir.exists() or not list(clips_dir.glob("*.md"))
+
 
 class TestClipTextWeakFetch:
     """Short URL fetch → save bookmark + skip LLM (P2 fix carries to service)."""

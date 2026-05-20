@@ -56,13 +56,15 @@ def provision_runtime(port: int | None = None) -> ServerSecrets:
     _port_file().write_text(str(port), encoding="utf-8")
     _pid_file().write_text(str(pid), encoding="utf-8")
 
-    # Token: 0600 perms so other local users can't read it.
+    # Token: create with 0600 from the first syscall so there is no brief
+    # world-readable window between write_text() and chmod().
     token_path = _token_file()
-    token_path.write_text(token, encoding="utf-8")
-    try:
+    if token_path.exists():
         os.chmod(token_path, 0o600)
-    except OSError:
-        pass  # best-effort on non-POSIX
+    fd = os.open(str(token_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(token)
 
     return ServerSecrets(port=port, token=token, pid=pid)
 

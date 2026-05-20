@@ -18,7 +18,11 @@ from neocortex.services.clip import clip_text
 
 class ClipRequest(BaseModel):
     """Body for POST /api/clip."""
-    source: str = Field(..., min_length=1, description="URL, plain text, or file path")
+    source: str = Field(
+        ...,
+        min_length=1,
+        description="URL or plain text. Image/file uploads are not supported by this endpoint yet.",
+    )
     process: bool | None = Field(
         default=None,
         description=(

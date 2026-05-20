@@ -66,6 +66,22 @@ async def clip_text(
             abort_reason=fetched.get("_fetch_error") or "fetch failed",
         )
 
+    # The HTTP/service path currently supports text and URLs only. The shared
+    # fetcher marks local image paths as screenshots with empty content so the
+    # CLI can run its vision/OCR branch; without that branch here, saving would
+    # create an empty screenshot clip that looks successful to the GUI.
+    if fetched.get("_image_path") and not fetched.get("content"):
+        return ClipResult(
+            saved_path="",
+            clip=Clip(id="", source=source, content=""),
+            llm_status="skipped_user_opt_out",
+            aborted=True,
+            abort_reason=(
+                "image OCR is not supported by the HTTP service yet; "
+                "use the CLI `neocortex clip <image>` path for screenshots"
+            ),
+        )
+
     title = fetched["title"]
     content = fetched["content"]
     clip_type = fetched["clip_type"]

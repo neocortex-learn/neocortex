@@ -219,3 +219,22 @@ class TestRuntimeFiles:
             cleanup_runtime()
             assert not (tmp_path / "server.pid").exists()
             assert not (tmp_path / "server-token").exists()
+
+    def test_provision_tightens_existing_token_permissions(self, tmp_path, monkeypatch):
+        """An old loose-permission token file must be made 0600 before reuse."""
+        import os
+
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        token_path = tmp_path / "server-token"
+        token_path.write_text("old-token", encoding="utf-8")
+        os.chmod(token_path, 0o644)
+
+        from neocortex.server.runtime import cleanup_runtime, provision_runtime
+
+        try:
+            secrets = provision_runtime(port=12346)
+            assert token_path.read_text(encoding="utf-8") == secrets.token
+            mode = os.stat(token_path).st_mode & 0o777
+            assert mode == 0o600
+        finally:
+            cleanup_runtime()
