@@ -484,12 +484,19 @@ class ClipResult(BaseModel):
     """clip 操作的结构化结果，供 CLI / GUI 统一消费。
 
     Q14 决策：new_or_pending_clusters 只是标记，不在 clip 阶段生成 stub concepts/*.md。
+
+    Aborted 状态（fetch 硬失败）：``aborted=True`` + ``abort_reason`` 携带原因，
+    其余字段为占位空值（``saved_path=""``，``clip`` 是默认空 Clip）。HTTP 端点返回
+    200 OK + aborted=true（请求本身合法，上游抓取失败属业务结果而非协议错误）。
     """
     saved_path: str
     clip: Clip
-    # ok | skipped_no_key | skipped_user_opt_out | failed
+    # ok | skipped_no_key | skipped_user_opt_out | skipped_weak_fetch | failed
     llm_status: str = "skipped_user_opt_out"
     llm_error: str | None = None
     existing_cluster_delta: list[ClusterDelta] = Field(default_factory=list)
     new_or_pending_clusters: list[str] = Field(default_factory=list)
     related_notes: list[RelatedNoteRef] = Field(default_factory=list)
+    # 抓取硬失败时由 service 设置；CLI / GUI 渲染时显示拒收提示。
+    aborted: bool = False
+    abort_reason: str | None = None
