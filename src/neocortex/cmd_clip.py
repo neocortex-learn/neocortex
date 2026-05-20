@@ -182,6 +182,12 @@ def clip(
         clip_type = fetched["clip_type"]
         clip_source = fetched["source"]
 
+        # P2 fix: weak fetch (short body but not an error) — save as bookmark
+        # but force-skip LLM to avoid hallucinating on near-empty content.
+        # This preserves the "I just want to save this URL" bookmark use case
+        # that the original 100-char hard-reject was killing.
+        weak_fetch = fetched.get("_fetch_quality") == "weak"
+
         # Single image clip: use LLM to describe/OCR the image
         image_path = fetched.get("_image_path")
         if image_path and not content:
@@ -330,6 +336,12 @@ def clip(
         # Track LLM status explicitly per §5.1 — no silent swallowing.
         llm_status = "skipped_user_opt_out"
         llm_error: str | None = None
+
+        # P2: weak fetch forces LLM skip regardless of user intent — there's
+        # nothing meaningful to process and concept pollution is the risk.
+        if weak_fetch and user_wants_llm:
+            user_wants_llm = False
+            llm_status = "skipped_weak_fetch"
 
         if user_wants_llm:
             if not (cfg.provider and cfg.api_key):
@@ -781,6 +793,8 @@ def _print_clip_result(result, lang: str, fallback_title: str = "") -> None:
         )
     elif result.llm_status == "skipped_no_key":
         console.print(f"  [yellow]ℹ {t('clip_llm_skipped_no_key', lang)}[/yellow]")
+    elif result.llm_status == "skipped_weak_fetch":
+        console.print(f"  [yellow]ℹ {t('clip_llm_skipped_weak_fetch', lang)}[/yellow]")
     elif result.llm_status == "skipped_user_opt_out":
         console.print(f"  [dim]{t('clip_llm_skipped_opt_out', lang)}[/dim]")
 
@@ -880,6 +894,18 @@ def _link_clip_to_concepts(notes_dir: Path, clip_obj) -> list:
     return deltas
 
 
+def _slug_tokens(slug: str) -> set[str]:
+    """Split a concept slug on -, ., _ into a set of tokens.
+
+    Used by _compute_new_or_pending for token-boundary fuzzy matching.
+    CJK tends to come back as a single token because there are no natural
+    delimiters, which is fine — single-CJK-token concepts mostly only get
+    exact matches, which is the correct behaviour.
+    """
+    import re
+    return {tok for tok in re.split(r"[-._]", slug) if tok}
+
+
 def _compute_new_or_pending(notes_dir: Path, related_concepts: list[str]) -> list[str]:
     """Return concepts that don't yet have a related concepts/<slug>.md page.
 
@@ -887,31 +913,36 @@ def _compute_new_or_pending(notes_dir: Path, related_concepts: list[str]) -> lis
     concept pages — these names are surfaced to the UI as "new topics waiting
     for kb compile" so the user gets seeding feedback on a cold-start vault.
 
-    Fuzzy match (problem #1 from 2026-05-20 self-test): compile produces
-    refined names like ``python-asyncio.gather`` from a "asyncio" hint, so
-    exact slug match falsely flags "asyncio" as pending. We treat a concept
-    as already-existing if any existing slug contains the queried slug as a
-    substring (or vice versa), provided both are >= 4 chars to avoid noise.
+    Fuzzy match strategy (P3 fix 2026-05-20): previously used naive substring
+    match (``slug in es``), which caused ``java → javascript`` false positives.
+    Now uses token-boundary matching: split both query slug and existing slug
+    on ``-`` / ``.`` / ``_`` into tokens, require an exact token overlap with
+    each matching token ≥ 4 chars. This correctly handles:
+
+    - asyncio  vs python-asyncio.gather → matches (shared token: asyncio)
+    - harness  vs harness-engineering   → matches (shared token: harness)
+    - java     vs javascript            → no match (no shared token)
     """
     concepts_dir = notes_dir / "concepts"
     if not concepts_dir.exists():
         return [c for c in related_concepts if c.strip()]
 
     existing_slugs = [p.stem for p in concepts_dir.glob("*.md")]
+    existing_token_sets = [(slug, _slug_tokens(slug)) for slug in existing_slugs]
 
     pending: list[str] = []
     for concept_name in related_concepts:
         slug = concept_name.strip().lower().replace(" ", "-")
         if not slug:
             continue
-        # Exact match
+        # 1. Exact slug match
         if slug in existing_slugs:
             continue
-        # Fuzzy substring match (both ≥4 chars to avoid e.g. "ai" matching
-        # "ai-driven-development" or "上下" matching everything).
-        if len(slug) >= 4 and any(
-            (len(es) >= 4 and (slug in es or es in slug))
-            for es in existing_slugs
+        # 2. Token-boundary fuzzy match: any shared token ≥4 chars
+        query_tokens = {t for t in _slug_tokens(slug) if len(t) >= 4}
+        if query_tokens and any(
+            query_tokens & {t for t in es_tokens if len(t) >= 4}
+            for _es, es_tokens in existing_token_sets
         ):
             continue
         pending.append(concept_name)

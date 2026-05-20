@@ -152,7 +152,7 @@ _FETCH_ERROR_MARKERS = (
 
 
 def _failed_fetch_payload(source: str, error: str) -> dict:
-    """Build a dict signalling fetch failure — caller must refuse to save."""
+    """Build a dict signalling hard fetch failure — caller must refuse to save."""
     return {
         "title": source,
         "content": "",
@@ -160,33 +160,43 @@ def _failed_fetch_payload(source: str, error: str) -> dict:
         "source": source,
         "_fetch_status": "failed",
         "_fetch_error": error,
+        "_fetch_quality": "none",
     }
 
 
 def _annotate_quality(payload: dict, extracted_text: str, source: str) -> dict:
-    """Detect obvious fetch garbage (empty / login wall / error page).
+    """Classify fetch outcome into three states (P2 fix 2026-05-20):
 
-    Source URLs that resolve to less than ~100 chars of real content or that
-    contain known error markers are flagged as failed so the caller can
-    refuse to save and stop the LLM from hallucinating about an error page.
+    - ``_fetch_status='failed'`` — hard error (HTTP error / known error
+      markers like login walls / 404 pages). Caller MUST reject.
+    - ``_fetch_status='ok'`` + ``_fetch_quality='weak'`` — short / sparse
+      extraction (< 100 chars) from a URL, but no error markers. Caller
+      should save as bookmark but skip LLM tagging (avoid hallucination
+      about near-empty content). Covers real short pages / index pages /
+      issue trackers / pure-link bookmark intent.
+    - ``_fetch_status='ok'`` + ``_fetch_quality='full'`` — normal content.
     """
     payload.setdefault("_fetch_status", "ok")
     payload.setdefault("_fetch_error", None)
+    payload.setdefault("_fetch_quality", "full")
+
     text = (extracted_text or "").strip()
     text_lower = text.lower()
-    if not text or len(text) < 100:
-        if source.startswith(("http://", "https://")):
-            payload["_fetch_status"] = "failed"
-            payload["_fetch_error"] = (
-                f"extracted content too short ({len(text)} chars) — "
-                "likely a login wall / JS-only page / empty article"
-            )
-        return payload
+
+    # Hard errors first (override quality)
     for marker in _FETCH_ERROR_MARKERS:
         if marker in text_lower:
             payload["_fetch_status"] = "failed"
             payload["_fetch_error"] = f"page contains error marker: {marker!r}"
+            payload["_fetch_quality"] = "none"
             return payload
+
+    # Weak (but valid) extraction — save as bookmark, skip LLM
+    if (not text or len(text) < 100) and source.startswith(("http://", "https://")):
+        payload["_fetch_quality"] = "weak"
+        # _fetch_status stays 'ok' so caller saves it
+        return payload
+
     return payload
 
 

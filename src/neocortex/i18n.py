@@ -1103,6 +1103,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "clip_llm_failed": {"en": "LLM call failed: {error}", "zh": "LLM 调用失败：{error}"},
     "clip_llm_skipped_no_key": {"en": "LLM skipped — no provider/key configured. Run `neocortex profile config` to enable AI tagging.", "zh": "未配置 LLM，跳过即时关联。运行 `neocortex profile config` 启用 AI 标签。"},
     "clip_llm_skipped_opt_out": {"en": "LLM skipped — re-run with --process for AI tagging.", "zh": "本次未启用 LLM，加 --process 可启用 AI 即时关联。"},
+    "clip_llm_skipped_weak_fetch": {
+        "en": "Fetched content was thin (<100 chars) — saved as bookmark, LLM tagging skipped to avoid hallucination.",
+        "zh": "抓取正文太短（<100 字符）——已保存为 bookmark，跳过 LLM 标注以防幻觉。",
+    },
     "clip_growing": {"en": "Growing topics", "zh": "已有主题增长"},
     "clip_seeded": {"en": "New topics seeded", "zh": "播下新主题"},
     "clip_seeded_hint": {

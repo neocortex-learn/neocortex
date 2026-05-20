@@ -327,10 +327,10 @@ class TestFetchFailureDetection:
             assert "HTTP fetch failed" in result["_fetch_error"]
 
     @pytest.mark.asyncio
-    async def test_short_content_marks_failed(self):
+    async def test_short_content_marks_weak_not_failed(self):
+        """P2 fix: 短正文不再硬拒，标 weak 让 cmd_clip 保存为 bookmark."""
         from neocortex.clipper import fetch_clip_content
 
-        # Mock a 200 response with near-empty HTML (login wall stub)
         mock_resp = MagicMock()
         mock_resp.text = "<html><body>x</body></html>"
         mock_resp.raise_for_status = MagicMock()
@@ -344,8 +344,32 @@ class TestFetchFailureDetection:
 
             result = await fetch_clip_content("https://stub.example.com/")
 
+            assert result["_fetch_status"] == "ok", "短抓取不再 hard fail"
+            assert result["_fetch_quality"] == "weak"
+            assert result["_fetch_error"] is None
+
+    @pytest.mark.asyncio
+    async def test_error_marker_still_fails(self):
+        """登录墙 / 错误页关键词仍走硬失败路径."""
+        from neocortex.clipper import fetch_clip_content
+
+        # 内容足够长（>100 字符）但含错误关键词
+        body = "<html><body>" + ("Please log in to continue. " * 10) + "</body></html>"
+        mock_resp = MagicMock()
+        mock_resp.text = body
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            result = await fetch_clip_content("https://login-wall.example.com/")
+
             assert result["_fetch_status"] == "failed"
-            assert "too short" in result["_fetch_error"]
+            assert "please log in" in (result["_fetch_error"] or "")
 
     @pytest.mark.asyncio
     async def test_normal_content_marks_ok(self):
@@ -481,15 +505,12 @@ class TestClipHelpers:
 
         assert _compute_new_or_pending(tmp_path, []) == []
 
-    def test_compute_new_or_pending_fuzzy_match(self, tmp_path):
-        """Problem #1: compile renames 'asyncio' → 'python-asyncio.gather'.
-        Exact match would falsely flag 'asyncio' as pending; substring match
-        recognises the relation and excludes it from the seeded list."""
+    def test_compute_new_or_pending_token_match_asyncio(self, tmp_path):
+        """asyncio 应匹配到 python-asyncio.gather（共享 token 'asyncio'）."""
         from neocortex.cmd_clip import _compute_new_or_pending
 
         concepts_dir = tmp_path / "concepts"
         concepts_dir.mkdir()
-        # compile-produced refined names
         (concepts_dir / "python-asyncio.gather.md").write_text("---\n---\n", encoding="utf-8")
         (concepts_dir / "harness-engineering.md").write_text("---\n---\n", encoding="utf-8")
 
@@ -497,11 +518,26 @@ class TestClipHelpers:
             tmp_path,
             ["asyncio", "harness", "totally-new-topic"],
         )
-        # asyncio matched python-asyncio.gather (substring), harness matched
-        # harness-engineering — both excluded; only the genuinely new one remains.
-        assert "asyncio" not in result
-        assert "harness" not in result
+        assert "asyncio" not in result, "应通过 token 'asyncio' 匹配 python-asyncio.gather"
+        assert "harness" not in result, "应通过 token 'harness' 匹配 harness-engineering"
         assert "totally-new-topic" in result
+
+    def test_compute_new_or_pending_no_substring_false_positive(self, tmp_path):
+        """P3 regression: java 不应被 javascript 吃掉（无共享 token）."""
+        from neocortex.cmd_clip import _compute_new_or_pending
+
+        concepts_dir = tmp_path / "concepts"
+        concepts_dir.mkdir()
+        (concepts_dir / "javascript.md").write_text("---\n---\n", encoding="utf-8")
+        (concepts_dir / "go-routine.md").write_text("---\n---\n", encoding="utf-8")
+
+        result = _compute_new_or_pending(tmp_path, ["Java", "Go", "Rust"])
+        # Java 应进 pending（与 javascript 无 token 重合）
+        assert "Java" in result, "java 不应被 javascript substring 误吃"
+        # Go 太短（<4 chars）跳过 fuzzy match → pending
+        assert "Go" in result
+        # Rust 完全无关
+        assert "Rust" in result
 
     def test_compute_new_or_pending_short_slug_no_false_match(self, tmp_path):
         """Avoid '上下' (2 chars) eating everything via substring noise."""
