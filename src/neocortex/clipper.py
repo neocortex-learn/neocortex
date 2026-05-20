@@ -116,7 +116,7 @@ async def fetch_clip_content(source: str) -> dict:
         text = md(doc.summary(), strip=["img", "a"]).strip()
         payload = {
             "title": title,
-            "content": text[:2000] if text else source,
+            "content": text[:_MAX_CLIP_CONTENT_CHARS] if text else source,
             "clip_type": "tweet",
             "source": source,
         }
@@ -127,7 +127,7 @@ async def fetch_clip_content(source: str) -> dict:
     text = md(doc.summary(), strip=["img"]).strip()
     payload = {
         "title": title,
-        "content": text[:2000] if text else source,
+        "content": text[:_MAX_CLIP_CONTENT_CHARS] if text else source,
         "clip_type": "bookmark",
         "source": source,
     }
@@ -135,6 +135,15 @@ async def fetch_clip_content(source: str) -> dict:
 
 
 # ── Fetch quality / failure helpers ──
+
+# Hard upper bound on saved clip content. The original 2000-char cap (set
+# defensively for early CLI experimentation) was silently truncating long
+# X Articles / WeChat posts / readability extracts mid-paragraph — users
+# would see "only half the tweet was saved". 50KB easily covers any
+# tweet, X Article, or WeChat long-form post while still bounding memory
+# against runaway readability extracts of giant pages.
+_MAX_CLIP_CONTENT_CHARS = 50_000
+
 
 _FETCH_ERROR_MARKERS = (
     "login required",
@@ -360,7 +369,7 @@ async def _fetch_wechat_clip(source: str) -> dict:
 
     return {
         "title": title,
-        "content": content[:2000] if content else source,
+        "content": content[:_MAX_CLIP_CONTENT_CHARS] if content else source,
         "clip_type": "bookmark",
         "source": source,
     }
@@ -409,7 +418,7 @@ async def _fetch_tweet_clip(source: str) -> dict:
 
     return {
         "title": title,
-        "content": text[:2000],
+        "content": text[:_MAX_CLIP_CONTENT_CHARS],
         "clip_type": "tweet",
         "source": source,
         "_fetch_status": "ok",
