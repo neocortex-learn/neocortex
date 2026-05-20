@@ -1,6 +1,6 @@
 # Mac 客户端 + 产品重新定位 提案
 
-> 状态：草稿 v0.7（2026-05-20）—— **Sprint 0 已授权启动 GUI**（self-test 通过 + #1/#4/#5 已修）
+> 状态：草稿 v0.8（2026-05-20）—— **Sprint 0 后端 ✅ 完成，Sprint 1 SwiftUI 解锁**
 > 用途：捋清"为什么要做客户端"+"它和 Neocortex 现状的关系"+"下一步动作"。**会持续迭代**，所有想法先进这里，不直接动代码。
 > 维护：每次讨论后追加 changelog，不要静默覆盖。
 
@@ -368,20 +368,35 @@
 
 ## 7. 路线图（粗）
 
-### Sprint 0：地基（**不动 UI**）
-1. `clip` 反馈闭环（5.1）：复用 `--process`，加结构化返回 + `related_notes` + `cluster_growth` + `llm_status`
-2. 多 vault 支持（5.2）：目录结构调整 + 迁移脚本 + `--vault` 参数 + `vault` 子命令
-3. service 层抽出（5.3）：`services/clip.py` 等 + cmd 改薄壳 + 测试迁移
-4. FastAPI server v0（5.3）：v1 端点最小集 + lifespan + healthz + PID
-5. **v1 安全（5.4）：token + 随机端口 + Origin/Host 校验 + 禁 CORS**（与 4 同时落地，不能解耦）
-6. CLI 行为（**与 Q7/§5.3 一致**）：CLI 默认直调 service；`NEOCORTEX_USE_SERVER=1` 或检测到 GUI server 已运行时可走 HTTP（带 `~/.neocortex/server-token`）；HTTP 失败自动 fallback 直调；直调与 HTTP 共用同一份 service 函数，禁止两套代码路径
+### Sprint 0：地基（**不动 UI**）— ✅ 已完成 2026-05-20
 
-### Sprint 1：Mac 客户端 v1
-7. SwiftUI 主窗口骨架（输入 + 时间线 + WebView）
-8. 关联面板 + 搜索
-9. MenuBarExtra + 全局快捷键
-10. vault 切换 UI
-11. Server 进程生命周期（spawn / health / kill）
+按用户选定的 **C 路径渐进分离**：cmd_clip 一行不动，新增 services / server 层独立验证；多 vault 推迟到 GUI v2；CLI 走 server 推迟到 GUI 稳定后再做。
+
+| # | 内容 | Commit | 状态 |
+|---|---|---|---|
+| S0-pre | clip 反馈闭环 + 结构化 ClipResult + 冷启动播种感 | `6a0870d` | ✅ |
+| S0-pre | 修 LLM 静默失败 + Q11 默认开启 | `01eec28` | ✅ |
+| S0-pre | 修 Rich 把概念名吃掉 | `f9c6749` | ✅ |
+| S0-pre | X/Twitter 走 x-tweet-fetcher + 抓取失败拒收 | `496ec00` | ✅ |
+| S0-pre | self-test 发现 #1/#4/#5 修复 | `86dd54b` | ✅ |
+| S0-pre | P2 hard-fail/weak-quality 分离 + P3 token 边界 | `0fa28cf` | ✅ |
+| **S0-1'** | services/clip.py 薄包装层（不动 cmd_clip） | `adc23ea` | ✅ |
+| **S0-2 + S0-3** | FastAPI server 骨架 + 安全中间件 day-1 | `a097b9b` | ✅ |
+| **S0-4** | POST /api/clip 端点 + httpx[socks] 修复 | `391f411` | ✅ |
+
+测试：61/61 通过（含 17 个 server 安全/接口测试）。Live curl 验证 SwiftUI 可直接消费 JSON。
+
+**推迟项**（C 路径决策，不阻塞 Sprint 1）：
+- ~~S0-5 CLI HTTP fallback~~：CLI 完全不动，不感知 server；GUI 稳定后再统一
+- ~~多 vault 迁移~~：v1 单 vault，Sprint 2+ 看儿童教育内容需求时机再加
+- ~~services 真重构~~：现在是薄包装层，cmd_clip 和 services/clip.py 有重复流程组织代码
+
+### Sprint 1：Mac 客户端 v1 — ⏳ 待启动
+7. SwiftUI 主窗口骨架（输入 + 时间线 + WebView 内嵌阅读）
+8. 关联面板（消费 ClipResult 的 existing_cluster_delta / new_or_pending_clusters / related_notes）
+9. MenuBarExtra + 全局快捷键（⌥ Space）
+10. ~~vault 切换 UI~~ — **跳过 v1**（推迟）
+11. Server 进程生命周期：app 启动 spawn `neocortex serve` → 等 /healthz 200 → 读 ~/.neocortex/server-token 注入 URLSession → 退出 SIGTERM
 
 ### Sprint 2：扩展捕获 + 长任务
 12. Share Extension（codesign + notarization）
@@ -466,6 +481,11 @@ CLI 修完后**桌面深度剪藏场景真的能用了**。但用户最早的痛
 
 ## Changelog
 
+- **v0.8 (2026-05-20)**：Sprint 0 后端完成。
+  - 状态行：**Sprint 0 后端 ✅ 完成，Sprint 1 SwiftUI 解锁**
+  - §7 路线图加 9 个 Sprint 0 commit 表格，含 hash + 状态
+  - 注明 C 路径推迟的 3 项：S0-5 CLI HTTP fallback / 多 vault / services 真重构
+  - Sprint 1 启动条件已满足：service 层 + token 安全 server + /api/clip 端点 全部可用
 - **v0.7 (2026-05-20)**：12 条样本自测 + 修 #1/#4/#5。
   - 新增 §9.5 自测验证报告：6 个问题清单 + 状态
   - #1 命名错位：`_compute_new_or_pending` 加双向 substring fuzzy match（≥4 字符门槛防误杀），改 hint 措辞
