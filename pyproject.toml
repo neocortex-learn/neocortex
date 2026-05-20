@@ -16,7 +16,7 @@ dependencies = [
     "google-genai>=1.0.0",
 
     # Content Fetching
-    "httpx>=0.28.0",
+    "httpx[socks]>=0.28.0",
     "readability-lxml>=0.8.0",
     "pymupdf>=1.25.0",
     "ebooklib>=0.18",

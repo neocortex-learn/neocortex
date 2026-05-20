@@ -124,6 +124,74 @@ class TestContentTypeCheck:
         assert r.status_code == 415
 
 
+class TestClipEndpoint:
+    """POST /api/clip — wraps services.clip.clip_text (S0-4)."""
+
+    def test_clip_no_auth(self, client):
+        r = client.post(
+            "/api/clip",
+            headers={"Content-Type": "application/json"},
+            json={"source": "test"},
+        )
+        assert r.status_code == 401
+
+    def test_clip_missing_source(self, client):
+        r = client.post(
+            "/api/clip",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={},
+        )
+        assert r.status_code == 422
+
+    def test_clip_plain_text(self, client, tmp_path, monkeypatch):
+        """End-to-end: POST plain text → ClipResult JSON, file saved."""
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        r = client.post(
+            "/api/clip",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"source": "服务器端 clip 测试，无 LLM key 走 skip 路径", "process": False},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["aborted"] is False
+        assert body["llm_status"] == "skipped_user_opt_out"
+        assert body["saved_path"] != ""
+        # Real file written to the patched notes_dir
+        from pathlib import Path
+        assert Path(body["saved_path"]).exists()
+        assert body["clip"]["title"] != ""
+
+    def test_clip_returns_full_result_shape(self, client, tmp_path, monkeypatch):
+        """Response must conform to ClipResult schema so SwiftUI/GUI can rely on it."""
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        r = client.post(
+            "/api/clip",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"source": "schema shape test", "process": False},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        for key in (
+            "saved_path", "clip", "llm_status", "llm_error",
+            "existing_cluster_delta", "new_or_pending_clusters",
+            "related_notes", "aborted", "abort_reason",
+        ):
+            assert key in body, f"ClipResult missing field {key}"
+
+
 class TestRuntimeFiles:
     def test_provision_writes_files(self, tmp_path, monkeypatch):
         """runtime.provision_runtime writes pid/port/token to ~/.neocortex/."""

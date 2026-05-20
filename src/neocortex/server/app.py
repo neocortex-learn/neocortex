@@ -46,4 +46,8 @@ def create_app(token: str, port: int) -> FastAPI:
         """Minimal authenticated endpoint; doubles as security smoke test."""
         return {"version": __version__}
 
+    # Resource routers
+    from neocortex.server.routes.clip import make_router as _clip_router
+    app.include_router(_clip_router(require_token))
+
     return app
