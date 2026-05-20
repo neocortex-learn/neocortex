@@ -114,9 +114,10 @@ async def fetch_clip_content(source: str) -> dict:
         doc = ReadabilityDoc(html)
         title = doc.short_title() or source
         text = md(doc.summary(), strip=["img", "a"]).strip()
+        body = text[:_MAX_CLIP_CONTENT_CHARS] if text else source
         payload = {
             "title": title,
-            "content": text[:_MAX_CLIP_CONTENT_CHARS] if text else source,
+            "content": _with_source_link(body, source),
             "clip_type": "tweet",
             "source": source,
         }
@@ -125,9 +126,10 @@ async def fetch_clip_content(source: str) -> dict:
     doc = ReadabilityDoc(html)
     title = doc.short_title() or source
     text = md(doc.summary(), strip=["img"]).strip()
+    body = text[:_MAX_CLIP_CONTENT_CHARS] if text else source
     payload = {
         "title": title,
-        "content": text[:_MAX_CLIP_CONTENT_CHARS] if text else source,
+        "content": _with_source_link(body, source),
         "clip_type": "bookmark",
         "source": source,
     }
@@ -143,6 +145,22 @@ async def fetch_clip_content(source: str) -> dict:
 # tweet, X Article, or WeChat long-form post while still bounding memory
 # against runaway readability extracts of giant pages.
 _MAX_CLIP_CONTENT_CHARS = 50_000
+
+
+def _with_source_link(content: str, source: str) -> str:
+    """Prepend an inline ``> 原文: <url>`` line so renders / Obsidian show a
+    one-click jump back to the source. Frontmatter has ``source:`` too, but
+    that's hidden from the rendered view and from most clients.
+
+    No-op for non-URL sources (``manual`` text, image paths). Idempotent —
+    if the same line already opens the content, returns content unchanged.
+    """
+    if not source.startswith(("http://", "https://")):
+        return content
+    header = f"> 原文：<{source}>"
+    if content.lstrip().startswith(header):
+        return content
+    return f"{header}\n\n{content}" if content else header
 
 
 _FETCH_ERROR_MARKERS = (
@@ -367,9 +385,10 @@ async def _fetch_wechat_clip(source: str) -> dict:
     title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
     title = title_match.group(1).strip() if title_match else source
 
+    body = content[:_MAX_CLIP_CONTENT_CHARS] if content else source
     return {
         "title": title,
-        "content": content[:_MAX_CLIP_CONTENT_CHARS] if content else source,
+        "content": _with_source_link(body, source),
         "clip_type": "bookmark",
         "source": source,
     }
@@ -416,9 +435,10 @@ async def _fetch_tweet_clip(source: str) -> dict:
     first_line = text.splitlines()[0].strip() if text else source
     title = first_line[:80] if first_line else source
 
+    body = text[:_MAX_CLIP_CONTENT_CHARS]
     return {
         "title": title,
-        "content": text[:_MAX_CLIP_CONTENT_CHARS],
+        "content": _with_source_link(body, source),
         "clip_type": "tweet",
         "source": source,
         "_fetch_status": "ok",
