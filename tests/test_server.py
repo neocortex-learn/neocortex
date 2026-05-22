@@ -192,6 +192,68 @@ class TestClipEndpoint:
             assert key in body, f"ClipResult missing field {key}"
 
 
+class TestClipDedup:
+    """Same URL clipped twice → second call returns the original note path
+    with ``reused=true`` instead of writing a second file."""
+
+    def test_same_url_returns_existing(self, client, tmp_path, monkeypatch):
+        from pathlib import Path
+
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        # Seed an existing clip with a known URL in its frontmatter.
+        clips_dir = tmp_path / "clips"
+        clips_dir.mkdir()
+        seed = clips_dir / "2026-05-22-seed.md"
+        seed.write_text(
+            '---\n'
+            'title: "Original"\n'
+            'source: "https://overreacted.io/before-you-memo/"\n'
+            'date: 2026-05-20\n'
+            '---\n\nbody',
+            encoding="utf-8",
+        )
+
+        r = client.post(
+            "/api/clip",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "source": "https://overreacted.io/before-you-memo/?utm_source=fb",
+                "process": False,
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["reused"] is True
+        assert body["saved_path"] == str(seed)
+        assert body["clip"]["title"] == "Original"
+        # No new file written.
+        siblings = list(clips_dir.glob("*.md"))
+        assert siblings == [seed]
+
+    def test_text_clip_not_deduped(self, client, tmp_path, monkeypatch):
+        """Pasted text (non-URL) never trips the dedup short-circuit even when
+        identical to a previous note; ``reused`` always returns False."""
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        for _ in range(2):
+            r = client.post(
+                "/api/clip",
+                headers={
+                    "Authorization": f"Bearer {TOKEN}",
+                    "Content-Type": "application/json",
+                },
+                json={"source": "a plain text note", "process": False},
+            )
+            assert r.status_code == 200
+            assert r.json()["reused"] is False
+
+
 class TestDeleteNoteEndpoint:
     """POST /api/notes/delete — trash a note + reverse concept refs."""
 

@@ -498,6 +498,10 @@ class ReadResult(BaseModel):
     elapsed_seconds: float = 0.0
     aborted: bool = False
     abort_reason: str | None = None
+    # True when an existing note with the same source URL was returned
+    # instead of re-running fetch/outline/N×LLM. saved_path points to the
+    # original; LLM cost and clutter both avoided.
+    reused: bool = False
 
 
 class AskResult(BaseModel):
@@ -537,3 +541,5 @@ class ClipResult(BaseModel):
     # 抓取硬失败时由 service 设置；CLI / GUI 渲染时显示拒收提示。
     aborted: bool = False
     abort_reason: str | None = None
+    # 同 URL 已经剪过 → 直接返回旧笔记路径，不写新文件、不调 LLM。
+    reused: bool = False

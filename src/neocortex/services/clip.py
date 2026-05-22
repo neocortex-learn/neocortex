@@ -35,6 +35,46 @@ from neocortex.models import (
 )
 
 
+def _reused_clip_result(existing: Path, notes_dir: Path, source: str) -> ClipResult:
+    """Build a ClipResult pointing at an already-saved clip. We surface enough
+    metadata for the GUI card to render: title (from frontmatter / H1 / stem),
+    saved_path, and the original source. The Clip body itself stays minimal —
+    the card switches to a "🔁 reused" layout that links to the file."""
+    try:
+        text = existing.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        text = ""
+
+    title = existing.stem
+    created_at = ""
+    if text.startswith("---"):
+        end = text.find("\n---", 4)
+        if end > 0:
+            for line in text[4:end].splitlines():
+                if line.startswith("title:"):
+                    title = line.split(":", 1)[1].strip().strip('"').strip("'")
+                elif line.startswith("date:"):
+                    created_at = line.split(":", 1)[1].strip()
+    if title == existing.stem:
+        for line in text.splitlines():
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+
+    return ClipResult(
+        saved_path=str(existing),
+        clip=Clip(
+            id="",
+            source=source,
+            content="",
+            title=title,
+            created_at=created_at,
+        ),
+        llm_status="skipped_user_opt_out",
+        reused=True,
+    )
+
+
 async def clip_text(
     source: str,
     *,
@@ -52,9 +92,24 @@ async def clip_text(
     """
     from neocortex.clipper import fetch_clip_content, process_clip
     from neocortex.config import append_log, get_data_dir, save_clip
+    from neocortex.dedup import find_existing
     from neocortex.search import NoteIndex
 
+    # Dedup short-circuit before any work — saves HTTP fetch + LLM call.
+    # Only kicks in for URLs (find_existing returns None for pasted text).
+    pre_hit = find_existing(notes_dir, source)
+    if pre_hit is not None:
+        return _reused_clip_result(pre_hit, notes_dir, source)
+
     fetched = await fetch_clip_content(source)
+
+    # Post-fetch dedup: site may have redirected to a canonical URL we've
+    # already stored under (e.g. trailing-slash variants).
+    canonical = fetched.get("source", source)
+    if canonical != source:
+        post_hit = find_existing(notes_dir, canonical)
+        if post_hit is not None:
+            return _reused_clip_result(post_hit, notes_dir, canonical)
 
     # Hard fetch failure → don't save, don't process, return aborted result.
     if fetched.get("_fetch_status") == "failed":

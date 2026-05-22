@@ -28,6 +28,51 @@ from neocortex.models import (
 ProgressCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
+def _reused_result(
+    existing: Path,
+    notes_dir: Path,
+    source: str,
+    started: float,
+) -> ReadResult:
+    """Build a ReadResult pointing at an already-saved note. We pull title /
+    topic_dir / word_count from the file on disk so the GUI card renders the
+    same shape as a fresh read — just with ``reused=True`` to flip the UI."""
+    try:
+        text = existing.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        text = ""
+
+    # Title: prefer frontmatter, fall back to first H1, then filename stem.
+    title = existing.stem
+    if text.startswith("---"):
+        end = text.find("\n---", 4)
+        if end > 0:
+            for line in text[4:end].splitlines():
+                if line.startswith("title:"):
+                    title = line.split(":", 1)[1].strip().strip('"').strip("'")
+                    break
+    if title == existing.stem:
+        for line in text.splitlines():
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+
+    try:
+        topic_dir = str(existing.parent.relative_to(notes_dir))
+    except ValueError:
+        topic_dir = str(existing.parent)
+
+    return ReadResult(
+        saved_path=str(existing),
+        title=title,
+        source=source,
+        topic_dir=topic_dir,
+        word_count=len(text.split()),
+        elapsed_seconds=round(time.monotonic() - started, 2),
+        reused=True,
+    )
+
+
 async def _emit(cb: ProgressCallback | None, phase: str, **payload: Any) -> None:
     """Fire progress callback if set; swallow errors so progress glitches
     never abort the read pipeline."""
@@ -83,6 +128,15 @@ async def read_url(
             abort_reason=f"create_provider 失败: {exc}",
         )
 
+    # Dedup short-circuit before fetch — saves the HTTP round trip too if
+    # the input URL is already known. Post-fetch we re-check using
+    # ``doc.source`` because some sites canonicalise via redirect.
+    from neocortex.dedup import find_existing
+    pre_hit = find_existing(notes_dir, source)
+    if pre_hit is not None:
+        await _emit(on_progress, "reused", path=str(pre_hit))
+        return _reused_result(pre_hit, notes_dir, source, started)
+
     # Fetch (URL → PDF → EPUB → image → audio all handled by ContentFetcher).
     await _emit(on_progress, "fetch", source=source)
     fetcher = ContentFetcher(provider=provider)
@@ -94,6 +148,15 @@ async def read_url(
             aborted=True,
             abort_reason=f"抓取失败: {exc}",
         )
+
+    # Second dedup check after fetch — covers cases like
+    # ``example.com/post`` → ``example.com/post/`` 301 → already stored
+    # under the canonical form.
+    if doc.source != source:
+        post_hit = find_existing(notes_dir, doc.source)
+        if post_hit is not None:
+            await _emit(on_progress, "reused", path=str(post_hit))
+            return _reused_result(post_hit, notes_dir, doc.source, started)
 
     # Outline (one LLM call) — service path always auto-deeps everything;
     # interactive c/r prompt belongs in CLI layer.
