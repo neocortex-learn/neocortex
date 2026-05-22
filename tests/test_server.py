@@ -514,6 +514,66 @@ class TestAskEndpoint:
         assert (tmp_path / body["saved_as_insight"]).exists()
 
 
+class TestMapEndpoint:
+    """GET /api/map — concept map Mermaid source."""
+
+    def test_map_no_auth(self, client):
+        r = client.get("/api/map")
+        assert r.status_code == 401
+
+    def test_empty_concepts_returns_placeholder(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        r = client.get(
+            "/api/map",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["concepts_returned"] == 0
+        assert "graph LR" in body["mermaid_source"]
+        assert "kb compile" in body["mermaid_source"]
+
+    def test_with_concepts_returns_graph(self, client, tmp_path, monkeypatch):
+        """Two related concept files → graph with both nodes + an edge."""
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        concepts = tmp_path / "concepts"
+        concepts.mkdir()
+        (concepts / "transformer.md").write_text(
+            "---\n"
+            "name: Transformer\n"
+            "evidence_count: 3\n"
+            'related_concepts: ["Attention"]\n'
+            "---\n# Transformer\n",
+            encoding="utf-8",
+        )
+        (concepts / "attention.md").write_text(
+            "---\n"
+            "name: Attention\n"
+            "evidence_count: 2\n"
+            'related_concepts: ["Transformer"]\n'
+            "---\n# Attention\n",
+            encoding="utf-8",
+        )
+
+        r = client.get(
+            "/api/map",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["concepts_returned"] == 2
+        assert body["edges_returned"] == 1  # de-duped by sorted tuple
+        src = body["mermaid_source"]
+        assert "Transformer" in src
+        assert "Attention" in src
+        # mermaid has an edge declaration
+        assert "-->" in src
+
+
 class TestDailyEndpoint:
     """GET /api/daily — read-only daily briefing."""
 

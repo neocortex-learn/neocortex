@@ -521,6 +521,20 @@ class AskResult(BaseModel):
     abort_reason: str | None = None
 
 
+class ConceptMap(BaseModel):
+    """Concept map (Mermaid graph) for the GUI map panel.
+
+    The GUI just renders ``mermaid_source`` straight through MermaidView;
+    metadata fields drive the header chip (count + filter description).
+    ``concepts_returned == 0`` is a valid state: the vault has no concepts
+    yet (run ``kb compile`` first).
+    """
+    mermaid_source: str
+    concepts_returned: int = 0
+    edges_returned: int = 0
+    filter_description: str = "none"  # "domain=ai" / "around=transformer" / "none"
+
+
 class SurfacingItem(BaseModel):
     """A clip that should be re-surfaced today (saved 3/7/14/30/60 days ago)."""
     saved_path: str
