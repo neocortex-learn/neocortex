@@ -11,13 +11,11 @@ intercept the ``websocket`` ASGI scope.
 
 from __future__ import annotations
 
-import secrets
-
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from neocortex.models import ReadResult
-from neocortex.server.security import ALLOWED_ORIGINS
+from neocortex.server.security import validate_ws_handshake
 from neocortex.services.read import read_url
 
 
@@ -63,36 +61,15 @@ def make_router(require_token, *, expected_token: str | None = None,
     if expected_token is None or expected_host is None:
         return router
 
-    expected_hosts = {
-        expected_host,
-        expected_host.replace("127.0.0.1", "localhost"),
-    }
-
     @router.websocket("/read/ws")
     async def read_ws(websocket: WebSocket) -> None:
-        # 1. Host check (defeats DNS rebinding even on WS).
-        host = websocket.headers.get("host", "")
-        if host not in expected_hosts:
-            await websocket.close(code=1008, reason="bad host")
-            return
-
-        # 2. Origin check — browsers always set this on WS handshakes; native
-        # clients (URLSessionWebSocketTask) omit it which is fine.
-        origin = websocket.headers.get("origin")
-        if origin is not None and origin not in ALLOWED_ORIGINS:
-            await websocket.close(code=1008, reason="bad origin")
-            return
-
-        # 3. Bearer token. URLSessionWebSocketTask supports custom headers;
-        # browsers don't, so we also accept ?token= as a fallback for them.
-        auth = websocket.headers.get("authorization", "")
-        token: str | None = None
-        if auth.lower().startswith("bearer "):
-            token = auth.split(" ", 1)[1].strip()
-        else:
-            token = websocket.query_params.get("token")
-        if not token or not secrets.compare_digest(token, expected_token):
-            await websocket.close(code=1008, reason="bad token")
+        # Host / origin / bearer-token checks all live in security.py so the
+        # WS path tracks the HTTP middleware policy automatically.
+        if not await validate_ws_handshake(
+            websocket,
+            expected_token=expected_token,
+            expected_host=expected_host,
+        ):
             return
 
         await websocket.accept()

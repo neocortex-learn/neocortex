@@ -91,26 +91,60 @@ def normalize_source_url(raw: str) -> str | None:
     ))
 
 
-_SOURCE_LINE = re.compile(r'^source:\s*"?([^"\n]+)"?\s*$', re.MULTILINE)
+_SOURCE_LINE = re.compile(r'^source:\s*"?([^"\n]+?)"?\s*$', re.MULTILINE)
+_TITLE_LINE = re.compile(r'^title:\s*"?([^"\n]+?)"?\s*$', re.MULTILINE)
+_DATE_LINE = re.compile(r'^(?:date|created_at):\s*([^\n]+?)\s*$', re.MULTILINE)
 
 
-def _extract_source(md_path: Path) -> str | None:
-    """Read the first frontmatter block, return its `source:` value or None.
+def extract_frontmatter_meta(md_path: Path) -> dict[str, str]:
+    """Return ``{title, source, created_at}`` parsed from the first frontmatter
+    block. Missing fields come back as empty strings.
 
-    Frontmatter must start at byte 0 with ``---\\n``; otherwise we don't try
-    to parse mid-file (those notes won't be dedup-candidates anyway).
+    Frontmatter must start at byte 0 with ``---\\n``; we don't try to parse
+    YAML mid-file (those notes wouldn't be dedup candidates anyway). When
+    ``title`` isn't in frontmatter, falls back to the first H1 heading.
+
+    Shared between dedup scanning and the ``_reused_*`` helpers in services/
+    so we don't keep two near-identical YAML mini-parsers in sync.
     """
     try:
         text = md_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
-        return None
-    if not text.startswith("---"):
-        return None
-    end = text.find("\n---", 4)
-    if end < 0:
-        return None
-    m = _SOURCE_LINE.search(text[4:end])
-    return m.group(1).strip() if m else None
+        return {"title": md_path.stem, "source": "", "created_at": ""}
+
+    front = ""
+    if text.startswith("---"):
+        end = text.find("\n---", 4)
+        if end > 0:
+            front = text[4:end]
+
+    title = ""
+    source = ""
+    created_at = ""
+    if front:
+        if m := _TITLE_LINE.search(front):
+            title = m.group(1).strip()
+        if m := _SOURCE_LINE.search(front):
+            source = m.group(1).strip()
+        if m := _DATE_LINE.search(front):
+            created_at = m.group(1).strip()
+
+    # Fallback: first ``# `` heading in the body.
+    if not title:
+        for line in text.splitlines():
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+    if not title:
+        title = md_path.stem
+
+    return {"title": title, "source": source, "created_at": created_at}
+
+
+def _extract_source(md_path: Path) -> str | None:
+    """Legacy thin shim — prefer ``extract_frontmatter_meta`` in new code."""
+    meta = extract_frontmatter_meta(md_path)
+    return meta["source"] or None
 
 
 def find_existing(notes_dir: Path, source: str) -> Path | None:
@@ -118,8 +152,15 @@ def find_existing(notes_dir: Path, source: str) -> Path | None:
     or None if no match. Returns the most recently modified one when
     multiple legacy duplicates exist.
 
-    Skip-listed: ``log.md`` / ``INDEX.md`` / ``overview.md`` (knowledge
-    base docs, not clips); hidden dirs (``.git``, ``.search.db``, etc.).
+    Lookup order:
+      1. ``NoteIndex.note_sources`` SQLite table (O(log n) — populated by
+         ``index_note`` for every clip/read written after this change).
+      2. Filesystem fallback: ``rglob("*.md")`` + frontmatter scan, to
+         cover legacy notes that pre-date the index. If we find one in the
+         fallback, hand it back to the index so the next call is fast.
+
+    Skip-listed in the FS scan: ``log.md`` / ``INDEX.md`` / ``overview.md``
+    (knowledge base docs, not clips); hidden dirs (``.git``, ``.search.db``).
     """
     key = normalize_source_url(source)
     if key is None:
@@ -127,19 +168,65 @@ def find_existing(notes_dir: Path, source: str) -> Path | None:
     if not notes_dir.exists():
         return None
 
+    # 1. Fast path — SQLite lookup.
+    indexed = _lookup_indexed_source(notes_dir, key)
+    if indexed is not None:
+        # File could have been deleted while still in the index — confirm
+        # it's still there before handing back, otherwise fall through.
+        if indexed.exists():
+            return indexed
+
+    # 2. Slow path — filesystem scan (one-time cost per legacy note).
     matches: list[Path] = []
     for md in notes_dir.rglob("*.md"):
         if any(part.startswith(".") for part in md.parts):
             continue
         if md.name in {"INDEX.md", "log.md", "overview.md"}:
             continue
-        raw = _extract_source(md)
-        if not raw:
+        meta = extract_frontmatter_meta(md)
+        if not meta["source"]:
             continue
-        if normalize_source_url(raw) == key:
+        if normalize_source_url(meta["source"]) == key:
             matches.append(md)
 
     if not matches:
         return None
     matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return matches[0]
+    winner = matches[0]
+
+    # Backfill the index so subsequent calls skip the FS scan.
+    _backfill_indexed_source(notes_dir, winner)
+    return winner
+
+
+def _lookup_indexed_source(notes_dir: Path, normalized_key: str) -> Path | None:
+    """SQLite probe; returns absolute path or None. Errors swallowed so a
+    corrupt index just degrades to the FS fallback rather than crashing."""
+    try:
+        from neocortex.config import get_data_dir
+        from neocortex.search import NoteIndex
+
+        idx = NoteIndex(get_data_dir() / "neocortex.sqlite")
+        rel = idx.find_filename_by_source(normalized_key)
+        if rel is None:
+            return None
+        return notes_dir / rel
+    except Exception:
+        return None
+
+
+def _backfill_indexed_source(notes_dir: Path, md_path: Path) -> None:
+    """Push a legacy match into NoteIndex so the next lookup is O(log n).
+    Best-effort — errors leave the row absent and we'll FS-scan again."""
+    try:
+        from neocortex.config import get_data_dir
+        from neocortex.search import NoteIndex
+
+        rel = str(md_path.relative_to(notes_dir))
+        meta = extract_frontmatter_meta(md_path)
+        content = md_path.read_text(encoding="utf-8", errors="ignore")
+        NoteIndex(get_data_dir() / "neocortex.sqlite").index_note(
+            rel, meta["title"], content,
+        )
+    except Exception:
+        pass

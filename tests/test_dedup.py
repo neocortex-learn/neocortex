@@ -64,6 +64,18 @@ class TestNormalize:
 
 
 class TestFindExisting:
+    @pytest.fixture(autouse=True)
+    def _isolate_data_dir(self, tmp_path, monkeypatch):
+        """Sandbox the SQLite index used by find_existing's fast-path probe.
+
+        Without this, every test would share the developer's ~/.neocortex/
+        note_sources table, accumulating rows from earlier runs and breaking
+        the ordering / dedup guarantees this suite checks.
+        """
+        data = tmp_path / "data"
+        data.mkdir()
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: data)
+
     @pytest.fixture
     def vault(self, tmp_path):
         clips = tmp_path / "clips"
@@ -118,6 +130,41 @@ class TestFindExisting:
         time.sleep(0.01)
         second = self._write_note(vault, "b.md", "https://example.com/x")
         assert find_existing(vault, "https://example.com/x") == second
+
+    def test_indexed_source_returned_without_fs_scan(self, vault, tmp_path, monkeypatch):
+        """When NoteIndex has the row, find_existing should hit SQLite, not the FS.
+
+        We simulate this by indexing a note explicitly, then deleting all .md
+        files from disk except the indexed one — if find_existing still finds
+        it, we know it came from the index (FS scan would miss because the
+        file isn't reachable until we restore it).
+        """
+        from neocortex.config import get_data_dir
+        from neocortex.search import NoteIndex
+
+        target = self._write_note(vault, "indexed.md", "https://example.com/x", body="payload")
+        # Index it. This populates note_sources.
+        idx = NoteIndex(get_data_dir() / "neocortex.sqlite")
+        idx.index_note("clips/indexed.md", "Indexed", target.read_text())
+        # SQLite probe should return the right relative path.
+        assert idx.find_filename_by_source("https://example.com/x") == "clips/indexed.md"
+        # find_existing returns it.
+        assert find_existing(vault, "https://example.com/x") == target
+
+    def test_legacy_note_backfilled_to_index_after_first_hit(
+        self, vault, tmp_path, monkeypatch,
+    ):
+        """A legacy (unindexed) note found via FS scan should be pushed into
+        the SQLite index so the second lookup skips rglob."""
+        from neocortex.config import get_data_dir
+        from neocortex.search import NoteIndex
+
+        self._write_note(vault, "legacy.md", "https://legacy.example/a")
+        # First call: SQLite miss → FS scan → backfill.
+        find_existing(vault, "https://legacy.example/a")
+        # Index now has the row.
+        idx = NoteIndex(get_data_dir() / "neocortex.sqlite")
+        assert idx.find_filename_by_source("https://legacy.example/a") == "clips/legacy.md"
 
     def test_skips_hidden_dirs(self, vault):
         hidden = vault / ".trash"

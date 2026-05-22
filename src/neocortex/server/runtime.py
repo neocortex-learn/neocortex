@@ -47,7 +47,18 @@ def allocate_free_port() -> int:
 
 
 def provision_runtime(port: int | None = None) -> ServerSecrets:
-    """Generate token, allocate port if needed, write runtime files."""
+    """Generate token, allocate port if needed, write runtime files.
+
+    If an existing pid file points to a dead process (previous `serve` got
+    SIGKILL'd or the OS crashed), wipe the stale files first so any in-flight
+    discover() callers see "nothing here" rather than a moment of mixed state
+    where pid/port came from old run and token came from new.
+    """
+    if _pid_file().exists():
+        old = read_pid()
+        if old is not None and not _pid_alive(old):
+            cleanup_runtime()
+
     if port is None:
         port = allocate_free_port()
     token = secrets.token_urlsafe(32)
@@ -100,13 +111,16 @@ def cleanup_runtime() -> None:
             pass
 
 
-def is_server_alive() -> bool:
-    """Best-effort: is there a PID file pointing to a live process?"""
-    pid = read_pid()
-    if pid is None:
-        return False
+def _pid_alive(pid: int) -> bool:
+    """Signal 0 liveness check — doesn't actually send a signal."""
     try:
-        os.kill(pid, 0)  # signal 0 = just check existence
+        os.kill(pid, 0)
         return True
     except (OSError, ProcessLookupError):
         return False
+
+
+def is_server_alive() -> bool:
+    """Best-effort: is there a PID file pointing to a live process?"""
+    pid = read_pid()
+    return pid is not None and _pid_alive(pid)

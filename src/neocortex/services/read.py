@@ -34,40 +34,29 @@ def _reused_result(
     source: str,
     started: float,
 ) -> ReadResult:
-    """Build a ReadResult pointing at an already-saved note. We pull title /
-    topic_dir / word_count from the file on disk so the GUI card renders the
-    same shape as a fresh read — just with ``reused=True`` to flip the UI."""
-    try:
-        text = existing.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        text = ""
-
-    # Title: prefer frontmatter, fall back to first H1, then filename stem.
-    title = existing.stem
-    if text.startswith("---"):
-        end = text.find("\n---", 4)
-        if end > 0:
-            for line in text[4:end].splitlines():
-                if line.startswith("title:"):
-                    title = line.split(":", 1)[1].strip().strip('"').strip("'")
-                    break
-    if title == existing.stem:
-        for line in text.splitlines():
-            if line.startswith("# "):
-                title = line[2:].strip()
-                break
+    """Build a ReadResult pointing at an already-saved note. The GUI card
+    renders the same shape as a fresh read — just with ``reused=True`` so
+    the UI flips to a "this URL is already in your vault" layout."""
+    from neocortex.dedup import extract_frontmatter_meta
+    meta = extract_frontmatter_meta(existing)
 
     try:
         topic_dir = str(existing.parent.relative_to(notes_dir))
     except ValueError:
         topic_dir = str(existing.parent)
 
+    # word_count requires the body text — meta only carries the heading.
+    try:
+        body = existing.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        body = ""
+
     return ReadResult(
         saved_path=str(existing),
-        title=title,
+        title=meta["title"],
         source=source,
         topic_dir=topic_dir,
-        word_count=len(text.split()),
+        word_count=len(body.split()),
         elapsed_seconds=round(time.monotonic() - started, 2),
         reused=True,
     )

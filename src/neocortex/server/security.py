@@ -82,6 +82,55 @@ def _json_error(code: int, detail: str) -> Response:
     return Response(content=body, status_code=code, media_type="application/json")
 
 
+async def validate_ws_handshake(
+    websocket,
+    *,
+    expected_token: str,
+    expected_host: str,
+) -> bool:
+    """Run the same checks SecurityMiddleware does, but for WebSocket scope.
+
+    Starlette's BaseHTTPMiddleware only sees ``http`` scope, so every WS
+    endpoint must do its own host/origin/token validation. Centralising it
+    here keeps the security model consistent — if we later add an allowed
+    origin or change token storage, both paths track together instead of
+    drifting.
+
+    Returns True when the handshake passed and the caller should ``accept()``.
+    Returns False after closing the socket with the appropriate code so the
+    caller just returns.
+    """
+    expected_hosts = {
+        expected_host,
+        expected_host.replace("127.0.0.1", "localhost"),
+    }
+
+    host = websocket.headers.get("host", "")
+    if host not in expected_hosts:
+        await websocket.close(code=1008, reason="bad host")
+        return False
+
+    origin = websocket.headers.get("origin")
+    if origin is not None and origin not in ALLOWED_ORIGINS:
+        await websocket.close(code=1008, reason="bad origin")
+        return False
+
+    # Token: prefer Authorization header (native clients); fall back to
+    # ?token= query for browsers (which can't set custom WS headers).
+    auth = websocket.headers.get("authorization", "")
+    token: str | None = None
+    if auth.lower().startswith("bearer "):
+        token = auth.split(" ", 1)[1].strip()
+    else:
+        token = websocket.query_params.get("token")
+
+    if not token or not secrets.compare_digest(token, expected_token):
+        await websocket.close(code=1008, reason="bad token")
+        return False
+
+    return True
+
+
 def make_token_dependency(expected_token: str):
     """Build a FastAPI dependency that validates Bearer token.
 

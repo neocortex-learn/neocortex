@@ -8,6 +8,27 @@ import sqlite3
 import struct
 from pathlib import Path
 
+def _normalize_source_from_content(content: str) -> str | None:
+    """Extract the ``source:`` value from leading frontmatter and normalise it.
+
+    Lives here (rather than via ``extract_frontmatter_meta``) to keep the
+    SQLite write path zero-import-cost on the hot index_note loop —
+    ``dedup.normalize_source_url`` is cheap and pure though, so we still
+    call it for consistent stripping rules.
+    """
+    if not content.startswith("---"):
+        return None
+    end = content.find("\n---", 4)
+    if end < 0:
+        return None
+    front = content[4:end]
+    m = re.search(r'^source:\s*"?([^"\n]+?)"?\s*$', front, re.MULTILINE)
+    if not m:
+        return None
+    from neocortex.dedup import normalize_source_url
+    return normalize_source_url(m.group(1).strip())
+
+
 _CJK_RE = re.compile(
     r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff"
     r"\U00020000-\U0002a6df\U0002a700-\U0002ebef"
@@ -38,6 +59,22 @@ class NoteIndex:
                     embedding BLOB NOT NULL
                 )
             """)
+            # Indexed normalised-URL → filename map for clip/read dedup.
+            # Lookup is O(log n) vs the previous O(n) full-vault rglob,
+            # which started hurting around 10k notes. Populated lazily by
+            # ``index_note`` from frontmatter; legacy notes outside the index
+            # still match via dedup.py's FS fallback scan.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS note_sources (
+                    normalized_source TEXT NOT NULL,
+                    filename          TEXT NOT NULL,
+                    PRIMARY KEY (normalized_source, filename)
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_note_sources_norm "
+                "ON note_sources(normalized_source)"
+            )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(str(self._db_path))
@@ -53,14 +90,44 @@ class NoteIndex:
         return self._embed_model
 
     def index_note(self, filename: str, title: str, content: str) -> None:
-        """Index or update a single note (FTS5 + embedding)."""
+        """Index or update a single note (FTS5 + embedding + dedup source).
+
+        We extract ``source:`` from the leading frontmatter (cheap regex, no
+        YAML lib) and feed it into ``note_sources`` so dedup queries don't
+        have to scan the whole vault. Notes without frontmatter ``source``
+        simply don't register here — that's correct (they opt out of dedup).
+        """
         with self._connect() as conn:
             conn.execute("DELETE FROM notes_fts WHERE filename = ?", (filename,))
             conn.execute(
                 "INSERT INTO notes_fts (filename, title, content) VALUES (?, ?, ?)",
                 (filename, title, content),
             )
+            # Refresh the source row (rewrite same content with different
+            # source URL is a rare but possible operation).
+            conn.execute("DELETE FROM note_sources WHERE filename = ?", (filename,))
+            normalized = _normalize_source_from_content(content)
+            if normalized:
+                conn.execute(
+                    "INSERT OR REPLACE INTO note_sources "
+                    "(normalized_source, filename) VALUES (?, ?)",
+                    (normalized, filename),
+                )
         self.index_note_embedding(filename, content)
+
+    def find_filename_by_source(self, normalized_source: str) -> str | None:
+        """Look up the indexed filename matching ``normalized_source`` (already
+        run through ``dedup.normalize_source_url``). Returns None if no row
+        matches — caller should then try the FS fallback for legacy notes.
+        """
+        if not normalized_source:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT filename FROM note_sources WHERE normalized_source = ? LIMIT 1",
+                (normalized_source,),
+            ).fetchone()
+        return row[0] if row else None
 
     def index_note_embedding(self, filename: str, content: str) -> None:
         """Generate and store the embedding vector for a single note."""

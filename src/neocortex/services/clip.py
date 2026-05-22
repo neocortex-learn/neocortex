@@ -36,39 +36,19 @@ from neocortex.models import (
 
 
 def _reused_clip_result(existing: Path, notes_dir: Path, source: str) -> ClipResult:
-    """Build a ClipResult pointing at an already-saved clip. We surface enough
-    metadata for the GUI card to render: title (from frontmatter / H1 / stem),
-    saved_path, and the original source. The Clip body itself stays minimal —
-    the card switches to a "🔁 reused" layout that links to the file."""
-    try:
-        text = existing.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        text = ""
-
-    title = existing.stem
-    created_at = ""
-    if text.startswith("---"):
-        end = text.find("\n---", 4)
-        if end > 0:
-            for line in text[4:end].splitlines():
-                if line.startswith("title:"):
-                    title = line.split(":", 1)[1].strip().strip('"').strip("'")
-                elif line.startswith("date:"):
-                    created_at = line.split(":", 1)[1].strip()
-    if title == existing.stem:
-        for line in text.splitlines():
-            if line.startswith("# "):
-                title = line[2:].strip()
-                break
-
+    """Build a ClipResult pointing at an already-saved clip. Card switches
+    to the "🔁 reused" layout — body content stays empty since the original
+    file is one click away."""
+    from neocortex.dedup import extract_frontmatter_meta
+    meta = extract_frontmatter_meta(existing)
     return ClipResult(
         saved_path=str(existing),
         clip=Clip(
             id="",
             source=source,
             content="",
-            title=title,
-            created_at=created_at,
+            title=meta["title"],
+            created_at=meta["created_at"],
         ),
         llm_status="skipped_user_opt_out",
         reused=True,

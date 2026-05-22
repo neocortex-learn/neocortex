@@ -254,6 +254,124 @@ class TestClipDedup:
             assert r.json()["reused"] is False
 
 
+class TestReadDedupRedirect:
+    """services/read.read_url dedup after fetch rewrites the URL.
+
+    Some sites redirect ``/post`` → ``/post/``; ``/x`` → canonical ``/x?id=42``.
+    If we only dedup pre-fetch, the same canonical article gets re-LLMed.
+    """
+
+    def test_redirect_to_canonical_hits_dedup(self, tmp_path, monkeypatch):
+        from datetime import date
+        from pathlib import Path
+        from neocortex.models import AppConfig, Profile
+        from neocortex.reader.fetcher import Document
+        from neocortex.services.read import read_url
+
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        # Seed an existing note under the *canonical* URL.
+        seeded = tmp_path / "topic" / "seed.md"
+        seeded.parent.mkdir()
+        seeded.write_text(
+            '---\ntitle: "Seed"\nsource: "https://canonical.example/a/"\n---\n\nbody',
+            encoding="utf-8",
+        )
+
+        class RedirectFetcher:
+            def __init__(self, *_, **__): pass
+            async def fetch(self, source):
+                # Original input was the shortlink — fetcher rewrites to canonical.
+                assert source == "https://short.example/a"
+                return Document(
+                    title="Canonical Title",
+                    source="https://canonical.example/a/",
+                    content="real body",
+                )
+
+        class FakeProvider:
+            def max_context_tokens(self): return 100_000
+
+        monkeypatch.setattr("neocortex.reader.fetcher.ContentFetcher", RedirectFetcher)
+        monkeypatch.setattr("neocortex.llm.create_provider", lambda _cfg: FakeProvider())
+
+        import asyncio
+        result = asyncio.run(read_url(
+            "https://short.example/a",
+            notes_dir=tmp_path,
+            cfg=AppConfig(provider="openai", api_key="sk-test"),
+            profile=Profile(),
+            lang=AppConfig().output_settings.language,
+        ))
+
+        assert result.reused is True
+        assert result.saved_path == str(seeded)
+        # No new file under topic/ (only the seed).
+        topic_files = list((tmp_path / "topic").glob("*.md"))
+        assert topic_files == [seeded]
+
+
+class TestReadWebSocketDisconnect:
+    """If the client drops mid-stream, the server must not crash; the
+    on_progress callback simply stops landing and read_url runs to completion."""
+
+    def test_client_disconnect_mid_stream(self, client, tmp_path, monkeypatch):
+        from neocortex.models import AppConfig, Outline, OutlineItem, Profile
+        from neocortex.reader.fetcher import Document
+
+        cfg = AppConfig(provider="openai", api_key="sk-test")
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.load_config", lambda: cfg)
+        monkeypatch.setattr("neocortex.config.load_profile", lambda: Profile())
+
+        class StubFetcher:
+            def __init__(self, *_, **__): pass
+            async def fetch(self, source):
+                return Document(title="Stub", source=source, content="body")
+
+        async def stub_outline(*_, **__):
+            return Outline(source="stub", items=[
+                OutlineItem(title="X", marker="deep", reason="r"),
+            ])
+
+        async def stub_notes(*_args, on_chunk=None, **_kwargs):
+            # Simulate two chunks — server tries to send progress on both,
+            # but the client closes after we drain the first message.
+            if on_chunk:
+                await on_chunk(1, 2)
+                await on_chunk(2, 2)
+            return "# Stub\n\nbody"
+
+        monkeypatch.setattr("neocortex.reader.fetcher.ContentFetcher", StubFetcher)
+        monkeypatch.setattr("neocortex.reader.teacher.generate_outline", stub_outline)
+        monkeypatch.setattr("neocortex.reader.teacher.generate_notes", stub_notes)
+
+        class FakeProvider:
+            def max_context_tokens(self): return 100_000
+        monkeypatch.setattr("neocortex.llm.create_provider", lambda _cfg: FakeProvider())
+
+        # Drain only the first event, then close the connection abruptly.
+        with client.websocket_connect(
+            "/api/read/ws",
+            headers={"Authorization": f"Bearer {TOKEN}", "Host": EXPECTED_HOST},
+        ) as ws:
+            ws.send_json({"source": "https://example.com/x"})
+            first = ws.receive_json()
+            assert first["type"] == "progress"
+            # Exiting the `with` triggers a client-side close.
+        # Server-side: read_url should have completed and saved the note,
+        # even though the WS send_json on subsequent progress events errored.
+        # We can verify by checking the file was written.
+        saved = list(tmp_path.rglob("*.md"))
+        # At least one .md exists under the (auto-created) topic dir.
+        assert any(p.name.endswith(".md") for p in saved), (
+            f"expected the note to still be saved despite client disconnect; "
+            f"got files: {saved}"
+        )
+
+
 class TestDeleteNoteEndpoint:
     """POST /api/notes/delete — trash a note + reverse concept refs."""
 
@@ -884,6 +1002,31 @@ class TestRuntimeFiles:
             cleanup_runtime()
             assert not (tmp_path / "server.pid").exists()
             assert not (tmp_path / "server-token").exists()
+
+    def test_provision_wipes_stale_files_when_old_pid_dead(self, tmp_path, monkeypatch):
+        """Stale pid file from a SIGKILL'd previous run gets cleaned before reprovision.
+
+        Without this, callers reading port/token mid-provision could see a
+        mix of old + new fields and end up with the wrong token.
+        """
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+
+        # Seed stale files pointing at a definitely-dead pid (we just spawned
+        # it and waited, but using a clearly fake one is faster).
+        (tmp_path / "server.pid").write_text("999999", encoding="utf-8")
+        (tmp_path / "server.port").write_text("11111", encoding="utf-8")
+        (tmp_path / "server-token").write_text("old-stale-token", encoding="utf-8")
+
+        from neocortex.server.runtime import cleanup_runtime, provision_runtime
+
+        try:
+            secrets = provision_runtime(port=22222)
+            # New values fully overwrote stale ones — no leftover token.
+            assert (tmp_path / "server.port").read_text() == "22222"
+            assert (tmp_path / "server-token").read_text() == secrets.token
+            assert secrets.token != "old-stale-token"
+        finally:
+            cleanup_runtime()
 
     def test_provision_tightens_existing_token_permissions(self, tmp_path, monkeypatch):
         """An old loose-permission token file must be made 0600 before reuse."""
