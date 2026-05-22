@@ -276,6 +276,7 @@ class AppConfig(BaseModel):
     github_token: str | None = None
     scan_settings: ScanSettings = Field(default_factory=ScanSettings)
     output_settings: OutputSettings = Field(default_factory=OutputSettings)
+    experimental: list[str] = Field(default_factory=list)
     # Q11: 配置了 LLM key 时 `neocortex clip` 默认走即时关联；设 False 退回零 LLM 路径。
     clip_default_process: bool = True
 
@@ -478,6 +479,25 @@ class RelatedNoteRef(BaseModel):
     title: str
     snippet: str = ""
     reason: str = ""
+
+
+class ReadResult(BaseModel):
+    """Structured result of a `read` (deep note) operation.
+
+    Mirrors the CLI ``cmd_read`` core flow: fetch → outline → generate_notes
+    → save. Aborts (fetch failed, LLM error mid-stream) come back with
+    ``aborted=True`` + ``abort_reason``.
+    """
+    saved_path: str
+    title: str
+    source: str
+    topic_dir: str
+    word_count: int = 0
+    deep_topics: list[str] = Field(default_factory=list)
+    brief_topics: list[str] = Field(default_factory=list)
+    elapsed_seconds: float = 0.0
+    aborted: bool = False
+    abort_reason: str | None = None
 
 
 class ClipResult(BaseModel):
