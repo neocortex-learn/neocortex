@@ -514,6 +514,106 @@ class TestAskEndpoint:
         assert (tmp_path / body["saved_as_insight"]).exists()
 
 
+class TestDailyEndpoint:
+    """GET /api/daily — read-only daily briefing."""
+
+    def test_daily_no_auth(self, client):
+        r = client.get("/api/daily")
+        assert r.status_code == 401
+
+    def test_empty_vault_returns_empty_briefing(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        r = client.get(
+            "/api/daily",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["surfacing"] == []
+        assert body["due_flashcard_count"] == 0
+        assert body["cluster_suggestions"] == []
+        assert body["uncompiled_count"] == 0
+        # Health pulse fields are all None / empty for an empty vault
+        assert body["health_pulse"]["lint_score"] is None
+        assert body["health_pulse"]["verify_score"] is None
+        # Date present
+        assert len(body["date"]) == 10  # YYYY-MM-DD
+
+    def test_surfacing_clip_appears(self, client, tmp_path, monkeypatch):
+        """Clip with next_surface ≤ today and status=inbox → in surfacing."""
+        from datetime import date, timedelta
+        from neocortex.config import save_clip
+        from neocortex.models import Clip
+
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        old = (date.today() - timedelta(days=7)).isoformat()
+        clip = Clip(
+            id="abcd1234",
+            source="https://example.com/x",
+            content="body",
+            title="Test Clip",
+            status="inbox",
+            summary="A short summary",
+            related_concepts=["redis"],
+            created_at=old,
+            next_surface=date.today().isoformat(),
+            surface_count=1,
+        )
+        save_clip(tmp_path, clip)
+
+        r = client.get(
+            "/api/daily",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert len(body["surfacing"]) == 1
+        item = body["surfacing"][0]
+        assert item["title"] == "Test Clip"
+        assert item["summary"] == "A short summary"
+        assert item["days_ago"] == 7
+        assert item["related_concepts"] == ["redis"]
+        # LLM context update skipped by default → empty
+        assert item["context_update"] == ""
+
+    def test_cluster_suggestion_at_three_clips(self, client, tmp_path, monkeypatch):
+        """≥3 inbox clips touching the same concept → cluster suggestion."""
+        from datetime import date
+        from neocortex.config import save_clip
+        from neocortex.models import Clip
+
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        for i in range(3):
+            save_clip(tmp_path, Clip(
+                id=f"id{i:04d}",
+                source=f"https://x.com/{i}",
+                content=f"body {i}",
+                title=f"Clip {i}",
+                status="inbox",
+                related_concepts=["transformer"],
+                created_at=date.today().isoformat(),
+                next_surface="2099-01-01",  # not in surfacing
+                surface_count=0,
+            ))
+
+        r = client.get(
+            "/api/daily",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        clusters = body["cluster_suggestions"]
+        assert len(clusters) == 1
+        assert clusters[0]["concept"] == "transformer"
+        assert clusters[0]["clip_count"] == 3
+
+
 class TestReadWebSocket:
     """WS /api/read/ws — streams progress events + final ReadResult."""
 

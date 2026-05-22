@@ -521,6 +521,51 @@ class AskResult(BaseModel):
     abort_reason: str | None = None
 
 
+class SurfacingItem(BaseModel):
+    """A clip that should be re-surfaced today (saved 3/7/14/30/60 days ago)."""
+    saved_path: str
+    title: str
+    summary: str = ""
+    days_ago: int = 0
+    related_concepts: list[str] = Field(default_factory=list)
+    # Optional LLM "what's changed since you saved this" context (~1 sentence).
+    context_update: str = ""
+    # True when the concept this clip touches has matured (≥3 evidences).
+    absorbed: bool = False
+
+
+class ClusterSuggestion(BaseModel):
+    """A concept appearing in ≥3 inbox clips → synthesis candidate."""
+    concept: str
+    clip_count: int
+
+
+class HealthPulse(BaseModel):
+    """Knowledge-base health snapshot: latest lint + verify scores w/ trend."""
+    lint_score: int | None = None
+    lint_delta: int | None = None      # vs previous report
+    lint_sparkline: str = ""           # last 8 reports, ASCII blocks
+    lint_stale_days: int | None = None
+    verify_score: int | None = None
+    verify_delta: int | None = None
+    verify_sparkline: str = ""
+
+
+class DailyBriefing(BaseModel):
+    """Output of ``services/daily.build_briefing``.
+
+    Read-only: building a briefing does NOT advance ``next_surface`` schedules
+    (the CLI ``daily`` command does that; the GUI version is lighter — user
+    must click a surfacing item to mark it surfaced explicitly, future work).
+    """
+    date: str  # YYYY-MM-DD
+    surfacing: list[SurfacingItem] = Field(default_factory=list)
+    due_flashcard_count: int = 0
+    cluster_suggestions: list[ClusterSuggestion] = Field(default_factory=list)
+    uncompiled_count: int = 0
+    health_pulse: HealthPulse = Field(default_factory=HealthPulse)
+
+
 class ClipResult(BaseModel):
     """clip 操作的结构化结果，供 CLI / GUI 统一消费。
 
