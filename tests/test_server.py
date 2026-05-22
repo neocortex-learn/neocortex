@@ -674,6 +674,101 @@ class TestDailyEndpoint:
         assert clusters[0]["clip_count"] == 3
 
 
+class TestSurfaceEndpoint:
+    """POST /api/daily/surface — advance a clip's next_surface schedule."""
+
+    def test_surface_no_auth(self, client):
+        r = client.post(
+            "/api/daily/surface",
+            headers={"Content-Type": "application/json"},
+            json={"clip_id": "abcd1234"},
+        )
+        assert r.status_code == 401
+
+    def test_surface_clip_not_found_404(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+        r = client.post(
+            "/api/daily/surface",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"clip_id": "ghost"},
+        )
+        assert r.status_code == 404
+
+    def test_surface_advances_schedule(self, client, tmp_path, monkeypatch):
+        from datetime import date, timedelta
+        from neocortex.config import load_clips, save_clip
+        from neocortex.models import Clip
+
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        save_clip(tmp_path, Clip(
+            id="surface1",
+            source="https://example.com/x",
+            content="body",
+            title="t",
+            status="inbox",
+            created_at=(date.today() - timedelta(days=7)).isoformat(),
+            next_surface=date.today().isoformat(),
+            surface_count=1,
+        ))
+
+        r = client.post(
+            "/api/daily/surface",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"clip_id": "surface1"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["clip_id"] == "surface1"
+        assert body["surface_count"] == 2
+        # surface_count=2 → SURFACE_INTERVALS[2] = 14 days out
+        expected = (date.today() + timedelta(days=14)).isoformat()
+        assert body["next_surface"] == expected
+        assert body["absorbed"] is False
+
+        # File on disk reflects the update
+        updated = next(c for c in load_clips(tmp_path) if c.id == "surface1")
+        assert updated.next_surface == expected
+        assert updated.surface_count == 2
+
+    def test_surface_absorbed_jumps_180_days(self, client, tmp_path, monkeypatch):
+        from datetime import date, timedelta
+        from neocortex.config import save_clip
+        from neocortex.models import Clip
+
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+
+        save_clip(tmp_path, Clip(
+            id="abs1", source="x", content="", title="t",
+            status="inbox",
+            created_at=date.today().isoformat(),
+            next_surface=date.today().isoformat(),
+            surface_count=0,
+        ))
+
+        r = client.post(
+            "/api/daily/surface",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"clip_id": "abs1", "absorbed": True},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["absorbed"] is True
+        assert body["next_surface"] == (date.today() + timedelta(days=180)).isoformat()
+
+
 class TestReadWebSocket:
     """WS /api/read/ws — streams progress events + final ReadResult."""
 

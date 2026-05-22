@@ -24,8 +24,16 @@ from neocortex.models import (
     HealthPulse,
     Language,
     Profile,
+    SurfaceUpdate,
     SurfacingItem,
 )
+
+# Spaced-resurfacing schedule (days). Mirrors cmd_daily.SURFACE_INTERVALS;
+# kept duplicated here so the service doesn't import cmd_daily (Rich +
+# Typer pulled in).
+_SURFACE_INTERVALS = [3, 7, 14, 30, 60]
+_ABSORBED_DAYS = 180  # clip is mature — push way out
+_OVERFLOW_DAYS = 90   # ran out of intervals — repeat quarterly
 
 
 async def build_briefing(
@@ -77,6 +85,7 @@ async def build_briefing(
         # full path. We rebuild relative to notes_dir so the GUI can open it.
         saved = _guess_clip_path(notes_dir, clip)
         surfacing_items.append(SurfacingItem(
+            clip_id=clip.id,
             saved_path=str(saved) if saved else "",
             title=clip.title or "(untitled)",
             summary=clip.summary or "",
@@ -118,6 +127,43 @@ async def build_briefing(
         cluster_suggestions=cluster_suggestions,
         uncompiled_count=uncompiled,
         health_pulse=pulse,
+    )
+
+
+def mark_surfaced(
+    *, notes_dir: Path, clip_id: str, absorbed: bool = False,
+) -> SurfaceUpdate | None:
+    """Advance a clip's surface schedule. Returns None if no clip matches.
+
+    Mirrors cmd_daily._update_surface_schedule for one clip:
+        absorbed=True       → next_surface = today + 180d
+        surface_count < 5   → SURFACE_INTERVALS[surface_count]
+        otherwise           → +90d (quarterly maintenance)
+    """
+    from datetime import timedelta
+    from neocortex.config import load_clips, save_clip
+
+    clips = load_clips(notes_dir)
+    target = next((c for c in clips if c.id == clip_id), None)
+    if target is None:
+        return None
+
+    today = date.today()
+    target.surface_count += 1
+    if absorbed:
+        next_days = _ABSORBED_DAYS
+    elif target.surface_count < len(_SURFACE_INTERVALS):
+        next_days = _SURFACE_INTERVALS[target.surface_count]
+    else:
+        next_days = _OVERFLOW_DAYS
+    target.next_surface = (today + timedelta(days=next_days)).isoformat()
+
+    save_clip(notes_dir, target)
+    return SurfaceUpdate(
+        clip_id=target.id,
+        next_surface=target.next_surface,
+        surface_count=target.surface_count,
+        absorbed=absorbed,
     )
 
 

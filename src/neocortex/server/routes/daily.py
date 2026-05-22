@@ -8,10 +8,16 @@ endpoint so the user can do it explicitly via the GUI.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
-from neocortex.models import DailyBriefing
-from neocortex.services.daily import build_briefing
+from neocortex.models import DailyBriefing, SurfaceUpdate
+from neocortex.services.daily import build_briefing, mark_surfaced
+
+
+class SurfaceRequest(BaseModel):
+    clip_id: str = Field(..., min_length=1)
+    absorbed: bool = False
 
 
 def make_router(require_token) -> APIRouter:
@@ -36,5 +42,22 @@ def make_router(require_token) -> APIRouter:
             lang=cfg.output_settings.language,
             with_llm=llm,
         )
+
+    @router.post(
+        "/daily/surface",
+        response_model=SurfaceUpdate,
+        dependencies=[Depends(require_token)],
+    )
+    async def surface_endpoint(req: SurfaceRequest) -> SurfaceUpdate:
+        from neocortex.config import get_notes_dir
+
+        result = mark_surfaced(
+            notes_dir=get_notes_dir(),
+            clip_id=req.clip_id,
+            absorbed=req.absorbed,
+        )
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"clip {req.clip_id!r} not found")
+        return result
 
     return router

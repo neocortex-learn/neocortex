@@ -537,6 +537,7 @@ class ConceptMap(BaseModel):
 
 class SurfacingItem(BaseModel):
     """A clip that should be re-surfaced today (saved 3/7/14/30/60 days ago)."""
+    clip_id: str = ""           # 8-char uuid from save_clip; required for /api/daily/surface
     saved_path: str
     title: str
     summary: str = ""
@@ -546,6 +547,14 @@ class SurfacingItem(BaseModel):
     context_update: str = ""
     # True when the concept this clip touches has matured (≥3 evidences).
     absorbed: bool = False
+
+
+class SurfaceUpdate(BaseModel):
+    """Result of marking a clip as surfaced (or absorbed)."""
+    clip_id: str
+    next_surface: str        # YYYY-MM-DD, when this clip will resurface next
+    surface_count: int       # how many times it's been surfaced now
+    absorbed: bool           # True → next_surface jumped to +180 days
 
 
 class ClusterSuggestion(BaseModel):
