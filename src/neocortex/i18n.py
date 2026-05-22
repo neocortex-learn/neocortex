@@ -1170,6 +1170,26 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "{count} items not yet compiled into your knowledge graph",
         "zh": "{count} 条内容尚未编译进知识图谱",
     },
+    "daily_health_title": {
+        "en": "Knowledge Base Health",
+        "zh": "知识库健康",
+    },
+    "daily_lint_score": {
+        "en": "Lint score: {score}/100",
+        "zh": "Lint 分数：{score}/100",
+    },
+    "daily_fidelity_score": {
+        "en": "Fidelity: {score}/100",
+        "zh": "忠实度：{score}/100",
+    },
+    "daily_no_lint": {
+        "en": "No lint history. Run: neocortex kb lint",
+        "zh": "暂无 lint 记录，运行：neocortex kb lint",
+    },
+    "daily_stale_lint": {
+        "en": "Last lint was {days}+ days ago",
+        "zh": "上次 lint 已过 {days} 天",
+    },
 
     # ── Explore ──
     "explore_title": {"en": "Explore", "zh": "站点探索"},

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json as json_lib
+import re
 from datetime import date, timedelta
+from pathlib import Path
 
 import typer
 
@@ -51,6 +53,7 @@ def daily() -> None:
 
     _detect_clusters(all_clips, lang)
     _check_uncompiled(notes_dir, lang)
+    _show_health_pulse(notes_dir, lang)
 
 
 def _get_context_updates(surfacing: list, notes_dir, lang) -> list[dict]:
@@ -229,3 +232,109 @@ def _check_uncompiled(notes_dir, lang) -> None:
         console.print(f"  \U0001f4e6 {t('daily_uncompiled', lang, count=str(uncompiled))}")
         console.print("     \u2192 neocortex kb compile")
         console.print()
+
+
+def _read_report_scores(reports_dir: Path, prefix: str, score_key: str) -> list[tuple[str, int]]:
+    """Read (date, score) pairs from report files matching prefix-*.md."""
+    if not reports_dir.exists():
+        return []
+    results: list[tuple[str, int]] = []
+    for rp in sorted(reports_dir.glob(f"{prefix}-*.md"), reverse=True):
+        try:
+            content = rp.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        m = re.search(rf"^{score_key}:\s*(\d+)", content, re.MULTILINE)
+        if m:
+            date_str = rp.stem.replace(f"{prefix}-", "")
+            results.append((date_str, int(m.group(1))))
+    return results
+
+
+def _sparkline(scores: list[int]) -> str:
+    """Generate a simple ASCII sparkline from a list of scores."""
+    if not scores:
+        return ""
+    blocks = " ▁▂▃▄▅▆▇█"
+    lo, hi = min(scores), max(scores)
+    spread = hi - lo if hi > lo else 1
+    return "".join(blocks[min(8, int((s - lo) / spread * 8))] for s in scores)
+
+
+def _show_health_pulse(notes_dir: Path, lang) -> None:
+    """Show a compact health pulse: lint score + fidelity trend."""
+    reports_dir = notes_dir / "_reports"
+    lint_scores = _read_report_scores(reports_dir, "lint", "score")
+    verify_scores = _read_report_scores(reports_dir, "verify", "fidelity_score")
+
+    if not lint_scores and not verify_scores:
+        console.print(f"  \U0001f3e5 {t('daily_no_lint', lang)}")
+        console.print()
+        return
+
+    console.print(f"  [bold]{t('daily_health_title', lang)}[/bold]")
+
+    if lint_scores:
+        latest_date, latest_score = lint_scores[0]
+        if latest_score >= 80:
+            style = "green"
+        elif latest_score >= 50:
+            style = "yellow"
+        else:
+            style = "red"
+
+        trend_str = ""
+        if len(lint_scores) >= 2:
+            delta = latest_score - lint_scores[1][1]
+            if delta > 0:
+                trend_str = f" [green]▲+{delta}[/green]"
+            elif delta < 0:
+                trend_str = f" [red]▼{delta}[/red]"
+
+        sparkline = ""
+        if len(lint_scores) >= 3:
+            recent = [s for _, s in reversed(lint_scores[:8])]
+            sparkline = f" [dim]{_sparkline(recent)}[/dim]"
+
+        console.print(
+            f"  \U0001f3af [{style}]{t('daily_lint_score', lang, score=str(latest_score))}[/{style}]"
+            f"{trend_str}{sparkline}"
+        )
+
+        # Staleness warning: lint older than 7 days
+        try:
+            days_ago = (date.today() - date.fromisoformat(latest_date)).days
+            if days_ago >= 7:
+                console.print(f"     [dim]{t('daily_stale_lint', lang, days=str(days_ago))}[/dim]")
+                console.print("     \u2192 neocortex kb lint")
+        except ValueError:
+            pass
+
+    if verify_scores:
+        latest_date, latest_score = verify_scores[0]
+        if latest_score >= 80:
+            style = "green"
+        elif latest_score >= 50:
+            style = "yellow"
+        else:
+            style = "red"
+
+        trend_str = ""
+        if len(verify_scores) >= 2:
+            delta = latest_score - verify_scores[1][1]
+            if delta > 0:
+                trend_str = f" [green]▲+{delta}[/green]"
+            elif delta < 0:
+                trend_str = f" [red]▼{delta}[/red]"
+
+        sparkline = ""
+        if len(verify_scores) >= 3:
+            recent = [s for _, s in reversed(verify_scores[:8])]
+            sparkline = f" [dim]{_sparkline(recent)}[/dim]"
+
+        console.print(
+            f"  \U0001f50d [{style}]{t('daily_fidelity_score', lang, score=str(latest_score))}[/{style}]"
+            f"{trend_str}{sparkline}"
+        )
+
+    console.print()

@@ -151,6 +151,12 @@ def save_config(config: AppConfig) -> None:
         raise
 
 
+def is_experimental(feature: str) -> bool:
+    """Check if an experimental feature is enabled in config."""
+    cfg = load_config()
+    return feature in cfg.experimental
+
+
 def load_profile() -> Profile:
     path = _profile_path()
     if not path.exists():

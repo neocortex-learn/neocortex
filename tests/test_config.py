@@ -8,6 +8,7 @@ from neocortex.config import (
     _ENC_PREFIX,
     _decrypt,
     _encrypt,
+    is_experimental,
     load_config,
     load_profile,
     save_config,
@@ -222,3 +223,44 @@ class TestI18n:
 
     def test_missing_key_returns_key_zh(self):
         assert t("nonexistent_key_abc", Language.ZH) == "nonexistent_key_abc"
+
+
+# ── Experimental features ──
+
+
+class TestExperimental:
+    def test_default_no_experimental(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        cfg = AppConfig()
+        assert cfg.experimental == []
+
+    def test_enable_experimental(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        cfg = AppConfig(experimental=["auto_compile"])
+        save_config(cfg)
+
+        loaded = load_config()
+        assert "auto_compile" in loaded.experimental
+
+    def test_is_experimental_true(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        cfg = AppConfig(experimental=["auto_compile"])
+        save_config(cfg)
+
+        assert is_experimental("auto_compile") is True
+        assert is_experimental("nonexistent") is False
+
+    def test_is_experimental_empty_config(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        cfg = AppConfig()
+        save_config(cfg)
+
+        assert is_experimental("anything") is False
+
+    def test_experimental_survives_roundtrip(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        cfg = AppConfig(experimental=["feature_a", "feature_b"])
+        save_config(cfg)
+
+        loaded = load_config()
+        assert set(loaded.experimental) == {"feature_a", "feature_b"}

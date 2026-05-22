@@ -347,3 +347,134 @@ class TestEmptyCases:
         from neocortex.cmd_clip import _inbox_synthesize
 
         _inbox_synthesize([], tmp_path / "notes", Language.EN)
+
+
+# ── Health pulse ──
+
+
+class TestHealthPulse:
+    def test_no_reports_shows_suggestion(self, tmp_path):
+        from neocortex.cmd_daily import _show_health_pulse
+
+        notes_dir = tmp_path / "notes"
+        notes_dir.mkdir(exist_ok=True)
+        _show_health_pulse(notes_dir, Language.EN)
+
+    def test_lint_report_shows_score(self, tmp_path):
+        from neocortex.cmd_daily import _show_health_pulse
+
+        notes_dir = tmp_path / "notes"
+        reports_dir = notes_dir / "_reports"
+        reports_dir.mkdir(parents=True)
+
+        (reports_dir / "lint-2026-04-14.md").write_text(
+            "---\ntype: lint-report\ndate: 2026-04-14\nscore: 75\n---\n",
+            encoding="utf-8",
+        )
+
+        _show_health_pulse(notes_dir, Language.EN)
+
+    def test_lint_trend_with_two_reports(self, tmp_path):
+        from neocortex.cmd_daily import _show_health_pulse
+
+        notes_dir = tmp_path / "notes"
+        reports_dir = notes_dir / "_reports"
+        reports_dir.mkdir(parents=True)
+
+        (reports_dir / "lint-2026-04-13.md").write_text(
+            "---\nscore: 70\n---\n", encoding="utf-8",
+        )
+        (reports_dir / "lint-2026-04-14.md").write_text(
+            "---\nscore: 80\n---\n", encoding="utf-8",
+        )
+
+        _show_health_pulse(notes_dir, Language.EN)
+
+    def test_verify_report_shows_fidelity(self, tmp_path):
+        from neocortex.cmd_daily import _show_health_pulse
+
+        notes_dir = tmp_path / "notes"
+        reports_dir = notes_dir / "_reports"
+        reports_dir.mkdir(parents=True)
+
+        (reports_dir / "verify-2026-04-14.md").write_text(
+            "---\nfidelity_score: 85\n---\n", encoding="utf-8",
+        )
+
+        _show_health_pulse(notes_dir, Language.EN)
+
+    def test_both_reports(self, tmp_path):
+        from neocortex.cmd_daily import _show_health_pulse
+
+        notes_dir = tmp_path / "notes"
+        reports_dir = notes_dir / "_reports"
+        reports_dir.mkdir(parents=True)
+
+        (reports_dir / "lint-2026-04-14.md").write_text(
+            "---\nscore: 90\n---\n", encoding="utf-8",
+        )
+        (reports_dir / "verify-2026-04-14.md").write_text(
+            "---\nfidelity_score: 88\n---\n", encoding="utf-8",
+        )
+
+        _show_health_pulse(notes_dir, Language.EN)
+
+
+class TestSparkline:
+    def test_sparkline_basic(self):
+        from neocortex.cmd_daily import _sparkline
+
+        result = _sparkline([50, 60, 70, 80, 90, 100])
+        assert len(result) == 6
+        assert result[0] != result[-1]
+
+    def test_sparkline_flat(self):
+        from neocortex.cmd_daily import _sparkline
+
+        result = _sparkline([80, 80, 80])
+        assert len(result) == 3
+
+    def test_sparkline_empty(self):
+        from neocortex.cmd_daily import _sparkline
+
+        assert _sparkline([]) == ""
+
+
+class TestReadReportScores:
+    def test_reads_lint_scores(self, tmp_path):
+        from neocortex.cmd_daily import _read_report_scores
+
+        reports_dir = tmp_path / "_reports"
+        reports_dir.mkdir()
+
+        (reports_dir / "lint-2026-04-10.md").write_text(
+            "---\nscore: 70\n---\n", encoding="utf-8",
+        )
+        (reports_dir / "lint-2026-04-12.md").write_text(
+            "---\nscore: 85\n---\n", encoding="utf-8",
+        )
+
+        scores = _read_report_scores(reports_dir, "lint", "score")
+        assert len(scores) == 2
+        assert scores[0] == ("2026-04-12", 85)
+        assert scores[1] == ("2026-04-10", 70)
+
+    def test_no_reports_dir(self, tmp_path):
+        from neocortex.cmd_daily import _read_report_scores
+
+        scores = _read_report_scores(tmp_path / "nonexistent", "lint", "score")
+        assert scores == []
+
+    def test_reads_verify_scores(self, tmp_path):
+        from neocortex.cmd_daily import _read_report_scores
+
+        reports_dir = tmp_path / "_reports"
+        reports_dir.mkdir()
+
+        (reports_dir / "verify-2026-04-14.md").write_text(
+            "---\nfidelity_score: 92\n---\n", encoding="utf-8",
+        )
+
+        scores = _read_report_scores(reports_dir, "verify", "fidelity_score")
+        assert len(scores) == 1
+        assert scores[0] == ("2026-04-14", 92)

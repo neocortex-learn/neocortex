@@ -24,7 +24,10 @@ from neocortex.reader.chunker import (
 from neocortex.reader.fetcher import ContentFetcher, Document, Section
 from neocortex.reader.teacher import (
     _style_instruction,
+    generate_flashcards,
+    generate_notes,
     generate_outline,
+    generate_scan_summary,
 )
 
 
@@ -359,3 +362,285 @@ class TestStyleInstruction:
         profile = _make_profile(persona=Persona(learning_style=None))
         result = _style_instruction(profile)
         assert result == ""
+
+
+# ===========================================================================
+# 4. generate_notes
+# ===========================================================================
+
+
+class TestGenerateNotes:
+    @pytest.mark.asyncio
+    async def test_basic_note_generation(self):
+        provider = _make_provider_mock("## Key Insight\nThis is important.")
+        profile = _make_profile()
+        doc = Document(
+            title="Test Article",
+            content="Full article content about testing.",
+            source="https://example.com/test",
+            sections=[
+                Section(title="Introduction", content="Intro paragraph.", level=1),
+            ],
+        )
+        outline = Outline(
+            items=[OutlineItem(title="Introduction", marker="brief", reason="Basic")],
+            source="https://example.com/test",
+        )
+
+        result = await generate_notes(doc, outline, profile, provider)
+
+        assert "# Test Article" in result
+        assert "Source: https://example.com/test" in result
+        assert "Key Insight" in result
+
+    @pytest.mark.asyncio
+    async def test_note_with_mindmap(self):
+        provider = _make_provider_mock("Content section.")
+        profile = _make_profile()
+        doc = Document(
+            title="Testing",
+            content="Content.",
+            source="test.md",
+            sections=[
+                Section(title="Deep Topic", content="Deep content.", level=1),
+                Section(title="Brief Topic", content="Brief content.", level=1),
+            ],
+        )
+        outline = Outline(
+            items=[
+                OutlineItem(title="Deep Topic", marker="deep", reason="Gap"),
+                OutlineItem(title="Brief Topic", marker="brief", reason="Review"),
+            ],
+            source="test.md",
+        )
+
+        result = await generate_notes(doc, outline, profile, provider)
+
+        assert "```mermaid" in result
+        assert "mindmap" in result
+        assert "Deep Dive" in result
+        assert "Review" in result
+
+    @pytest.mark.asyncio
+    async def test_note_with_question(self):
+        call_count = 0
+
+        async def multi_response(messages, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return "Main notes content."
+            return "## Answer\nHere is the answer to your question."
+
+        provider = _make_provider_mock("")
+        provider.chat = multi_response
+        profile = _make_profile()
+        doc = Document(
+            title="Doc",
+            content="Content.",
+            source="test.md",
+            sections=[Section(title="S", content="C.", level=1)],
+        )
+        outline = Outline(
+            items=[OutlineItem(title="S", marker="brief", reason="R")],
+            source="test.md",
+        )
+
+        result = await generate_notes(
+            doc, outline, profile, provider, question="What is X?",
+        )
+
+        assert call_count == 2
+        assert "Answer" in result
+
+    @pytest.mark.asyncio
+    async def test_note_chinese_header(self):
+        provider = _make_provider_mock("笔记内容。")
+        profile = _make_profile(persona=Persona(language=Language.ZH))
+        doc = Document(
+            title="测试文章",
+            content="内容。",
+            source="test.md",
+            sections=[Section(title="测试", content="内容。", level=1)],
+        )
+        outline = Outline(
+            items=[OutlineItem(title="测试", marker="brief", reason="R")],
+            source="test.md",
+        )
+
+        result = await generate_notes(doc, outline, profile, provider)
+
+        assert "# 测试文章" in result
+        assert "来源:" in result
+
+
+# ===========================================================================
+# 5. generate_flashcards
+# ===========================================================================
+
+
+class TestGenerateFlashcards:
+    @pytest.mark.asyncio
+    async def test_valid_flashcards(self):
+        response = json.dumps([
+            {
+                "question": "What is Redis?",
+                "answer": "In-memory data store",
+                "concept": "Redis",
+                "difficulty": "easy",
+                "knowledge_layer": "factual",
+            },
+            {
+                "question": "When to use Redis vs Memcached?",
+                "answer": "When you need data structures",
+                "concept": "Redis",
+                "difficulty": "medium",
+                "knowledge_layer": "conceptual",
+            },
+        ])
+        provider = _make_provider_mock(response)
+        profile = _make_profile()
+        doc = Document(title="Redis", content="Redis content.", source="s.md", sections=[])
+        outline = Outline(
+            items=[OutlineItem(title="Redis Basics", marker="deep", reason="Gap")],
+            source="s.md",
+        )
+
+        cards = await generate_flashcards(doc, outline, "Notes about Redis.", profile, provider)
+
+        assert len(cards) == 2
+        assert cards[0]["question"] == "What is Redis?"
+        assert cards[0]["knowledge_layer"] == "factual"
+        assert cards[1]["knowledge_layer"] == "conceptual"
+
+    @pytest.mark.asyncio
+    async def test_flashcards_invalid_json_fallback(self):
+        response = 'Some text before [{"question": "Q?", "answer": "A"}] after'
+        provider = _make_provider_mock(response)
+        profile = _make_profile()
+        doc = Document(title="T", content="C.", source="s.md", sections=[])
+        outline = Outline(items=[], source="s.md")
+
+        cards = await generate_flashcards(doc, outline, "Notes.", profile, provider)
+
+        assert len(cards) == 1
+        assert cards[0]["question"] == "Q?"
+
+    @pytest.mark.asyncio
+    async def test_flashcards_total_garbage_returns_empty(self):
+        provider = _make_provider_mock("This is not JSON at all, no brackets here")
+        profile = _make_profile()
+        doc = Document(title="T", content="C.", source="s.md", sections=[])
+        outline = Outline(items=[], source="s.md")
+
+        cards = await generate_flashcards(doc, outline, "Notes.", profile, provider)
+        assert cards == []
+
+    @pytest.mark.asyncio
+    async def test_flashcards_skips_incomplete_items(self):
+        response = json.dumps([
+            {"question": "Q?"},  # missing answer
+            {"answer": "A"},  # missing question
+            {"question": "Good Q?", "answer": "Good A"},
+        ])
+        provider = _make_provider_mock(response)
+        profile = _make_profile()
+        doc = Document(title="T", content="C.", source="s.md", sections=[])
+        outline = Outline(items=[], source="s.md")
+
+        cards = await generate_flashcards(doc, outline, "Notes.", profile, provider)
+        assert len(cards) == 1
+        assert cards[0]["question"] == "Good Q?"
+
+    @pytest.mark.asyncio
+    async def test_flashcards_default_fields(self):
+        response = json.dumps([{"question": "Q?", "answer": "A"}])
+        provider = _make_provider_mock(response)
+        profile = _make_profile()
+        doc = Document(title="T", content="C.", source="s.md", sections=[])
+        outline = Outline(items=[], source="s.md")
+
+        cards = await generate_flashcards(doc, outline, "Notes.", profile, provider)
+        assert cards[0]["concept"] == ""
+        assert cards[0]["difficulty"] == "medium"
+        assert cards[0]["knowledge_layer"] == "conceptual"
+
+
+# ===========================================================================
+# 6. generate_scan_summary
+# ===========================================================================
+
+
+class TestGenerateScanSummary:
+    @pytest.mark.asyncio
+    async def test_valid_summary(self):
+        response = json.dumps({
+            "summary": "Great article on caching",
+            "priority": "P0",
+            "relevant_gaps": ["caching", "performance"],
+        })
+        provider = _make_provider_mock(response)
+        profile = _make_profile()
+        doc = Document(
+            title="Redis Caching",
+            content="Deep dive into Redis caching patterns.",
+            source="https://example.com",
+            sections=[],
+        )
+
+        result = await generate_scan_summary(doc, profile, provider)
+
+        assert result["summary"] == "Great article on caching"
+        assert result["priority"] == "P0"
+        assert result["relevant_gaps"] == ["caching", "performance"]
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_fallback(self):
+        provider = _make_provider_mock("Not JSON at all, no braces")
+        profile = _make_profile()
+        doc = Document(title="Fallback Test", content="C.", source="s.md", sections=[])
+
+        result = await generate_scan_summary(doc, profile, provider)
+
+        assert result["summary"] == "Fallback Test"
+        assert result["priority"] == "P2"
+        assert result["relevant_gaps"] == []
+
+    @pytest.mark.asyncio
+    async def test_invalid_priority_normalized(self):
+        response = json.dumps({
+            "summary": "Some article",
+            "priority": "URGENT",
+            "relevant_gaps": [],
+        })
+        provider = _make_provider_mock(response)
+        profile = _make_profile()
+        doc = Document(title="T", content="C.", source="s.md", sections=[])
+
+        result = await generate_scan_summary(doc, profile, provider)
+        assert result["priority"] == "P2"
+
+    @pytest.mark.asyncio
+    async def test_non_list_gaps_normalized(self):
+        response = json.dumps({
+            "summary": "Article",
+            "priority": "P1",
+            "relevant_gaps": "not a list",
+        })
+        provider = _make_provider_mock(response)
+        profile = _make_profile()
+        doc = Document(title="T", content="C.", source="s.md", sections=[])
+
+        result = await generate_scan_summary(doc, profile, provider)
+        assert result["relevant_gaps"] == []
+
+    @pytest.mark.asyncio
+    async def test_json_wrapped_in_text(self):
+        response = 'Here is the result: {"summary": "Good", "priority": "P1", "relevant_gaps": ["x"]} done'
+        provider = _make_provider_mock(response)
+        profile = _make_profile()
+        doc = Document(title="T", content="C.", source="s.md", sections=[])
+
+        result = await generate_scan_summary(doc, profile, provider)
+        assert result["summary"] == "Good"
+        assert result["priority"] == "P1"

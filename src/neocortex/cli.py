@@ -502,6 +502,8 @@ def config(
     language: str = typer.Option(None, help="Note language (en/zh)"),
     github_token: str = typer.Option(None, "--github-token", help="GitHub Personal Access Token"),
     notes_dir: str = typer.Option(None, "--notes-dir", help="Notes directory path"),
+    enable_experimental: str = typer.Option(None, "--enable-experimental", help="Enable an experimental feature"),
+    disable_experimental: str = typer.Option(None, "--disable-experimental", help="Disable an experimental feature"),
 ) -> None:
     """Configure LLM provider, API key, and preferences."""
     from neocortex.config import load_config, save_config
@@ -510,7 +512,10 @@ def config(
     cfg = load_config()
     lang = cfg.output_settings.language
 
-    has_updates = any(v is not None for v in [provider, api_key, base_url, model, language, github_token, notes_dir])
+    has_updates = any(v is not None for v in [
+        provider, api_key, base_url, model, language, github_token, notes_dir,
+        enable_experimental, disable_experimental,
+    ])
 
     if not has_updates:
         console.print()
@@ -523,6 +528,8 @@ def config(
         console.print(f"  github_token:  {_mask_api_key(cfg.github_token)}")
         console.print(f"  language:      {cfg.output_settings.language.value}")
         console.print(f"  notes_dir:     {cfg.output_settings.notes_dir}")
+        if cfg.experimental:
+            console.print(f"  experimental:  {', '.join(sorted(cfg.experimental))}")
         console.print()
         return
 
@@ -555,6 +562,16 @@ def config(
 
     if notes_dir is not None:
         cfg.output_settings.notes_dir = notes_dir
+
+    if enable_experimental is not None:
+        if enable_experimental not in cfg.experimental:
+            cfg.experimental.append(enable_experimental)
+            console.print(f"  [green]Enabled experimental feature: {enable_experimental}[/green]")
+
+    if disable_experimental is not None:
+        if disable_experimental in cfg.experimental:
+            cfg.experimental.remove(disable_experimental)
+            console.print(f"  [yellow]Disabled experimental feature: {disable_experimental}[/yellow]")
 
     save_config(cfg)
     console.print(f"  {t('config_saved', cfg.output_settings.language)}")

@@ -14,8 +14,12 @@ from neocortex.compiler import (
     _parse_concept_frontmatter,
     compile_all,
     compile_note,
+    detect_conflicts,
+    extract_claims,
     extract_concepts,
+    generate_concept_entry,
     generate_index,
+    generate_overview,
     insert_wikilinks,
 )
 from neocortex.models import (
@@ -573,3 +577,265 @@ class TestCompileAll:
 
         assert len(progress_calls) >= 1
         assert progress_calls[0] == (1, 1)
+
+
+# ── Collect all concepts ──
+
+
+class TestCollectAllConcepts:
+    def test_collects_from_concepts_dir(self, notes_dir):
+        concepts_dir = notes_dir / "concepts"
+        concepts_dir.mkdir()
+        (concepts_dir / "redis.md").write_text(
+            "---\ntype: concept\nname: Redis\nevidence_count: 3\n"
+            "source_notes: [note1.md]\n---\n\n# Redis\nIn-memory store.",
+            encoding="utf-8",
+        )
+        (concepts_dir / "kafka.md").write_text(
+            "---\ntype: concept\nname: Kafka\nevidence_count: 1\n"
+            "source_notes: []\n---\n\n# Kafka\nEvent streaming.",
+            encoding="utf-8",
+        )
+
+        entries = collect_all_concepts(concepts_dir)
+        assert len(entries) == 2
+        names = {e.name for e in entries}
+        assert names == {"Redis", "Kafka"}
+
+    def test_empty_dir(self, notes_dir):
+        concepts_dir = notes_dir / "concepts"
+        concepts_dir.mkdir()
+        entries = collect_all_concepts(concepts_dir)
+        assert entries == []
+
+    def test_nonexistent_dir(self, notes_dir):
+        entries = collect_all_concepts(notes_dir / "nonexistent")
+        assert entries == []
+
+    def test_skips_unreadable_files(self, notes_dir):
+        concepts_dir = notes_dir / "concepts"
+        concepts_dir.mkdir()
+        bad = concepts_dir / "bad.md"
+        bad.write_bytes(b"\x80\x81\x82")  # invalid utf-8
+
+        (concepts_dir / "good.md").write_text(
+            "---\nname: Good\n---\n# Good", encoding="utf-8",
+        )
+
+        entries = collect_all_concepts(concepts_dir)
+        assert len(entries) >= 1
+        assert any(e.name == "Good" for e in entries)
+
+    def test_fallback_name_from_stem(self, notes_dir):
+        concepts_dir = notes_dir / "concepts"
+        concepts_dir.mkdir()
+        (concepts_dir / "my-concept.md").write_text(
+            "# Just a heading\nNo frontmatter name.", encoding="utf-8",
+        )
+
+        entries = collect_all_concepts(concepts_dir)
+        assert len(entries) == 1
+        assert entries[0].name == "my-concept"
+
+
+# ── Extract claims ──
+
+
+class TestExtractClaims:
+    @pytest.mark.asyncio
+    async def test_extract_claims_basic(self, mock_provider):
+        mock_provider.chat.return_value = json.dumps([
+            {"claim": "Redis supports pub/sub", "concept": "Redis", "context": "messaging"},
+            {"claim": "Redis is single-threaded", "concept": "Redis", "context": "architecture"},
+        ])
+
+        claims = await extract_claims("Redis notes content", mock_provider)
+        assert len(claims) == 2
+        assert claims[0]["claim"] == "Redis supports pub/sub"
+        assert claims[0]["concept"] == "Redis"
+
+    @pytest.mark.asyncio
+    async def test_extract_claims_invalid_json(self, mock_provider):
+        mock_provider.chat.return_value = "not json at all"
+        claims = await extract_claims("content", mock_provider)
+        assert claims == []
+
+    @pytest.mark.asyncio
+    async def test_extract_claims_strips_markdown_fences(self, mock_provider):
+        mock_provider.chat.return_value = '```json\n[{"claim": "X is Y", "concept": "X"}]\n```'
+        claims = await extract_claims("content", mock_provider)
+        assert len(claims) == 1
+        assert claims[0]["claim"] == "X is Y"
+
+    @pytest.mark.asyncio
+    async def test_extract_claims_skips_items_without_claim(self, mock_provider):
+        mock_provider.chat.return_value = json.dumps([
+            {"concept": "Redis"},  # no "claim" key
+            {"claim": "Valid claim", "concept": "Test"},
+        ])
+        claims = await extract_claims("content", mock_provider)
+        assert len(claims) == 1
+        assert claims[0]["claim"] == "Valid claim"
+
+    @pytest.mark.asyncio
+    async def test_extract_claims_non_list_returns_empty(self, mock_provider):
+        mock_provider.chat.return_value = '{"claim": "not a list"}'
+        claims = await extract_claims("content", mock_provider)
+        assert claims == []
+
+    @pytest.mark.asyncio
+    async def test_extract_claims_missing_optional_fields(self, mock_provider):
+        mock_provider.chat.return_value = json.dumps([
+            {"claim": "Bare claim"},
+        ])
+        claims = await extract_claims("content", mock_provider)
+        assert len(claims) == 1
+        assert claims[0]["concept"] == ""
+        assert claims[0]["context"] == ""
+
+
+# ── Detect conflicts ──
+
+
+class TestDetectConflicts:
+    @pytest.mark.asyncio
+    async def test_no_matching_concepts_returns_empty(self, mock_provider):
+        new_claims = [{"claim": "X", "concept": "Redis"}]
+        existing_claims = {"Kafka": [{"claim": "Y"}]}
+
+        conflicts = await detect_conflicts(new_claims, existing_claims, mock_provider)
+        assert conflicts == []
+        mock_provider.chat.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_detect_genuine_conflict(self, mock_provider):
+        mock_provider.chat.return_value = json.dumps([
+            {
+                "pair_index": 0,
+                "type": "genuine",
+                "explanation": "Contradicts",
+                "resolution_hint": "Check version",
+            }
+        ])
+
+        new_claims = [{"claim": "Redis is multi-threaded", "concept": "Redis"}]
+        existing_claims = {"redis": [{"claim": "Redis is single-threaded", "source": "old-note.md"}]}
+
+        conflicts = await detect_conflicts(new_claims, existing_claims, mock_provider)
+        assert len(conflicts) == 1
+        assert conflicts[0]["type"] == "genuine"
+        assert conflicts[0]["claim_a"] == "Redis is single-threaded"
+        assert conflicts[0]["claim_b"] == "Redis is multi-threaded"
+
+    @pytest.mark.asyncio
+    async def test_detect_no_conflict(self, mock_provider):
+        mock_provider.chat.return_value = "[]"
+
+        new_claims = [{"claim": "Redis supports strings", "concept": "Redis"}]
+        existing_claims = {"redis": [{"claim": "Redis supports hashes"}]}
+
+        conflicts = await detect_conflicts(new_claims, existing_claims, mock_provider)
+        assert conflicts == []
+
+    @pytest.mark.asyncio
+    async def test_detect_conflicts_invalid_json(self, mock_provider):
+        mock_provider.chat.return_value = "not json"
+
+        new_claims = [{"claim": "X", "concept": "Redis"}]
+        existing_claims = {"redis": [{"claim": "Y"}]}
+
+        conflicts = await detect_conflicts(new_claims, existing_claims, mock_provider)
+        assert conflicts == []
+
+    @pytest.mark.asyncio
+    async def test_detect_conflicts_invalid_pair_index(self, mock_provider):
+        mock_provider.chat.return_value = json.dumps([
+            {"pair_index": 999, "type": "genuine", "explanation": "Bad index"},
+        ])
+
+        new_claims = [{"claim": "X", "concept": "Redis"}]
+        existing_claims = {"redis": [{"claim": "Y"}]}
+
+        conflicts = await detect_conflicts(new_claims, existing_claims, mock_provider)
+        assert conflicts == []
+
+
+# ── Generate concept entry ──
+
+
+class TestGenerateConceptEntry:
+    @pytest.mark.asyncio
+    async def test_generates_frontmatter_and_body(self, mock_provider, profile):
+        mock_provider.chat.return_value = (
+            "## One-liner\nIn-memory data store.\n\n"
+            "## Core Points\n- Fast lookups\n\n"
+            "## Open Questions\n- When to use vs Memcached?"
+        )
+
+        source_notes = [
+            {"filename": "redis-basics.md", "title": "Redis Basics", "content_preview": "Redis is..."},
+        ]
+
+        result = await generate_concept_entry(
+            "Redis", source_notes, ["Memcached"], profile, mock_provider, Language.EN,
+        )
+
+        assert "---" in result
+        assert "name: Redis" in result
+        assert "type: concept" in result
+        assert "evidence_count: 1" in result
+        assert '\"redis-basics.md\"' in result
+        assert "[[Memcached]]" in result
+        assert "In-memory data store" in result
+
+    @pytest.mark.asyncio
+    async def test_generates_chinese_sections(self, mock_provider, profile):
+        mock_provider.chat.return_value = (
+            "## 一句话理解\n内存数据存储。\n\n"
+            "## 核心要点\n- 快速查询\n\n"
+            "## 开放问题\n- 何时使用？"
+        )
+
+        result = await generate_concept_entry(
+            "Redis", [{"filename": "a.md", "title": "A"}],
+            [], profile, mock_provider, Language.ZH,
+        )
+
+        assert "来源笔记" in result
+        assert "内存数据存储" in result
+
+
+# ── Generate overview ──
+
+
+class TestGenerateOverview:
+    @pytest.mark.asyncio
+    async def test_creates_overview_file(self, notes_dir, profile, mock_provider):
+        mock_provider.chat.return_value = (
+            "## Knowledge Map\nYou focus on backend.\n\n"
+            "## Cross-Domain Connections\nRedis + Kafka.\n\n"
+            "## Belief Evolution\nNone.\n\n"
+            "## Blind Spots\nFrontend.\n\n"
+            "## Suggested Directions\nLearn React."
+        )
+
+        concepts = [
+            ConceptEntry(name="Redis", evidence_count=3, source_notes=["a.md"]),
+            ConceptEntry(name="Kafka", evidence_count=2, source_notes=["b.md"]),
+        ]
+
+        with patch("neocortex.config.load_belief_changes", return_value=[]):
+            await generate_overview(notes_dir, concepts, profile, mock_provider, Language.EN)
+
+        overview_path = notes_dir / "overview.md"
+        assert overview_path.exists()
+        content = overview_path.read_text(encoding="utf-8")
+        assert "type: overview" in content
+        assert "concepts: 2" in content
+        assert "Knowledge Map" in content
+
+    @pytest.mark.asyncio
+    async def test_overview_skips_empty_concepts(self, notes_dir, profile, mock_provider):
+        await generate_overview(notes_dir, [], profile, mock_provider, Language.EN)
+        assert not (notes_dir / "overview.md").exists()
+        mock_provider.chat.assert_not_called()
