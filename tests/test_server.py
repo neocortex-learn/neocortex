@@ -325,6 +325,133 @@ class TestSearchEndpoint:
         assert "asyncio" in body["hits"][0]["snippet"].lower()
 
 
+class TestAskEndpoint:
+    """POST /api/ask — single-turn Q&A with auto-evaluate + insight save."""
+
+    def test_ask_no_auth(self, client):
+        r = client.post(
+            "/api/ask",
+            headers={"Content-Type": "application/json"},
+            json={"question": "what is async/await?"},
+        )
+        assert r.status_code == 401
+
+    def test_ask_missing_question(self, client):
+        r = client.post(
+            "/api/ask",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={},
+        )
+        assert r.status_code == 422
+
+    def test_ask_no_provider_returns_aborted(self, client, tmp_path, monkeypatch):
+        """No api_key/provider configured → 200 + aborted=true (not 500)."""
+        from neocortex.models import AppConfig
+
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            "neocortex.config.load_config", lambda: AppConfig()
+        )
+
+        r = client.post(
+            "/api/ask",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"question": "explain map vs flatMap"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["aborted"] is True
+        assert "provider" in (body["abort_reason"] or "").lower()
+        assert body["answer"] == ""
+        assert body["saved_as_insight"] is None
+
+    def test_ask_happy_path_with_mock_provider(self, client, tmp_path, monkeypatch):
+        """Mocked LLM returns canned answer; evaluator says no-save → no insight file."""
+        from neocortex.models import AppConfig, Profile
+
+        cfg = AppConfig(provider="openai", api_key="sk-test")
+
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.load_config", lambda: cfg)
+        monkeypatch.setattr("neocortex.config.load_profile", lambda: Profile())
+
+        class FakeProvider:
+            async def chat(self, messages):
+                # Evaluator prompt has the literal "yes' or 'no" — return 'no' so
+                # we exercise the non-save path here.
+                last = messages[-1]["content"]
+                if "'yes' or 'no'" in last:
+                    return "no"
+                return "**简短答案** — async 等待异步结果。"
+            def max_context_tokens(self): return 100_000
+
+        monkeypatch.setattr(
+            "neocortex.llm.create_provider", lambda _cfg: FakeProvider()
+        )
+
+        r = client.post(
+            "/api/ask",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"question": "什么是 async/await?"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["aborted"] is False
+        assert body["answer"].startswith("**简短答案**")
+        assert body["saved_as_insight"] is None  # evaluator returned 'no'
+        assert body["elapsed_seconds"] >= 0
+
+    def test_ask_saves_insight_when_evaluator_says_yes(
+        self, client, tmp_path, monkeypatch
+    ):
+        from neocortex.models import AppConfig, Profile
+
+        cfg = AppConfig(provider="openai", api_key="sk-test")
+
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.load_config", lambda: cfg)
+        monkeypatch.setattr("neocortex.config.load_profile", lambda: Profile())
+
+        class YesProvider:
+            async def chat(self, messages):
+                last = messages[-1]["content"]
+                if "'yes' or 'no'" in last:
+                    return "yes"
+                return "RNN 维护隐藏状态，Transformer 全并行 — 这种对比连接了…"
+            def max_context_tokens(self): return 100_000
+
+        monkeypatch.setattr(
+            "neocortex.llm.create_provider", lambda _cfg: YesProvider()
+        )
+
+        r = client.post(
+            "/api/ask",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"question": "Transformer 比 RNN 强在哪？"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["aborted"] is False
+        assert body["saved_as_insight"] is not None
+        assert body["saved_as_insight"].startswith("insights/")
+        assert (tmp_path / body["saved_as_insight"]).exists()
+
+
 class TestRuntimeFiles:
     def test_provision_writes_files(self, tmp_path, monkeypatch):
         """runtime.provision_runtime writes pid/port/token to ~/.neocortex/."""

@@ -500,6 +500,23 @@ class ReadResult(BaseModel):
     abort_reason: str | None = None
 
 
+class AskResult(BaseModel):
+    """ask 操作的结构化结果：一问一答 + 是否自动 save 为 insight。
+
+    Query 反写：若 LLM 判定回答含新综合 / 跨概念连接（``evaluate_insight_value``
+    返回 True），自动写入 insights/ 并返回相对路径。否则 ``saved_as_insight=None``。
+
+    Aborted（provider 未配置 / LLM 调用失败）：``aborted=True`` + ``abort_reason``，
+    answer 为空字符串。
+    """
+    question: str
+    answer: str
+    saved_as_insight: str | None = None  # vault 相对路径或 None
+    elapsed_seconds: float = 0.0
+    aborted: bool = False
+    abort_reason: str | None = None
+
+
 class ClipResult(BaseModel):
     """clip 操作的结构化结果，供 CLI / GUI 统一消费。
 
