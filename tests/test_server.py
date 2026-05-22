@@ -277,6 +277,54 @@ class TestDeleteNoteEndpoint:
         assert "clip:abc" not in updated
 
 
+class TestSearchEndpoint:
+    """GET /api/search — FTS5 search."""
+
+    def test_search_no_auth(self, client):
+        r = client.get("/api/search", params={"q": "test"})
+        assert r.status_code == 401
+
+    def test_search_empty_query_400(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        r = client.get(
+            "/api/search",
+            params={"q": "  "},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert r.status_code == 400
+
+    def test_search_no_index_returns_empty(self, client, tmp_path, monkeypatch):
+        """Empty vault (no SQLite file yet) → 200 with hits=[] rather than 500."""
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        r = client.get(
+            "/api/search",
+            params={"q": "anything"},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["hits"] == []
+        assert body["query"] == "anything"
+        assert body["mode"] == "fts"
+
+    def test_search_finds_indexed_note(self, client, tmp_path, monkeypatch):
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        from neocortex.search import NoteIndex
+        idx = NoteIndex(tmp_path / "neocortex.sqlite")
+        idx.index_note("hello.md", "Hello World", "this fragment mentions asyncio gather concurrency")
+
+        r = client.get(
+            "/api/search",
+            params={"q": "asyncio"},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["hits"]) == 1
+        assert body["hits"][0]["filename"] == "hello.md"
+        assert "asyncio" in body["hits"][0]["snippet"].lower()
+
+
 class TestRuntimeFiles:
     def test_provision_writes_files(self, tmp_path, monkeypatch):
         """runtime.provision_runtime writes pid/port/token to ~/.neocortex/."""
