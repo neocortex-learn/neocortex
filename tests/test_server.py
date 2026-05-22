@@ -452,6 +452,94 @@ class TestAskEndpoint:
         assert (tmp_path / body["saved_as_insight"]).exists()
 
 
+class TestReadWebSocket:
+    """WS /api/read/ws — streams progress events + final ReadResult."""
+
+    def test_ws_bad_token_rejected(self, client):
+        # No token at all → 1008 close before accept.
+        with pytest.raises(Exception):
+            with client.websocket_connect("/api/read/ws") as ws:
+                ws.receive_json()  # should never arrive
+
+    def test_ws_streams_progress_and_done(self, client, tmp_path, monkeypatch):
+        """Mock fetcher + LLM so the pipeline runs end-to-end fast."""
+        from neocortex.models import AppConfig, Outline, OutlineItem, Profile
+        from neocortex.reader.fetcher import Document
+
+        cfg = AppConfig(provider="openai", api_key="sk-test")
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.load_config", lambda: cfg)
+        monkeypatch.setattr("neocortex.config.load_profile", lambda: Profile())
+
+        class StubFetcher:
+            def __init__(self, *_, **__): pass
+            async def fetch(self, source):
+                return Document(
+                    title="Stub Article", source=source,
+                    content="A short fake article body for chunking.",
+                )
+
+        async def stub_outline(*_args, **_kwargs):
+            return Outline(source="stub", items=[
+                OutlineItem(title="Stub Topic", marker="deep", reason="r"),
+            ])
+
+        async def stub_notes(*_args, on_chunk=None, **_kwargs):
+            # Pretend 2 chunks so we get two progress events.
+            if on_chunk:
+                await on_chunk(1, 2)
+                await on_chunk(2, 2)
+            return "# Stub Article\n\nfake body content"
+
+        monkeypatch.setattr(
+            "neocortex.reader.fetcher.ContentFetcher", StubFetcher
+        )
+        monkeypatch.setattr(
+            "neocortex.reader.teacher.generate_outline", stub_outline
+        )
+        monkeypatch.setattr(
+            "neocortex.reader.teacher.generate_notes", stub_notes
+        )
+
+        class FakeProvider:
+            def max_context_tokens(self): return 100_000
+        monkeypatch.setattr(
+            "neocortex.llm.create_provider", lambda _cfg: FakeProvider()
+        )
+
+        events: list[dict] = []
+        with client.websocket_connect(
+            "/api/read/ws",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Host": EXPECTED_HOST,
+            },
+        ) as ws:
+            ws.send_json({"source": "https://example.com/article"})
+            # Drain until we see 'done' or hit a sensible cap.
+            for _ in range(20):
+                msg = ws.receive_json()
+                events.append(msg)
+                if msg.get("type") == "done":
+                    break
+
+        phases = [e["phase"] for e in events if e.get("type") == "progress"]
+        assert "fetch" in phases
+        assert "outline" in phases
+        assert "chunk" in phases
+        assert "save" in phases
+
+        done = events[-1]
+        assert done["type"] == "done"
+        assert done["result"]["aborted"] is False
+        assert done["result"]["title"] == "Stub Article"
+        assert done["result"]["word_count"] >= 1
+        # File actually written
+        from pathlib import Path
+        assert Path(done["result"]["saved_path"]).exists()
+
+
 class TestRuntimeFiles:
     def test_provision_writes_files(self, tmp_path, monkeypatch):
         """runtime.provision_runtime writes pid/port/token to ~/.neocortex/."""

@@ -54,7 +54,11 @@ def create_app(token: str, port: int) -> FastAPI:
     from neocortex.server.routes.search import make_router as _search_router
     app.include_router(_clip_router(require_token))
     app.include_router(_notes_router(require_token))
-    app.include_router(_read_router(require_token))
+    app.include_router(_read_router(
+        require_token,
+        expected_token=token,
+        expected_host=expected_host,
+    ))
     app.include_router(_search_router(require_token))
     app.include_router(_ask_router(require_token))
 

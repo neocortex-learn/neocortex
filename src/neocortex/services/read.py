@@ -16,6 +16,7 @@ from __future__ import annotations
 import time
 from datetime import date
 from pathlib import Path
+from typing import Any, Awaitable, Callable
 
 from neocortex.models import (
     AppConfig,
@@ -23,6 +24,19 @@ from neocortex.models import (
     Profile,
     ReadResult,
 )
+
+ProgressCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+
+
+async def _emit(cb: ProgressCallback | None, phase: str, **payload: Any) -> None:
+    """Fire progress callback if set; swallow errors so progress glitches
+    never abort the read pipeline."""
+    if cb is None:
+        return
+    try:
+        await cb(phase, payload)
+    except Exception:
+        pass
 
 
 async def read_url(
@@ -33,8 +47,17 @@ async def read_url(
     profile: Profile,
     lang: Language,
     focus: str | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> ReadResult:
-    """Fetch URL → generate outline → write deep note → return ReadResult."""
+    """Fetch URL → generate outline → write deep note → return ReadResult.
+
+    ``on_progress(phase, payload)`` lets WS callers stream live updates:
+        - ``fetch``    payload: {source}
+        - ``outline``  payload: {title, deep_count, brief_count}
+        - ``chunk``    payload: {done, total}
+        - ``save``     payload: {path}
+        - ``done``     payload: {elapsed_seconds, word_count}
+    HTTP callers (POST /api/read) pass nothing → behaviour unchanged."""
     from neocortex.cmd_read import _resolve_topic_dir
     from neocortex.config import get_data_dir
     from neocortex.llm import create_provider
@@ -61,6 +84,7 @@ async def read_url(
         )
 
     # Fetch (URL → PDF → EPUB → image → audio all handled by ContentFetcher).
+    await _emit(on_progress, "fetch", source=source)
     fetcher = ContentFetcher(provider=provider)
     try:
         doc = await fetcher.fetch(source)
@@ -75,17 +99,29 @@ async def read_url(
     # interactive c/r prompt belongs in CLI layer.
     try:
         outline = await generate_outline(doc, profile, provider)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return ReadResult(
             saved_path="", title=doc.title, source=doc.source, topic_dir="",
             aborted=True,
             abort_reason=f"大纲生成失败: {exc}",
         )
+    deep_topics = [item.title for item in outline.items if item.marker == "deep" and item.title]
+    brief_topics = [item.title for item in outline.items if item.marker == "brief" and item.title]
+    await _emit(
+        on_progress, "outline",
+        title=doc.title,
+        deep_count=len(deep_topics),
+        brief_count=len(brief_topics),
+    )
 
     # Notes (N LLM calls, one per chunk + mindmap header).
     try:
-        notes_content = await generate_notes(doc, outline, profile, provider, focus=focus)
-    except Exception as exc:
+        async def _chunk_progress(done: int, total: int) -> None:
+            await _emit(on_progress, "chunk", done=done, total=total)
+        notes_content = await generate_notes(
+            doc, outline, profile, provider, focus=focus, on_chunk=_chunk_progress,
+        )
+    except Exception as exc:  # noqa: BLE001 — silenced below for compat
         return ReadResult(
             saved_path="", title=doc.title, source=doc.source, topic_dir="",
             aborted=True,
@@ -93,6 +129,7 @@ async def read_url(
         )
 
     # Save (same scheme as cmd_read for cross-tool consistency).
+    await _emit(on_progress, "save")
     topic_dir = _resolve_topic_dir(notes_dir, doc, outline, profile)
     topic_dir.mkdir(parents=True, exist_ok=True)
 
@@ -107,8 +144,6 @@ async def read_url(
         filename = f"{safe_title}-{today_str}-{counter}.md"
         note_path = topic_dir / filename
 
-    deep_topics = [item.title for item in outline.items if item.marker == "deep" and item.title]
-    brief_topics = [item.title for item in outline.items if item.marker == "brief" and item.title]
     frontmatter_lines = [
         "---",
         f"title: \"{doc.title.replace(chr(34), chr(39))}\"",
@@ -142,13 +177,17 @@ async def read_url(
     except Exception:
         pass
 
+    elapsed = round(time.monotonic() - started, 2)
+    word_count = len(notes_content.split())
+    await _emit(on_progress, "done", elapsed_seconds=elapsed, word_count=word_count)
+
     return ReadResult(
         saved_path=str(note_path),
         title=doc.title,
         source=doc.source,
         topic_dir=str(topic_dir.relative_to(notes_dir)) if topic_dir.is_relative_to(notes_dir) else str(topic_dir),
-        word_count=len(notes_content.split()),
+        word_count=word_count,
         deep_topics=deep_topics,
         brief_topics=brief_topics,
-        elapsed_seconds=round(time.monotonic() - started, 2),
+        elapsed_seconds=elapsed,
     )

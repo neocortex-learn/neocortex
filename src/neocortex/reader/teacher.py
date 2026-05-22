@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Awaitable, Callable
 
 from neocortex.llm.base import LLMProvider
 from neocortex.models import Language, LearningStyle, Outline, OutlineItem, Profile
@@ -238,7 +239,11 @@ async def generate_notes(
     focus: str | None = None,
     question: str | None = None,
     deep: bool = False,
+    on_chunk: Callable[[int, int], Awaitable[None]] | None = None,
 ) -> str:
+    """Generate the full note. ``on_chunk(done, total)`` is invoked after each
+    chunk's LLM call so callers (WS server) can stream progress. CLI passes
+    nothing and gets the same behaviour as before."""
     max_ctx = provider.max_context_tokens()
     reserved_for_prompt = 2000
     reserved_for_response = max(max_ctx // 4, 4000)
@@ -276,11 +281,18 @@ async def generate_notes(
 
     note_parts.append(header)
 
-    for chunk in chunks:
+    total_chunks = len(chunks)
+    for idx, chunk in enumerate(chunks):
         prompt = _build_chunk_prompt(chunk, outline, profile, focus, question)
         messages = [{"role": "user", "content": prompt}]
         response = await provider.chat(messages)
         note_parts.append(response.strip())
+        if on_chunk is not None:
+            try:
+                await on_chunk(idx + 1, total_chunks)
+            except Exception:
+                # Progress reporting failure must never abort generation.
+                pass
 
     if question:
         already_answered = any(question.lower() in part.lower() for part in note_parts)

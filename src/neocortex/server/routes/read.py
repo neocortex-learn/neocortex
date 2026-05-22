@@ -1,16 +1,23 @@
-"""POST /api/read — deep-note generation (long-running ~30s–3min).
+"""POST /api/read and WebSocket /api/read/ws — deep-note generation.
 
-Sync HTTP for v0 — caller (Mac client / CLI fallback / future iOS) just waits.
-WebSocket progress streaming can be added later; for now the response body
-includes elapsed_seconds so the UI can show "took 47s".
+HTTP variant: sync, blocks for 30s–3min, returns final ReadResult. Used by
+CLI fallback and any client that doesn't speak WebSocket.
+
+WebSocket variant: streams progress events live so the GUI can show
+``fetch → outline → chunk 3/8 → save`` instead of a frozen spinner. Auth
+must be done manually here because Starlette's BaseHTTPMiddleware doesn't
+intercept the ``websocket`` ASGI scope.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import secrets
+
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from neocortex.models import ReadResult
+from neocortex.server.security import ALLOWED_ORIGINS
 from neocortex.services.read import read_url
 
 
@@ -22,7 +29,14 @@ class ReadRequest(BaseModel):
     )
 
 
-def make_router(require_token) -> APIRouter:
+def make_router(require_token, *, expected_token: str | None = None,
+                expected_host: str | None = None) -> APIRouter:
+    """Build the read router.
+
+    ``expected_token`` / ``expected_host`` enable the WebSocket auth path.
+    They're optional so existing call sites (`make_router(require_token)`) keep
+    working — WS just won't be mounted when they're missing.
+    """
     router = APIRouter(prefix="/api", tags=["read"])
 
     @router.post(
@@ -45,5 +59,97 @@ def make_router(require_token) -> APIRouter:
             lang=cfg.output_settings.language,
             focus=req.focus,
         )
+
+    if expected_token is None or expected_host is None:
+        return router
+
+    expected_hosts = {
+        expected_host,
+        expected_host.replace("127.0.0.1", "localhost"),
+    }
+
+    @router.websocket("/read/ws")
+    async def read_ws(websocket: WebSocket) -> None:
+        # 1. Host check (defeats DNS rebinding even on WS).
+        host = websocket.headers.get("host", "")
+        if host not in expected_hosts:
+            await websocket.close(code=1008, reason="bad host")
+            return
+
+        # 2. Origin check — browsers always set this on WS handshakes; native
+        # clients (URLSessionWebSocketTask) omit it which is fine.
+        origin = websocket.headers.get("origin")
+        if origin is not None and origin not in ALLOWED_ORIGINS:
+            await websocket.close(code=1008, reason="bad origin")
+            return
+
+        # 3. Bearer token. URLSessionWebSocketTask supports custom headers;
+        # browsers don't, so we also accept ?token= as a fallback for them.
+        auth = websocket.headers.get("authorization", "")
+        token: str | None = None
+        if auth.lower().startswith("bearer "):
+            token = auth.split(" ", 1)[1].strip()
+        else:
+            token = websocket.query_params.get("token")
+        if not token or not secrets.compare_digest(token, expected_token):
+            await websocket.close(code=1008, reason="bad token")
+            return
+
+        await websocket.accept()
+
+        # 4. Receive {source, focus?} as the first JSON message.
+        try:
+            payload = await websocket.receive_json()
+            req = ReadRequest(**payload)
+        except Exception as exc:  # noqa: BLE001
+            await websocket.send_json({"type": "error", "message": f"bad request: {exc}"})
+            await websocket.close(code=1003)
+            return
+
+        from neocortex.config import get_notes_dir, load_config, load_profile
+
+        cfg = load_config()
+        profile = load_profile()
+        notes_dir = get_notes_dir()
+
+        client_alive = True
+
+        async def on_progress(phase: str, payload: dict) -> None:
+            nonlocal client_alive
+            if not client_alive:
+                return
+            try:
+                await websocket.send_json({"type": "progress", "phase": phase, **payload})
+            except Exception:
+                client_alive = False
+
+        try:
+            result = await read_url(
+                req.source,
+                notes_dir=notes_dir,
+                cfg=cfg,
+                profile=profile,
+                lang=cfg.output_settings.language,
+                focus=req.focus,
+                on_progress=on_progress,
+            )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                await websocket.send_json({"type": "error", "message": str(exc)})
+                await websocket.close(code=1011)
+            except Exception:
+                pass
+            return
+
+        try:
+            await websocket.send_json({
+                "type": "done",
+                "result": result.model_dump(mode="json"),
+            })
+            await websocket.close()
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            pass
 
     return router
