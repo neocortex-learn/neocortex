@@ -419,6 +419,7 @@ async def _fetch_wechat_clip(source: str) -> dict:
     """Fetch WeChat article content using wechat-article-to-markdown tool."""
     import shutil
     import subprocess
+    import tempfile
     from pathlib import Path
 
     if not shutil.which("wechat-article-to-markdown"):
@@ -427,29 +428,40 @@ async def _fetch_wechat_clip(source: str) -> dict:
             "Install: uv tool install wechat-article-to-markdown"
         )
 
-    result = subprocess.run(
-        ["wechat-article-to-markdown", source],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-
-    if result.returncode != 0:
-        error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-        raise ValueError(
-            f"WeChat article fetch failed: {error_msg}\n"
-            "Try: uv tool install --force wechat-article-to-markdown --with 'httpx[socks]'"
+    # Pin output under a temp dir — the tool's default writes ./<title>/<title>.md
+    # in cwd, which (a) pollutes whatever directory the server was launched in,
+    # (b) fails silently with returncode!=0 + empty stderr when cwd isn't writable.
+    with tempfile.TemporaryDirectory(prefix="neocortex-wechat-") as tmpdir:
+        result = subprocess.run(
+            ["wechat-article-to-markdown", "-o", tmpdir, source],
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
 
-    # Parse saved path from stdout: "✅ 已保存: <path>"
-    md_path = _parse_wechat_output(result.stdout)
-    if md_path is None:
-        raise ValueError(
-            "wechat-article-to-markdown produced no output. "
-            "The article may be behind a paywall or login wall."
-        )
+        if result.returncode != 0:
+            details = [f"exit={result.returncode}"]
+            if result.stderr and result.stderr.strip():
+                details.append(f"stderr={result.stderr.strip()[:400]}")
+            if result.stdout and result.stdout.strip():
+                details.append(f"stdout={result.stdout.strip()[:400]}")
+            raise ValueError(
+                "WeChat article fetch failed (" + " | ".join(details) + ").\n"
+                "Try: uv tool install --force wechat-article-to-markdown --with 'httpx[socks]'\n"
+                "Or paste the article text directly: neocortex clip --paste"
+            )
 
-    content = md_path.read_text(encoding="utf-8")
+        # Parse saved path from stdout: "✅ 已保存: <path>"
+        md_path = _parse_wechat_output(result.stdout)
+        if md_path is None or not md_path.exists():
+            raise ValueError(
+                "wechat-article-to-markdown produced no output. "
+                "The article may be behind a paywall or login wall."
+            )
+
+        # Must read before leaving the `with` block — tempdir is removed on exit.
+        content = md_path.read_text(encoding="utf-8")
+
     title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
     title = title_match.group(1).strip() if title_match else source
 

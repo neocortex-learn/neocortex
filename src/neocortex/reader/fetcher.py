@@ -198,6 +198,7 @@ class ContentFetcher:
         """Fetch WeChat article using wechat-article-to-markdown tool."""
         import shutil
         import subprocess
+        import tempfile
 
         if not shutil.which("wechat-article-to-markdown"):
             raise ValueError(
@@ -205,44 +206,53 @@ class ContentFetcher:
                 "Install: uv tool install wechat-article-to-markdown"
             )
 
-        result = subprocess.run(
-            ["wechat-article-to-markdown", url],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-
-        if result.returncode != 0:
-            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-            raise ValueError(
-                f"WeChat article fetch failed: {error_msg}\n"
-                "Try: uv tool install --force wechat-article-to-markdown --with 'httpx[socks]'"
+        # Pin output under a temp dir — tool defaults to writing in cwd which
+        # silently fails (returncode!=0 + empty stderr) when the server's cwd
+        # isn't writable. Copying images before the tempdir is removed.
+        with tempfile.TemporaryDirectory(prefix="neocortex-wechat-") as tmpdir:
+            result = subprocess.run(
+                ["wechat-article-to-markdown", "-o", tmpdir, url],
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
 
-        # Parse saved path from stdout: "✅ 已保存: <path>"
-        md_path = _parse_wechat_output_path(result.stdout)
-        if md_path is None:
-            raise ValueError(
-                "wechat-article-to-markdown produced no output. "
-                "The article may be behind a paywall or login wall."
-            )
+            if result.returncode != 0:
+                details = [f"exit={result.returncode}"]
+                if result.stderr and result.stderr.strip():
+                    details.append(f"stderr={result.stderr.strip()[:400]}")
+                if result.stdout and result.stdout.strip():
+                    details.append(f"stdout={result.stdout.strip()[:400]}")
+                raise ValueError(
+                    "WeChat article fetch failed (" + " | ".join(details) + ").\n"
+                    "Try: uv tool install --force wechat-article-to-markdown --with 'httpx[socks]'\n"
+                    "Or paste the article text directly: neocortex clip --paste"
+                )
 
-        content = md_path.read_text(encoding="utf-8")
+            # Parse saved path from stdout: "✅ 已保存: <path>"
+            md_path = _parse_wechat_output_path(result.stdout)
+            if md_path is None or not md_path.exists():
+                raise ValueError(
+                    "wechat-article-to-markdown produced no output. "
+                    "The article may be behind a paywall or login wall."
+                )
 
-        # Extract title from first heading
-        title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
-        title = title_match.group(1).strip() if title_match else url
+            content = md_path.read_text(encoding="utf-8")
 
-        # Copy images to notes dir if they exist
-        img_dir = md_path.parent / "images"
-        if img_dir.exists():
-            from neocortex.config import get_notes_dir
-            dest_img_dir = get_notes_dir() / "images"
-            dest_img_dir.mkdir(parents=True, exist_ok=True)
-            for img in img_dir.iterdir():
-                dest = dest_img_dir / img.name
-                if not dest.exists():
-                    shutil.copy2(str(img), str(dest))
+            # Extract title from first heading
+            title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+            title = title_match.group(1).strip() if title_match else url
+
+            # Copy images out before tempdir is removed.
+            img_dir = md_path.parent / "images"
+            if img_dir.exists():
+                from neocortex.config import get_notes_dir
+                dest_img_dir = get_notes_dir() / "images"
+                dest_img_dir.mkdir(parents=True, exist_ok=True)
+                for img in img_dir.iterdir():
+                    dest = dest_img_dir / img.name
+                    if not dest.exists():
+                        shutil.copy2(str(img), str(dest))
 
         sections = self._parse_markdown_sections(content)
         if not sections:
