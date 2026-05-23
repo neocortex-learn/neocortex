@@ -78,6 +78,21 @@ def read(
         from neocortex.reader.fetcher import ContentFetcher
         from neocortex.reader.teacher import generate_notes, generate_outline
 
+        notes_dir = get_notes_dir()
+
+        # Mirror services/read.py: short-circuit if this URL was already
+        # deep-read. Saves 30s–3min and ~$0.05 per duplicate. --scan and
+        # --deep also benefit; they all start from the fetched doc.
+        from neocortex.dedup import find_existing, normalize_source_url
+        norm = normalize_source_url(source)
+        if norm:
+            existing = find_existing(notes_dir, norm)
+            if existing:
+                console.print(
+                    f"  [yellow]{t('read_reused', lang, path=str(existing))}[/yellow]"
+                )
+                return
+
         fetcher = ContentFetcher(provider=provider)
 
         with console.status(f"  {t('read_fetching', lang)}"):

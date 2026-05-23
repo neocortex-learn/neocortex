@@ -163,6 +163,18 @@ def clip(
             # Skip to saving
             fetched = {"title": title, "content": content, "clip_type": clip_type, "source": clip_source}
         else:
+            # Mirror services/clip.py: short-circuit if this URL was already
+            # clipped. Avoids duplicate notes + the LLM tagging round-trip.
+            from neocortex.dedup import find_existing, normalize_source_url
+            norm = normalize_source_url(raw_input)
+            if norm:
+                existing = find_existing(notes_dir, norm)
+                if existing:
+                    console.print(
+                        f"  [yellow]{t('clip_reused', lang, path=str(existing))}[/yellow]"
+                    )
+                    return
+
             with console.status(f"  {t('clip_fetching', lang)}"):
                 fetched = await fetch_clip_content(raw_input)
 

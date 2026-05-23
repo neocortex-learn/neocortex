@@ -1080,6 +1080,14 @@ STRINGS: dict[str, dict[str, str]] = {
     "clip_relevance": {"en": "For you", "zh": "对你"},
     "clip_topic": {"en": "Topic", "zh": "分类"},
     "clip_fetching": {"en": "Fetching content...", "zh": "正在获取内容..."},
+    "clip_reused": {
+        "en": "Already clipped this URL → {path} (skipping)",
+        "zh": "此 URL 已 clip 过，复用：{path}",
+    },
+    "read_reused": {
+        "en": "Already read this URL → {path} (skipping)",
+        "zh": "此 URL 已读过，复用：{path}",
+    },
     "clip_processing": {"en": "Processing...", "zh": "正在处理..."},
     "clip_empty": {"en": "Nothing to clip.", "zh": "没有可捕获的内容。"},
     "clip_image_needs_llm": {
