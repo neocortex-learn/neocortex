@@ -415,18 +415,19 @@ def _parse_wechat_output(stdout: str):
     return None
 
 
-_WECHAT_SLUG_BAD = re.compile(r"[/\\?*:|\"<>\x00-\x1f]+")
-
-
 def _wechat_image_slug(stem: str) -> str:
     """Slugify article title for use as image filename prefix.
 
-    Keep CJK chars (Obsidian + macOS FS handle them fine) — only strip the
-    characters that break file paths or wikilinks (``/`` ``?`` ``*`` etc.).
+    Mirrors ``config.save_clip``'s slug logic so image filenames stay in
+    lockstep with the note filename — both lose punctuation (full-width
+    ``，`` ``。`` included; they break URL parsing in some markdown
+    renderers) and keep CJK + alnum + ``_``. Without this, a note's URL
+    inside the markdown could end up with ``，`` / ``。`` which some
+    renderers fail to resolve.
     """
-    cleaned = _WECHAT_SLUG_BAD.sub("", stem).strip()
-    # Cap length so the final ``<slug>-img_001.png`` stays well under PATH_MAX.
-    return cleaned[:80] if cleaned else "wechat-article"
+    s = re.sub(r"[^\w\s-]", "", stem)
+    s = re.sub(r"[\s_]+", "-", s).strip("-").lower()
+    return s[:60] if s else "wechat-article"
 
 
 def relocate_wechat_images(content: str, md_path, notes_dir) -> str:
