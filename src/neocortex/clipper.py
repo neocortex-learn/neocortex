@@ -431,20 +431,27 @@ def _wechat_image_slug(stem: str) -> str:
 
 def relocate_wechat_images(content: str, md_path, notes_dir) -> str:
     """Move WeChat tool's per-article ``images/`` to vault-wide ``notes_dir/images/``
-    with a per-article prefix, and rewrite markdown refs to Obsidian wikilinks.
+    with a per-article prefix, and rewrite markdown refs to standard relative
+    paths that any markdown renderer (GUI client, Obsidian, GitHub, ...) accepts.
 
     The wechat-article-to-markdown tool produces:
         <tempdir>/<title>/<title>.md     ← references ``images/img_001.png``
         <tempdir>/<title>/images/img_001.png
 
-    Notes are saved at varying depths (``clips/*.md``, ``<topic>/*.md``),
-    so the relative ``images/...`` refs break. We:
+    Notes are saved at depth 1 under the vault (``clips/*.md``, ``<topic>/*.md``).
+    We:
 
     1. Copy each image to ``notes_dir/images/<slug>-<original_name>``
        (vault-wide, prefixed to avoid ``img_001.png`` collisions between
        articles).
-    2. Rewrite ``![alt](images/img_001.png)`` → ``![[<slug>-img_001.png]]``
-       (Obsidian wikilink — vault-global, location-independent).
+    2. Rewrite ``![alt](images/img_001.png)`` → ``![](../images/<slug>-img_001.png)``
+       — standard markdown, relative to the note's parent dir. Works in
+       any renderer, including the GUI client (which uses a vanilla
+       markdown engine that does NOT render Obsidian ``![[wikilinks]]``).
+
+    Assumes notes live one directory deep under ``notes_dir`` — true today
+    (``clips/`` and ``<topic>/``). If we ever nest deeper, the ``..`` count
+    here is the single point to update.
 
     Caller passes ``md_path`` while the tempdir is still alive.
     """
@@ -473,11 +480,12 @@ def relocate_wechat_images(content: str, md_path, notes_dir) -> str:
         return content
 
     def _rewrite(match: re.Match) -> str:
-        original = match.group(1)
+        alt = match.group(1)
+        original = match.group(2)
         renamed = rename_map.get(original, original)
-        return f"![[{renamed}]]"
+        return f"![{alt}](../images/{renamed})"
 
-    return re.sub(r"!\[[^\]]*\]\(images/([^)]+)\)", _rewrite, content)
+    return re.sub(r"!\[([^\]]*)\]\(images/([^)]+)\)", _rewrite, content)
 
 
 async def _fetch_wechat_clip(source: str) -> dict:
