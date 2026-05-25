@@ -480,11 +480,18 @@ def relocate_wechat_images(content: str, md_path, notes_dir) -> str:
     if not rename_map:
         return content
 
+    # Percent-encode the URL portion so Swift / SwiftUI's URL(string:) (used
+    # by MarkdownUI in the Mac client) can parse non-ASCII filenames. The
+    # files themselves stay CJK on disk — only the markdown URL text gets
+    # encoded. Obsidian / VS Code / GitHub all accept this form too.
+    from urllib.parse import quote
+
     def _rewrite(match: re.Match) -> str:
         alt = match.group(1)
         original = match.group(2)
         renamed = rename_map.get(original, original)
-        return f"![{alt}](../images/{renamed})"
+        encoded = quote(renamed, safe="-_.")
+        return f"![{alt}](../images/{encoded})"
 
     return re.sub(r"!\[([^\]]*)\]\(images/([^)]+)\)", _rewrite, content)
 
