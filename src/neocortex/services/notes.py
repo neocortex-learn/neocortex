@@ -111,6 +111,12 @@ def delete_note(notes_dir: Path, file_path: Path, *, db_path: Path | None = None
                     conn.execute("DELETE FROM note_embeddings WHERE filename = ?", (rel,))
                 except sqlite3.OperationalError:
                     pass
+                # Also clear the dedup-source row so re-clipping the same URL
+                # isn't blocked by a stale entry pointing at the deleted file.
+                try:
+                    conn.execute("DELETE FROM note_sources WHERE filename = ?", (rel,))
+                except sqlite3.OperationalError:
+                    pass
                 conn.commit()
         except sqlite3.Error:
             pass

@@ -56,6 +56,7 @@ def clip(
         "-p",
         help="LLM 即时关联（默认：配置了 LLM key 时自动开启；--no-process 强制关闭）",
     ),
+    force: bool = typer.Option(False, "--force", "-f", help="跳过 URL 去重，强制重抓重存"),
 ) -> None:
     """Capture a fragment to your knowledge base.
 
@@ -165,15 +166,18 @@ def clip(
         else:
             # Mirror services/clip.py: short-circuit if this URL was already
             # clipped. Avoids duplicate notes + the LLM tagging round-trip.
-            from neocortex.dedup import find_existing, normalize_source_url
-            norm = normalize_source_url(raw_input)
-            if norm:
-                existing = find_existing(notes_dir, norm)
-                if existing:
-                    console.print(
-                        f"  [yellow]{t('clip_reused', lang, path=str(existing))}[/yellow]"
-                    )
-                    return
+            # --force bypasses dedup (useful when content changed or the prior
+            # clip was incomplete, e.g. fetched before image relocation fix).
+            if not force:
+                from neocortex.dedup import find_existing, normalize_source_url
+                norm = normalize_source_url(raw_input)
+                if norm:
+                    existing = find_existing(notes_dir, norm)
+                    if existing:
+                        console.print(
+                            f"  [yellow]{t('clip_reused', lang, path=str(existing))}[/yellow]"
+                        )
+                        return
 
             with console.status(f"  {t('clip_fetching', lang)}"):
                 fetched = await fetch_clip_content(raw_input)

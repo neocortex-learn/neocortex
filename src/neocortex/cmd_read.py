@@ -58,6 +58,7 @@ def read(
     exercises: bool = typer.Option(False, "--exercises", help="Generate exercises (adds ~30s)"),
     compile: bool = typer.Option(False, "--compile", help="Compile into concept graph (adds ~1-3min)"),
     full: bool = typer.Option(False, "--full", help="Enable all: flashcards + exercises + compile"),
+    force: bool = typer.Option(False, "--force", "-f", help="跳过 URL 去重，强制重读重存"),
 ) -> None:
     """Read a URL/file and generate personalized notes."""
     from neocortex.config import get_data_dir, get_notes_dir, load_config, load_profile, save_profile
@@ -83,15 +84,17 @@ def read(
         # Mirror services/read.py: short-circuit if this URL was already
         # deep-read. Saves 30s–3min and ~$0.05 per duplicate. --scan and
         # --deep also benefit; they all start from the fetched doc.
-        from neocortex.dedup import find_existing, normalize_source_url
-        norm = normalize_source_url(source)
-        if norm:
-            existing = find_existing(notes_dir, norm)
-            if existing:
-                console.print(
-                    f"  [yellow]{t('read_reused', lang, path=str(existing))}[/yellow]"
-                )
-                return
+        # --force bypasses dedup when re-reading is intentional.
+        if not force:
+            from neocortex.dedup import find_existing, normalize_source_url
+            norm = normalize_source_url(source)
+            if norm:
+                existing = find_existing(notes_dir, norm)
+                if existing:
+                    console.print(
+                        f"  [yellow]{t('read_reused', lang, path=str(existing))}[/yellow]"
+                    )
+                    return
 
         fetcher = ContentFetcher(provider=provider)
 
