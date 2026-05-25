@@ -1,7 +1,13 @@
 # Neocortex 开发规范
 
 ## 项目概述
-Neocortex 是一个 AI 驱动的个人知识库工具。Python CLI。
+Neocortex 是一个 AI 驱动的个人知识库工具。Python CLI + 本地 HTTP/WebSocket server。
+
+**配套客户端**：SwiftUI macOS App 在另一个 repo `~/Documents/neocortex-mac/`
+（独立 git，无 submodule 关系），通过 `~/.neocortex/server.{pid,port,token}`
+做服务发现 + HTTP 调用本仓库的 server。改 UI 渲染 / 全局快捷键 / vault 浏览器
+请去那个 repo；本仓库专注后端、数据模型、知识库引擎、API 协议。详见
+`docs/SERVER.md` 的契约描述。
 
 核心理念：把知识库当代码仓库管——有 intake（clip），有 compile（概念提取），有 search（检索），有 health check（lint/verify）。
 - **轻路径（默认）**：clip（零 LLM 存入）→ compile（批量整理）→ ask/search（搜到）
