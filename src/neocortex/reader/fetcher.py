@@ -243,16 +243,12 @@ class ContentFetcher:
             title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
             title = title_match.group(1).strip() if title_match else url
 
-            # Copy images out before tempdir is removed.
-            img_dir = md_path.parent / "images"
-            if img_dir.exists():
-                from neocortex.config import get_notes_dir
-                dest_img_dir = get_notes_dir() / "images"
-                dest_img_dir.mkdir(parents=True, exist_ok=True)
-                for img in img_dir.iterdir():
-                    dest = dest_img_dir / img.name
-                    if not dest.exists():
-                        shutil.copy2(str(img), str(dest))
+            # Relocate per-article ``images/`` into vault-wide ``notes_dir/images/``
+            # with a per-article prefix, and rewrite refs to Obsidian wikilinks
+            # so they resolve from any note depth (clip / topic-bucketed / etc.).
+            from neocortex.clipper import relocate_wechat_images
+            from neocortex.config import get_notes_dir
+            content = relocate_wechat_images(content, md_path, get_notes_dir())
 
         sections = self._parse_markdown_sections(content)
         if not sections:

@@ -415,6 +415,71 @@ def _parse_wechat_output(stdout: str):
     return None
 
 
+_WECHAT_SLUG_BAD = re.compile(r"[/\\?*:|\"<>\x00-\x1f]+")
+
+
+def _wechat_image_slug(stem: str) -> str:
+    """Slugify article title for use as image filename prefix.
+
+    Keep CJK chars (Obsidian + macOS FS handle them fine) — only strip the
+    characters that break file paths or wikilinks (``/`` ``?`` ``*`` etc.).
+    """
+    cleaned = _WECHAT_SLUG_BAD.sub("", stem).strip()
+    # Cap length so the final ``<slug>-img_001.png`` stays well under PATH_MAX.
+    return cleaned[:80] if cleaned else "wechat-article"
+
+
+def relocate_wechat_images(content: str, md_path, notes_dir) -> str:
+    """Move WeChat tool's per-article ``images/`` to vault-wide ``notes_dir/images/``
+    with a per-article prefix, and rewrite markdown refs to Obsidian wikilinks.
+
+    The wechat-article-to-markdown tool produces:
+        <tempdir>/<title>/<title>.md     ← references ``images/img_001.png``
+        <tempdir>/<title>/images/img_001.png
+
+    Notes are saved at varying depths (``clips/*.md``, ``<topic>/*.md``),
+    so the relative ``images/...`` refs break. We:
+
+    1. Copy each image to ``notes_dir/images/<slug>-<original_name>``
+       (vault-wide, prefixed to avoid ``img_001.png`` collisions between
+       articles).
+    2. Rewrite ``![alt](images/img_001.png)`` → ``![[<slug>-img_001.png]]``
+       (Obsidian wikilink — vault-global, location-independent).
+
+    Caller passes ``md_path`` while the tempdir is still alive.
+    """
+    import shutil
+    from pathlib import Path
+
+    img_dir = Path(md_path).parent / "images"
+    if not img_dir.exists():
+        return content
+
+    slug = _wechat_image_slug(Path(md_path).stem)
+    dest_dir = Path(notes_dir) / "images"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    rename_map: dict[str, str] = {}
+    for img in img_dir.iterdir():
+        if not img.is_file():
+            continue
+        new_name = f"{slug}-{img.name}"
+        dest = dest_dir / new_name
+        if not dest.exists():
+            shutil.copy2(str(img), str(dest))
+        rename_map[img.name] = new_name
+
+    if not rename_map:
+        return content
+
+    def _rewrite(match: re.Match) -> str:
+        original = match.group(1)
+        renamed = rename_map.get(original, original)
+        return f"![[{renamed}]]"
+
+    return re.sub(r"!\[[^\]]*\]\(images/([^)]+)\)", _rewrite, content)
+
+
 async def _fetch_wechat_clip(source: str) -> dict:
     """Fetch WeChat article content using wechat-article-to-markdown tool."""
     import shutil
@@ -459,8 +524,11 @@ async def _fetch_wechat_clip(source: str) -> dict:
                 "The article may be behind a paywall or login wall."
             )
 
-        # Must read before leaving the `with` block — tempdir is removed on exit.
+        # Must read + relocate images before leaving the `with` block
+        # (tempdir is removed on exit).
         content = md_path.read_text(encoding="utf-8")
+        from neocortex.config import get_notes_dir
+        content = relocate_wechat_images(content, md_path, get_notes_dir())
 
     title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
     title = title_match.group(1).strip() if title_match else source
