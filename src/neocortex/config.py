@@ -58,14 +58,53 @@ def _decrypt(ciphertext: str) -> str:
         return fernet.decrypt(token).decode()
 
 
+def _layout_root() -> Path | None:
+    """Return the unified project root if this install lives in a
+    ``<root>/{server,mac,vault,data}`` layout, else None.
+
+    Walks up from this file: the canonical path is
+    ``<root>/server/src/neocortex/config.py``, so 4 ``.parent``s land on
+    ``<root>``. We require both a ``data/`` and ``server/`` sibling to
+    avoid false positives (e.g. nested venv installs in unrelated trees).
+
+    Lets the whole project tree be moved without touching any code —
+    paths are derived from where the running code lives.
+    """
+    try:
+        candidate = Path(__file__).resolve().parents[3]
+    except IndexError:
+        return None
+    if (candidate / "data").is_dir() and (candidate / "server" / "src" / "neocortex").is_dir():
+        return candidate
+    return None
+
+
 def get_data_dir() -> Path:
-    data_dir = Path.home() / ".neocortex"
+    """Resolve where runtime/cache/config files live.
+
+    Priority:
+      1. ``NEOCORTEX_DATA_DIR`` env var (explicit override for advanced users)
+      2. ``<layout_root>/data/`` when running from a unified layout
+      3. ``~/.neocortex/`` (legacy standalone install)
+    """
+    env_override = os.environ.get("NEOCORTEX_DATA_DIR")
+    if env_override:
+        data_dir = Path(env_override).expanduser()
+    elif root := _layout_root():
+        data_dir = root / "data"
+    else:
+        data_dir = Path.home() / ".neocortex"
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir
 
 
 def get_notes_dir() -> Path:
-    """Get the notes directory. Uses config setting, defaults to ~/Documents/Neocortex."""
+    """Get the notes directory.
+
+    Reads ``output_settings.notes_dir`` from config first (user explicit
+    setting wins). When unset, falls back to ``<layout_root>/vault`` if
+    available, else the legacy ``~/Documents/Neocortex`` default.
+    """
     cfg_path = _config_path()
     if cfg_path.exists():
         try:
@@ -77,7 +116,10 @@ def get_notes_dir() -> Path:
                 return notes_dir
         except (json.JSONDecodeError, OSError):
             pass
-    notes_dir = Path.home() / "Documents" / "Neocortex"
+    if root := _layout_root():
+        notes_dir = root / "vault"
+    else:
+        notes_dir = Path.home() / "Documents" / "Neocortex"
     notes_dir.mkdir(parents=True, exist_ok=True)
     return notes_dir
 
