@@ -456,7 +456,7 @@ def load_clips(notes_dir: Path) -> list[Clip]:
     if not clips_dir.exists():
         return []
     clips: list[Clip] = []
-    for f in sorted(clips_dir.glob("*.md")):
+    for f in sorted(clips_dir.rglob("*.md")):
         clip = _parse_clip_file(f)
         if clip:
             clips.append(clip)
@@ -537,10 +537,12 @@ def _parse_clip_file(path: Path) -> Clip | None:
 
 
 def save_clip(notes_dir: Path, clip: Clip) -> Path:
-    """Save a clip as markdown file. Returns the file path."""
+    """Save a clip as markdown file under clips/<topic>/. Returns the file path."""
     import re
     import tempfile
-    clips_dir = notes_dir / "clips"
+
+    topic_slug = clip.topic if clip.topic else "ai-practice"
+    clips_dir = notes_dir / "clips" / topic_slug
     clips_dir.mkdir(parents=True, exist_ok=True)
 
     date_prefix = clip.created_at or "undated"
@@ -563,7 +565,7 @@ def save_clip(notes_dir: Path, clip: Clip) -> Path:
         f"summary: {clip.summary}",
         f"relevance: {clip.relevance}",
         f"priority: {clip.priority}",
-        f"topic: {clip.topic}",
+        f"topic: {topic_slug}",
         f"created_at: {clip.created_at}",
         f"processed_at: {clip.processed_at or ''}",
         f"promoted_to: {clip.promoted_to or ''}",
@@ -571,7 +573,16 @@ def save_clip(notes_dir: Path, clip: Clip) -> Path:
         f"surface_count: {clip.surface_count}",
         "---",
     ]
-    md_content = "\n".join(frontmatter_lines) + "\n\n" + clip.content
+
+    body_parts = []
+    if clip.takeaways:
+        body_parts.append("## 要点提炼\n")
+        for t in clip.takeaways:
+            body_parts.append(f"- {t}")
+        body_parts.append("\n---\n")
+    body_parts.append(clip.content)
+
+    md_content = "\n".join(frontmatter_lines) + "\n\n" + "\n".join(body_parts)
 
     path = clips_dir / filename
     fd, tmp_path = tempfile.mkstemp(dir=str(clips_dir), suffix=".tmp")

@@ -162,7 +162,8 @@ class TestClipTextLLMPath:
             "relevance": "Useful for backend work",
             "related_concepts": ["asyncio", "concurrency"],
             "auto_tags": ["python", "async"],
-            "topic": "backend",
+            "topic": "engineering",
+            "takeaways": ["asyncio 适合 IO 密集型并发"],
         }))
 
         with patch("neocortex.llm.create_provider", return_value=mock_provider):
@@ -180,7 +181,8 @@ class TestClipTextLLMPath:
         assert result.llm_error is None
         assert "asyncio" in result.clip.related_concepts
         assert result.clip.summary == "About async patterns"
-        assert result.clip.topic == "backend"
+        assert result.clip.topic == "engineering"
+        assert result.clip.takeaways == ["asyncio 适合 IO 密集型并发"]
 
 
 class TestClipTextDefaultsFromConfig:

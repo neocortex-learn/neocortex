@@ -138,7 +138,8 @@ async def clip_text(
         "relevance": "",
         "related_concepts": [],
         "auto_tags": [],
-        "topic": "general",
+        "topic": "ai-practice",
+        "takeaways": [],
     }
 
     # Weak fetch forces LLM skip (avoid hallucinating on near-empty content).
@@ -154,22 +155,30 @@ async def clip_text(
                 from neocortex.llm import create_provider
 
                 provider = create_provider(cfg)
+
+                if lang.value == "zh":
+                    from neocortex.clipper import _chinese_ratio, maybe_translate_to_chinese
+                    translation = await maybe_translate_to_chinese(content, provider)
+                    if translation:
+                        content = translation
+                    if title and _chinese_ratio(title) < 0.20:
+                        try:
+                            zh_title = await provider.chat([
+                                {"role": "system", "content": "将英文标题翻译成简洁的中文（10-25字）。直接输出译文，不加任何标记。"},
+                                {"role": "user", "content": title},
+                            ])
+                            zh_title = zh_title.strip().strip('"').lstrip("# ")
+                            if zh_title and _chinese_ratio(zh_title) >= 0.3:
+                                title = zh_title
+                        except Exception:
+                            pass
+
                 processed = await process_clip(
                     content, title, profile, provider, lang,
                     notes_dir=notes_dir,
                 )
                 llm_status = processed.pop("_llm_status", "ok")
                 llm_error = processed.pop("_llm_error", None)
-                # If the body is mostly non-Chinese and the user prefers
-                # Chinese, run a translation pass and append it so the user
-                # can read foreign-language clips without context-switching.
-                if lang.value == "zh" and llm_status == "ok":
-                    from neocortex.clipper import maybe_translate_to_chinese
-                    translation = await maybe_translate_to_chinese(content, provider)
-                    if translation:
-                        content = (
-                            f"{content}\n\n---\n\n## 中文译文\n\n{translation}"
-                        )
             except Exception as exc:
                 llm_status = "failed"
                 llm_error = str(exc) or exc.__class__.__name__
@@ -197,7 +206,8 @@ async def clip_text(
         summary=processed.get("summary", ""),
         relevance=processed.get("relevance", ""),
         priority="",
-        topic=processed.get("topic", "general"),
+        topic=processed.get("topic", "ai-practice"),
+        takeaways=processed.get("takeaways", []),
         created_at=today.isoformat(),
         processed_at=today.isoformat() if processed.get("summary") else None,
         next_surface=(today + timedelta(days=3)).isoformat(),

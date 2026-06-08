@@ -254,6 +254,75 @@ def _chinese_ratio(text: str) -> float:
     return cjk / counted if counted else 0.0
 
 
+_TRANSLATE_GLOSSARY = """
+### A. Keep English as-is (never translate — universally written in English in Chinese text)
+API, SDK, PR, CI/CD, Docker, Git, LLM, Token, Benchmark
+
+### B. Translate to Chinese, annotate English in parentheses on FIRST occurrence only
+| English | Chinese |
+|---------|---------|
+| AI Agent | AI 智能体 |
+| Agentic | 智能体化的 |
+| Context Engineering | 上下文工程 |
+| Prompt Engineering | 提示词工程 |
+| Fine-tuning | 微调 |
+| RAG / Retrieval-Augmented Generation | 检索增强生成 |
+| Chain of Thought (CoT) | 思维链 |
+| RLHF | 基于人类反馈的强化学习 |
+| Embedding | 向量化 |
+| Transformer | Transformer（不译，但可注释"一种神经网络架构"） |
+| Pipeline | 流水线 |
+| Workflow | 工作流 |
+| Harness | 编排框架 |
+| Scaffold / Scaffolding | 脚手架 |
+| Vibe Coding | 凭感觉编程 |
+| AI Wrapper | AI 套壳 |
+| Hallucination | 幻觉 |
+| Alignment | 对齐 |
+| Guardrails | 护栏 |
+| Grounding | 落地 |
+| Inference | 推理 |
+| Checkpoint | 检查点 |
+| Sandbox | 沙箱 |
+
+### C. Translate fully (no annotation needed — Chinese term is well-known)
+| English | Chinese |
+|---------|---------|
+| Moat | 护城河 |
+| Flywheel | 飞轮效应 |
+| Boilerplate | 样板代码 |
+| Latency | 延迟 |
+| Throughput | 吞吐量 |
+""".strip()
+
+_TRANSLATE_PROMPT = """You are a professional translator. Translate the following markdown content from English to Simplified Chinese.
+
+## Glossary
+
+The glossary has three sections:
+- **A. Keep English**: These are universally written in English in Chinese text (e.g. API, SDK, Token). Never translate.
+- **B. Translate + annotate**: Use the Chinese translation. On FIRST occurrence, include the English in parentheses — e.g. "上下文工程（Context Engineering）". After that, Chinese only.
+- **C. Translate fully**: The Chinese term is well-known enough that no English annotation is needed.
+
+{glossary}
+
+## Translation Principles
+
+Rewrite the content into natural, engaging Chinese — not merely translate it. Every sentence should read as if a skilled Chinese native writer composed it from scratch.
+
+- **Accuracy first**: Facts, data, numbers, proper nouns, and logic must match the original exactly
+- **Natural flow**: Use idiomatic Chinese word order. Break long English sentences into shorter, natural Chinese ones. Interpret metaphors and idioms by intended meaning, not word-for-word
+- **Anti-translationese**: Avoid unnecessary connectives (因此/然而/此外 used as crutches), passive voice abuse (被/由/受到), noun pile-ups, and stiff calques from English syntax
+- **Terminology**: Use glossary translations consistently. For tech terms NOT in the glossary, keep the English original if it's commonly used as-is in Chinese tech circles (e.g. API, SDK, Docker, Git, PR)
+- **Preserve format**: Keep ALL markdown formatting — headings, bold, italic, images, links, code blocks, blockquotes, lists
+- **Proactive interpretation**: For jargon or concepts the reader may lack context for, add a BRIEF explanation in bold parentheses （**解释**）. Use sparingly — only where genuinely needed
+- **Do NOT add** any translator's notes, preface, or postscript. Output ONLY the translated text
+
+## Source Text
+
+{content}"""
+
+
 async def maybe_translate_to_chinese(
     content: str,
     provider: LLMProvider,
@@ -261,38 +330,44 @@ async def maybe_translate_to_chinese(
     threshold: float = 0.20,
     max_input_chars: int = 30_000,
 ) -> str | None:
-    """If ``content`` is mostly non-Chinese, return a Chinese translation;
-    otherwise None.
+    """If ``content`` is mostly non-Chinese, return a high-quality Chinese
+    translation using baoyu-style principles; otherwise None.
 
-    Conservative defaults:
-        - Skip if CJK ratio >= 20% (already partially Chinese — likely a
-          tweet that quotes English; translating would be noisy).
-        - Skip if content too long (>30K chars; protects token cost).
-
-    Returns plain translation string (caller appends to original body).
+    Translation approach adapted from github.com/JimLiu/baoyu-skills:
+    glossary-driven, anti-translationese, natural Chinese voice.
     """
     if not content or len(content) > max_input_chars:
         return None
     if _chinese_ratio(content) >= threshold:
         return None
 
-    prompt = (
-        "请把下面的文本翻译成简体中文。保留原文的 Markdown 结构（标题层级、"
-        "列表、引用块、代码块、链接、加粗 / 斜体）。专有名词（人名、产品名、"
-        "公司名、技术术语）保留英文不译。直接输出译文，不要加任何解释或前言。\n\n"
-        "原文：\n"
-        f"{content}"
-    )
+    system = _TRANSLATE_PROMPT.format(
+        glossary=_TRANSLATE_GLOSSARY,
+        content="",
+    ).rsplit("## Source Text", 1)[0].strip()
     try:
-        translated = await provider.chat([{"role": "user", "content": prompt}])
+        translated = await provider.chat([
+            {"role": "system", "content": system},
+            {"role": "user", "content": content},
+        ])
         translated = translated.strip()
-        # Sanity: if the model returned something that's still mostly non-Chinese
-        # (refusal / echo), drop it rather than save garbage.
         if _chinese_ratio(translated) < 0.3:
             return None
         return translated
     except Exception:
         return None
+
+
+CLIP_CATEGORIES = [
+    "ai-practice",       # AI 工具实践：怎么用 Claude Code / Codex / prompt 技巧 / AI workflow
+    "ai-architecture",   # AI 原理：LLM 底层、Agent 架构、模型设计、系统原理
+    "product",           # 产品思维：产品设计、用户体验、商业模式
+    "engineering",       # 工程实践：云基础设施、后端、前端、系统架构、编码实践
+    "learning",          # 学习方法：知识管理、认知科学、教学方法
+    "career",            # 成长：职业发展、思维模式、行业趋势
+]
+
+CLIP_CATEGORIES_STR = ", ".join(CLIP_CATEGORIES)
 
 
 async def process_clip(
@@ -303,10 +378,10 @@ async def process_clip(
     language: Language,
     notes_dir: Path | None = None,
 ) -> dict:
-    """Lightweight LLM processing: summarize, relate, classify.
+    """Lightweight LLM processing: summarize, relate, classify, extract.
 
     1 LLM call, returns:
-    {summary, relevance, related_concepts, auto_tags, topic}
+    {summary, relevance, related_concepts, auto_tags, topic, takeaways}
     """
     domains = list(profile.skills.domains.keys())
     gaps: list[str] = []
@@ -321,30 +396,40 @@ async def process_clip(
     if language.value == "zh":
         lang_hint = (
             "All string values in the JSON response (summary, relevance, "
-            "related_concepts, auto_tags) MUST be in Simplified Chinese (中文)"
+            "related_concepts, auto_tags, takeaways) MUST be in Simplified Chinese (中文)"
             "，无论原文是什么语言。即使原文是英文 / 日文 / 任何语言，"
-            "summary 和 relevance 必须翻译成中文。topic 仍是英文标识符。"
+            "summary、relevance、takeaways 必须翻译成中文。topic 仍是英文标识符。"
         )
     else:
         lang_hint = "All string values in the JSON response must be in English."
-    domains_str = ", ".join(domains) if domains else "general"
     gaps_str = ", ".join(gaps[:20]) if gaps else "(none)"
     concepts_str = ", ".join(concepts[:30]) if concepts else "(none)"
 
     prompt = (
         "You are a knowledge management assistant. The user just clipped a fragment.\n\n"
-        f"User skill domains: {domains_str}\n"
         f"User skill gaps: {gaps_str}\n"
         f"Existing concepts: {concepts_str}\n\n"
-        f"Fragment:\n{title}\n{content[:1500]}\n\n"
+        f"Fragment:\n{title}\n{content[:3000]}\n\n"
         "Reply in JSON:\n"
         "{\n"
         '  "summary": "one sentence summarizing what this is about",\n'
         '  "relevance": "one sentence on what this means for the user given their profile",\n'
         '  "related_concepts": ["concept1", "concept2"],\n'
         '  "auto_tags": ["tag1", "tag2", "tag3"],\n'
-        '  "topic": "best matching domain from the user\'s domain list, or general"\n'
+        f'  "topic": "MUST be one of: {CLIP_CATEGORIES_STR}",\n'
+        '  "takeaways": ["核心要点1", "核心要点2", "核心要点3"]\n'
         "}\n\n"
+        "takeaways: Extract 3-5 key takeaways from the fragment. Each should be a "
+        "complete, self-contained sentence that captures an actionable insight or "
+        "important idea. The reader should understand the article's value from "
+        "takeaways alone without reading the full text.\n\n"
+        f"topic: Pick the SINGLE best match from [{CLIP_CATEGORIES_STR}]. "
+        "ai-practice = how to USE AI tools (Claude Code, Codex, prompts, workflows). "
+        "ai-architecture = how AI WORKS internally (LLM internals, agent architecture, system design). "
+        "product = product design, UX, business models. "
+        "engineering = cloud infra, backend, frontend, coding practices. "
+        "learning = learning methods, knowledge management, cognitive science. "
+        "career = career growth, mindset, industry trends.\n\n"
         f"{lang_hint}"
     )
 
@@ -359,24 +444,27 @@ async def process_clip(
             data = json.loads(json_match.group())
         else:
             data = json.loads(raw)
+        topic = data.get("topic", "ai-practice")
+        if topic not in CLIP_CATEGORIES:
+            topic = "ai-practice"
         return {
             "summary": data.get("summary", ""),
             "relevance": data.get("relevance", ""),
             "related_concepts": data.get("related_concepts", [])[:3],
             "auto_tags": data.get("auto_tags", [])[:5],
-            "topic": data.get("topic", "general"),
-            # Status metadata for caller (禁止静默失败 — see CLIENT_PROPOSAL §5.1)
+            "topic": topic,
+            "takeaways": data.get("takeaways", [])[:5],
             "_llm_status": "ok",
             "_llm_error": None,
         }
     except Exception as exc:
-        fallback = _fallback_process(content, title, domains)
+        fallback = _fallback_process(content, title)
         fallback["_llm_status"] = "failed"
         fallback["_llm_error"] = str(exc) or exc.__class__.__name__
         return fallback
 
 
-def _fallback_process(content: str, title: str, domains: list[str]) -> dict:
+def _fallback_process(content: str, title: str) -> dict:
     """Fallback when LLM is unavailable: extract keywords, guess topic."""
     words = re.findall(r"[a-zA-Z\u4e00-\u9fff]{2,}", (title + " " + content)[:500])
     word_freq: dict[str, int] = {}
@@ -386,11 +474,11 @@ def _fallback_process(content: str, title: str, domains: list[str]) -> dict:
     sorted_words = sorted(word_freq.items(), key=lambda x: -x[1])
     tags = [w for w, _ in sorted_words[:5] if len(w) > 2]
 
-    topic = "general"
+    topic = "ai-practice"
     content_lower = (title + " " + content).lower()
-    for d in domains:
-        if d.lower() in content_lower:
-            topic = d
+    for cat in CLIP_CATEGORIES:
+        if cat.replace("-", " ") in content_lower or cat.replace("-", "") in content_lower:
+            topic = cat
             break
 
     return {
@@ -399,6 +487,7 @@ def _fallback_process(content: str, title: str, domains: list[str]) -> dict:
         "related_concepts": [],
         "auto_tags": tags,
         "topic": topic,
+        "takeaways": [],
     }
 
 
@@ -439,20 +528,14 @@ def relocate_wechat_images(content: str, md_path, notes_dir) -> str:
         <tempdir>/<title>/<title>.md     ← references ``images/img_001.png``
         <tempdir>/<title>/images/img_001.png
 
-    Notes are saved at depth 1 under the vault (``clips/*.md``, ``<topic>/*.md``).
+    Notes are saved at depth 2 under the vault (``clips/<topic>/*.md``).
     We:
 
     1. Copy each image to ``notes_dir/images/<slug>-<original_name>``
        (vault-wide, prefixed to avoid ``img_001.png`` collisions between
        articles).
-    2. Rewrite ``![alt](images/img_001.png)`` → ``![](../images/<slug>-img_001.png)``
-       — standard markdown, relative to the note's parent dir. Works in
-       any renderer, including the GUI client (which uses a vanilla
-       markdown engine that does NOT render Obsidian ``![[wikilinks]]``).
-
-    Assumes notes live one directory deep under ``notes_dir`` — true today
-    (``clips/`` and ``<topic>/``). If we ever nest deeper, the ``..`` count
-    here is the single point to update.
+    2. Rewrite ``![alt](images/img_001.png)`` → ``![](../../images/<slug>-img_001.png)``
+       — standard markdown, relative to the note's parent dir.
 
     Caller passes ``md_path`` while the tempdir is still alive.
     """
@@ -491,60 +574,45 @@ def relocate_wechat_images(content: str, md_path, notes_dir) -> str:
         original = match.group(2)
         renamed = rename_map.get(original, original)
         encoded = quote(renamed, safe="-_.")
-        return f"![{alt}](../images/{encoded})"
+        return f"![{alt}](../../images/{encoded})"
 
     return re.sub(r"!\[([^\]]*)\]\(images/([^)]+)\)", _rewrite, content)
 
 
 async def _fetch_wechat_clip(source: str) -> dict:
-    """Fetch WeChat article content using wechat-article-to-markdown tool."""
+    """Fetch WeChat article content using wechat-article-to-markdown tool,
+    falling back to markdown.new browser rendering on failure."""
     import shutil
     import subprocess
     import tempfile
     from pathlib import Path
 
-    if not shutil.which("wechat-article-to-markdown"):
+    content: str | None = None
+
+    if shutil.which("wechat-article-to-markdown"):
+        with tempfile.TemporaryDirectory(prefix="neocortex-wechat-") as tmpdir:
+            result = subprocess.run(
+                ["wechat-article-to-markdown", "-o", tmpdir, source],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+            if result.returncode == 0:
+                md_path = _parse_wechat_output(result.stdout)
+                if md_path is not None and md_path.exists():
+                    content = md_path.read_text(encoding="utf-8")
+                    from neocortex.config import get_notes_dir
+                    content = relocate_wechat_images(content, md_path, get_notes_dir())
+
+    if not content:
+        content = await _fetch_wechat_via_markdown_new(source)
+
+    if not content:
         raise ValueError(
-            "WeChat article fetching requires wechat-article-to-markdown. "
-            "Install: uv tool install wechat-article-to-markdown"
+            "WeChat article fetch failed (both wechat-article-to-markdown and markdown.new).\n"
+            "Or paste the article text directly: neocortex clip --paste"
         )
-
-    # Pin output under a temp dir — the tool's default writes ./<title>/<title>.md
-    # in cwd, which (a) pollutes whatever directory the server was launched in,
-    # (b) fails silently with returncode!=0 + empty stderr when cwd isn't writable.
-    with tempfile.TemporaryDirectory(prefix="neocortex-wechat-") as tmpdir:
-        result = subprocess.run(
-            ["wechat-article-to-markdown", "-o", tmpdir, source],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-
-        if result.returncode != 0:
-            details = [f"exit={result.returncode}"]
-            if result.stderr and result.stderr.strip():
-                details.append(f"stderr={result.stderr.strip()[:400]}")
-            if result.stdout and result.stdout.strip():
-                details.append(f"stdout={result.stdout.strip()[:400]}")
-            raise ValueError(
-                "WeChat article fetch failed (" + " | ".join(details) + ").\n"
-                "Try: uv tool install --force wechat-article-to-markdown --with 'httpx[socks]'\n"
-                "Or paste the article text directly: neocortex clip --paste"
-            )
-
-        # Parse saved path from stdout: "✅ 已保存: <path>"
-        md_path = _parse_wechat_output(result.stdout)
-        if md_path is None or not md_path.exists():
-            raise ValueError(
-                "wechat-article-to-markdown produced no output. "
-                "The article may be behind a paywall or login wall."
-            )
-
-        # Must read + relocate images before leaving the `with` block
-        # (tempdir is removed on exit).
-        content = md_path.read_text(encoding="utf-8")
-        from neocortex.config import get_notes_dir
-        content = relocate_wechat_images(content, md_path, get_notes_dir())
 
     title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
     title = title_match.group(1).strip() if title_match else source
@@ -556,6 +624,60 @@ async def _fetch_wechat_clip(source: str) -> dict:
         "clip_type": "bookmark",
         "source": source,
     }
+
+
+async def _fetch_wechat_via_markdown_new(source: str) -> str | None:
+    """Fallback: fetch WeChat article via markdown.new browser rendering.
+
+    Uses curl because httpx gets 403 from markdown.new (it fingerprints
+    HTTP/2 + library-style TLS, which curl avoids).
+    """
+    import subprocess
+
+    url = f"https://markdown.new/{source}?method=browser"
+    try:
+        result = subprocess.run(
+            ["curl", "-sS", "-L", "--max-time", "60",
+             "-H", "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+             url],
+            capture_output=True, text=True, timeout=70,
+        )
+        if result.returncode != 0:
+            return None
+        text = result.stdout.strip()
+        if len(text) < 80 or "环境异常" in text:
+            return None
+        body = re.sub(r"^.*?^Markdown Content:\s*\n", "", text,
+                       count=1, flags=re.DOTALL | re.MULTILINE)
+        body = _strip_wechat_ui_junk(body)
+        return body.strip() if body.strip() else None
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+
+
+_WECHAT_JUNK_MARKERS = [
+    "轻触查看原文",
+    "向上滑动看下一个",
+    "Got It](javascript",
+    "Scan with Weixin",
+    "微信扫一扫可打开此内容",
+    "Cancel](javascript:void",
+    "Video Mini Program Like",
+    "轻点两下取消赞",
+    "Share Comment Favorite",
+]
+
+
+def _strip_wechat_ui_junk(text: str) -> str:
+    earliest = len(text)
+    for marker in _WECHAT_JUNK_MARKERS:
+        idx = text.find(marker)
+        if idx != -1 and idx < earliest:
+            earliest = idx
+    if earliest < len(text):
+        text = text[:earliest]
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 async def _fetch_tweet_clip(source: str) -> dict:

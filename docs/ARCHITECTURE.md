@@ -86,7 +86,7 @@
 │  recommendations.json           │ ← 概念覆盖率影响推荐
 │  neocortex.sqlite               │ ← FTS5 + 向量索引
 │  profile.json                   │ ← 概念掌握度更新 skills
-│  server.{pid,port,token}        │ ← GUI 服务发现（serve 运行时）
+│  server.pid/port + server-token │ ← GUI 服务发现（serve 运行时）
 └─────────────────────────────────┘
 ```
 

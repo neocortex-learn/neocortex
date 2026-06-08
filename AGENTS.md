@@ -1,13 +1,7 @@
 # Neocortex 开发规范
 
 ## 项目概述
-Neocortex 是一个 AI 驱动的个人知识库工具。Python CLI + 本地 HTTP/WebSocket server。
-
-**配套客户端**：SwiftUI macOS App 在另一个 repo `~/Documents/neocortex-mac/`
-（独立 git，无 submodule 关系），通过 `~/.neocortex/server.{pid,port}` + `server-token`
-做服务发现 + HTTP 调用本仓库的 server。改 UI 渲染 / 全局快捷键 / vault 浏览器
-请去那个 repo；本仓库专注后端、数据模型、知识库引擎、API 协议。详见
-`docs/SERVER.md` 的契约描述。
+Neocortex 是一个 AI 驱动的个人知识库工具。Python CLI。
 
 核心理念：把知识库当代码仓库管——有 intake（clip），有 compile（概念提取），有 search（检索），有 health check（lint/verify）。
 - **轻路径（默认）**：clip（零 LLM 存入）→ compile（批量整理）→ ask/search（搜到）
@@ -38,15 +32,13 @@ neocortex --help          # 查看 CLI 帮助
 
 ## CLI 命令结构
 ```
-顶层命令（9 个）：clip, search, ask (--chat), read, review, inbox, daily, serve
+顶层命令（7 个）：clip, search, ask (--chat), read, review, inbox, daily
 子命令组：
   kb:       notes, card, compile, lint, verify, map
   discover: explore, research, feed
   learn:    recommend (--plan), digest, opportunities
   profile:  init, config, scan, import, 默认（查看画像）
 ```
-
-`serve` 启动本地 FastAPI server（127.0.0.1 + Bearer token），供 GUI 客户端（SwiftUI / Tauri）调用。详见 `docs/SERVER.md` 与本文件下方的 server/services 层说明。
 
 ## 目录结构
 ```
@@ -62,14 +54,11 @@ src/neocortex/
 ├── cmd_verify.py   # kb 组：verify（忠实度验证）
 ├── cmd_visualize.py # kb 组：map；learn 组：digest
 ├── cmd_clip.py     # 顶层：clip + inbox
-├── cmd_daily.py    # 顶层：daily（含 _show_health_pulse — lint/fidelity 趋势）
-├── cmd_search.py   # 顶层：search（FTS5 + 向量混合检索）
-├── cmd_serve.py    # 顶层：serve（启动 FastAPI 本地 server，写 ~/.neocortex/server.{pid,port} + server-token）
+├── cmd_daily.py    # 顶层：daily
 ├── cmd_explore.py  # discover 组：explore
 ├── cmd_research.py # discover 组：research
 ├── cmd_feed.py     # discover 组：feed
 ├── clipper.py      # 碎片捕获处理引擎（URL/文本/截图，默认零 LLM）
-├── dedup.py        # URL 规范化 + frontmatter 查重（仅 services 层调用，CLI 路径暂不去重）
 ├── compiler.py     # 概念编译引擎（提取、生成、wikilink、索引、语义链接）
 ├── converger.py    # 认知收敛（跨笔记综合高层理解）
 ├── decay.py        # 知识信心衰减（Hidalgo 年衰减 50% 模型）
@@ -96,60 +85,8 @@ src/neocortex/
 ├── scanner/        # 项目扫描（含 gap 同义词规范化）
 ├── reader/         # 内容阅读 + 笔记生成（URL/PDF/EPUB/图片/微信公众号）
 ├── matcher/        # 推荐匹配（base 策略 + GitHub 机会匹配）
-├── importer/       # 聊天记录导入
-├── services/       # 纯函数服务层（无 Rich/Typer/交互），HTTP server 入口
-│                   # clip / read / ask / daily / notes / visualize
-└── server/         # FastAPI 本地 server（Sprint 0）
-    ├── app.py         # create_app() 工厂 + healthz + version
-    ├── runtime.py     # PID/port/token 文件管理（0600）
-    ├── security.py    # SecurityMiddleware + WS 握手校验
-    └── routes/        # 7 个 router：clip/read/notes/search/ask/daily/map
+└── importer/       # 聊天记录导入
 ```
-
-## Server / Services 层（Sprint 0）
-
-**目的**：把 CLI 内部逻辑包装成 HTTP 友好的纯函数入口，给 GUI 客户端（SwiftUI / 未来 Tauri）调用。
-
-- **`services/*.py`**（6 个）：从 cmd_*.py 提取出来的纯异步函数，不带 Rich/Typer/Prompt。
-  公共接口示例：`services.clip.clip_text()`、`services.read.read_url(on_progress=...)`、
-  `services.daily.build_briefing()`、`services.ask.ask_question()`、
-  `services.notes.delete_note()`、`services.visualize.build_concept_map()`。
-- **`server/app.py`**：`create_app(token, port) -> FastAPI`，注册 7 个路由 + healthz + version。
-  禁用 Swagger / OpenAPI（减少暴露面），不挂 CORS（依赖浏览器 SOP 隔离）。
-- **`server/security.py`**：四层防御 Bearer token + Host 严格匹配 + Origin 白名单
-  （`null` / `tauri://localhost`）+ 变更方法强制 `Content-Type: application/json`。
-  WebSocket 在 `validate_ws_handshake()` 中复用同一组检查（Starlette HTTP 中间件不拦 WS）。
-- **`server/runtime.py`**：启动时随机分配端口 + 随机 token，写入
-  `~/.neocortex/server.{pid,port}` + `server-token`（token 文件 0600，从首次 syscall 起就是 0600）。
-  GUI 客户端读这三个文件做服务发现。
-- **关键约束**：CLI 不依赖 services（`cmd_clip.py` / `cmd_read.py` 直接调引擎），
-  只有 server 路由强制走 services；将来 CLI 收敛到 services 是单独的迁移工作。
-
-**Routes 速查**（全部 `prefix="/api"`，除 `/healthz`）：
-
-| Method | Path | 用途 |
-|---|---|---|
-| GET | `/healthz` | 公开活性探针（不需要 token，Host 仍校验） |
-| GET | `/api/version` | 最小鉴权端点（双重身份：smoke test） |
-| POST | `/api/clip` | URL/文本捕获，返回 `ClipResult` |
-| POST | `/api/read` | 深度阅读（同步阻塞 30s–3min），返回 `ReadResult` |
-| WS | `/api/read/ws` | 同 `/api/read` 但实时推送 fetch/outline/chunk 进度 |
-| POST | `/api/notes/delete` | 删除笔记（POST 体，不是 DELETE 方法） |
-| GET | `/api/search` | FTS5 + 向量混合检索 |
-| POST | `/api/ask` | 单次问答，触发 query 反写为 insight |
-| GET | `/api/daily` | 今日浮现 briefing |
-| POST | `/api/daily/surface` | 标记 clip 已浮现，推进调度 |
-| GET | `/api/map` | 返回 Mermaid 概念图源码 |
-
-**注意**：CLI 路径下 clip/read **不去重**，去重只在 services 层（`services/clip.py:75`、
-`services/read.py:123` 调 `dedup.find_existing`）。commit 33a3884 描述与代码现状有出入。
-
-## 实验性功能开关
-
-`profile config --enable-experimental <feature>` / `--disable-experimental <feature>`
-把功能名追加到 `cfg.experimental: list[str]`。
-其他模块用 `config.is_experimental(feature: str) -> bool` 查询是否启用。
-当前未提交（cli.py / config.py / i18n.py / cmd_daily.py 已加，待合入）。
 
 ## 核心机制
 
@@ -187,7 +124,7 @@ gap → (首次阅读) → learning → (reads≥2 + Probe≥solid) → verified
 - `verified → known`：距 verified_at ≥ 7 天后再次通过 Probe（延迟复测，防止短期记忆）
 - 阅读单独**不再**自动升级到 known，确保"读过 ≠ 学会"
 
-### 学习路径（参考 [learn-claude-code](https://github.com/shareAI-lab/learn-claude-code) 的渐进式设计）
+### 学习路径（参考 [learn-Codex](https://github.com/shareAI-lab/learn-Codex) 的渐进式设计）
 推荐不再是平铺的独立主题，而是**有序的学习路径**：
 - 每条推荐有 `step`（学习顺序）和 `depends_on`（前置主题列表）
 - 前置未完成的步骤处于锁定状态，完成后自动解锁下游步骤
@@ -197,7 +134,7 @@ gap → (首次阅读) → learning → (reads≥2 + Probe≥solid) → verified
 ### Gap 语义去重
 `scanner/profile.py` 中的同义词表（`_GAP_SYNONYMS`）将 LLM 输出的不同表述归一化为统一名称。新发现的同义词直接加到表里。
 
-### Token 优化（参考 learn-claude-code 的 Skill 按需加载思路）
+### Token 优化（参考 learn-Codex 的 Skill 按需加载思路）
 `_build_context()` 按域分组展示 gap（减少重复 domain/level 标签），阅读历史只传标题不传完整路径，降低每次 LLM 调用的 token 消耗。
 
 ### 可视化笔记（Mermaid 图表）
@@ -237,7 +174,7 @@ gap → (首次阅读) → learning → (reads≥2 + Probe≥solid) → verified
 - 推荐必须包含 `step` 和 `depends_on` 字段，保持学习路径的有序性
 
 ## 设计参考
-- [learn-claude-code](https://github.com/shareAI-lab/learn-claude-code) — 渐进式学习路径设计、Skill 按需加载、任务依赖图
+- [learn-Codex](https://github.com/shareAI-lab/learn-Codex) — 渐进式学习路径设计、Skill 按需加载、任务依赖图
 - [Obsidian](https://obsidian.md) — 本地 Markdown vault 模型、用户拥有文件
 - [Readwise Reader](https://readwise.io/read) — 阅读→高亮→复习闭环、间隔复习算法
 - [ljg-skills](https://github.com/lijigang/ljg-skills) — 论文阅读写作原则、视觉卡片生成、概念八维解剖

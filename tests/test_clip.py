@@ -134,7 +134,8 @@ class TestProcessClip:
             "relevance": "Directly addresses your caching gap",
             "related_concepts": ["redis"],
             "auto_tags": ["caching", "performance", "backend"],
-            "topic": "backend",
+            "topic": "engineering",
+            "takeaways": ["Redis 适合高并发场景的缓存策略"],
         }))
 
         result = await process_clip(
@@ -145,8 +146,9 @@ class TestProcessClip:
             Language.EN,
         )
         assert result["summary"] == "About caching patterns"
-        assert result["topic"] == "backend"
+        assert result["topic"] == "engineering"
         assert len(result["auto_tags"]) == 3
+        assert result["takeaways"] == ["Redis 适合高并发场景的缓存策略"]
 
     @pytest.mark.asyncio
     async def test_llm_failure_fallback(self):
@@ -165,9 +167,11 @@ class TestProcessClip:
             provider,
             Language.EN,
         )
-        assert result["topic"] == "backend"
+        assert result["topic"] in ("ai-practice", "engineering", "ai-architecture",
+                                    "product", "learning", "career")
         assert isinstance(result["auto_tags"], list)
         assert result["summary"] == ""
+        assert isinstance(result["takeaways"], list)
 
 
 class TestSaveClip:
