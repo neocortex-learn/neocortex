@@ -9,6 +9,8 @@ from datetime import date
 from pathlib import Path
 
 import typer
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.table import Table
 from rich.text import Text
 
 from neocortex.cli import (
@@ -68,41 +70,72 @@ def scan(
 
         cache = ScanCache(get_data_dir() / "scan_cache.json")
 
+        valid_paths: list[Path] = []
         for p in paths:
             resolved = Path(p).resolve()
             if not resolved.is_dir():
                 console.print(f"  [red]{t('scan_not_found', lang, path=str(resolved))}[/red]")
-                continue
-
-            cached = cache.get(str(resolved))
-            if cached is not None:
-                console.print(f"  [dim]{t('scan_cached', lang, name=resolved.name)}[/dim]")
-                skills = cached
             else:
-                with console.status(f"  {t('scan_project', lang, name=resolved.name)}"):
+                valid_paths.append(resolved)
+
+        if not valid_paths:
+            return all_skills
+
+        results_table = Table(show_header=False, show_edge=False, pad_edge=False, padding=(0, 1))
+        results_table.add_column("name", style="cyan", min_width=20)
+        results_table.add_column("status")
+        results_table.add_column("detail", style="dim")
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold]{task.description}"),
+            BarColumn(bar_width=30),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            overall = progress.add_task(
+                t("scan_project", lang, name=""),
+                total=len(valid_paths),
+            )
+
+            for resolved in valid_paths:
+                progress.update(overall, description=f"  {resolved.name}")
+
+                cached = cache.get(str(resolved))
+                if cached is not None:
+                    skills = cached
+                    results_table.add_row(resolved.name, "[dim]cached[/dim]", "")
+                else:
                     project_info = scanner.scan(str(resolved))
 
-                langs_str = ", ".join(
-                    f"{ln} ({lines})"
-                    for ln, lines in sorted(project_info.languages.items(), key=lambda x: -x[1])
-                )
-                frameworks_str = ", ".join(project_info.frameworks) if project_info.frameworks else "-"
-                console.print(f"  {t('scan_detected', lang, langs=langs_str or '-', frameworks=frameworks_str)}")
+                    langs_str = ", ".join(
+                        f"{ln} ({lines})"
+                        for ln, lines in sorted(project_info.languages.items(), key=lambda x: -x[1])[:3]
+                    )
+                    frameworks_str = ", ".join(project_info.frameworks[:4]) if project_info.frameworks else ""
 
-                with console.status(f"  {t('analyzing', lang)}"):
                     key_files = extract_key_files(
                         str(resolved),
                         max_lines=cfg.scan_settings.max_file_lines,
                         exclude_patterns=cfg.scan_settings.exclude_patterns,
                     )
                     skills = await analyze_project(project_info, key_files, provider)
+                    cache.put(str(resolved), skills)
 
-                cache.put(str(resolved), skills)
+                    detail = frameworks_str or langs_str or "-"
+                    results_table.add_row(resolved.name, "[green]✓[/green]", detail)
 
-            if all_skills is not None:
-                all_skills = merge_profiles(all_skills, skills)
-            else:
-                all_skills = skills
+                if all_skills is not None:
+                    all_skills = merge_profiles(all_skills, skills)
+                else:
+                    all_skills = skills
+
+                progress.advance(overall)
+
+        console.print()
+        console.print(results_table)
 
         return all_skills
 
@@ -143,25 +176,39 @@ def scan(
 
             repos = repos[:10]
 
-        console.print(f"  {t('github_scanning', lang, count=str(len(repos)))}")
+        results_table = Table(show_header=False, show_edge=False, pad_edge=False, padding=(0, 1))
+        results_table.add_column("name", style="cyan", min_width=20)
+        results_table.add_column("status")
+        results_table.add_column("detail", style="dim")
 
-        for repo in repos:
-            clone_path = None
-            try:
-                with console.status(f"  {t('github_cloning', lang, repo=repo['full_name'])}"):
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold]{task.description}"),
+            BarColumn(bar_width=30),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            overall = progress.add_task(
+                f"  GitHub ({len(repos)} repos)",
+                total=len(repos),
+            )
+
+            for repo in repos:
+                clone_path = None
+                try:
+                    progress.update(overall, description=f"  {repo['name']}")
                     clone_path = await clone_repo(repo["clone_url"], token)
 
-                with console.status(f"  {t('scan_project', lang, name=repo['name'])}"):
                     project_info = scanner.scan(str(clone_path))
 
-                langs_str = ", ".join(
-                    f"{ln} ({lines})"
-                    for ln, lines in sorted(project_info.languages.items(), key=lambda x: -x[1])
-                )
-                frameworks_str = ", ".join(project_info.frameworks) if project_info.frameworks else "-"
-                console.print(f"  {t('scan_detected', lang, langs=langs_str or '-', frameworks=frameworks_str)}")
+                    frameworks_str = ", ".join(project_info.frameworks[:4]) if project_info.frameworks else ""
+                    langs_str = ", ".join(
+                        f"{ln} ({lines})"
+                        for ln, lines in sorted(project_info.languages.items(), key=lambda x: -x[1])[:3]
+                    )
 
-                with console.status(f"  {t('analyzing', lang)}"):
                     key_files = extract_key_files(
                         str(clone_path),
                         max_lines=cfg.scan_settings.max_file_lines,
@@ -169,16 +216,23 @@ def scan(
                     )
                     skills = await analyze_project(project_info, key_files, provider)
 
-                if all_skills is not None:
-                    all_skills = merge_profiles(all_skills, skills)
-                else:
-                    all_skills = skills
+                    if all_skills is not None:
+                        all_skills = merge_profiles(all_skills, skills)
+                    else:
+                        all_skills = skills
 
-            except subprocess.CalledProcessError:
-                console.print(f"  [red]{t('github_clone_failed', lang, repo=repo['full_name'], error='clone failed')}[/red]")
-            finally:
-                if clone_path is not None:
-                    cleanup_repo(clone_path)
+                    detail = frameworks_str or langs_str or "-"
+                    results_table.add_row(repo["name"], "[green]✓[/green]", detail)
+
+                except subprocess.CalledProcessError:
+                    results_table.add_row(repo["name"], "[red]✗[/red]", "clone failed")
+                finally:
+                    if clone_path is not None:
+                        cleanup_repo(clone_path)
+                    progress.advance(overall)
+
+        console.print()
+        console.print(results_table)
 
         return all_skills
 
@@ -200,7 +254,12 @@ def scan(
             notes_count = len([p for p in get_notes_dir().rglob("*.md") if p.parts and "concepts" not in p.parts and "insights" not in p.parts and "diagrams" not in p.parts])
             save_snapshot(prof, get_data_dir(), notes_count)
 
-            console.print(f"  [green]{t('scan_complete', lang)}[/green]")
+            n_langs = len(all_skills.languages)
+            n_domains = len(all_skills.domains)
+            n_gaps = sum(len(d.gaps) for d in all_skills.domains.values())
+            console.print()
+            console.print(f"  [green bold]{t('scan_complete', lang)}[/green bold]")
+            console.print(f"  [dim]{n_langs} languages · {n_domains} domains · {n_gaps} gaps[/dim]")
 
     asyncio.run(_run_scan())
 
