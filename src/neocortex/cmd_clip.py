@@ -367,7 +367,32 @@ def clip(
                     from neocortex.llm import create_provider
 
                     provider = create_provider(cfg)
+
+                    from neocortex.clipper import (
+                        _chinese_ratio,
+                        clean_content,
+                        maybe_translate_to_chinese,
+                    )
+
                     with console.status(f"  {t('clip_processing', lang)}"):
+                        content = await clean_content(content, provider)
+
+                        if lang.value == "zh":
+                            translation = await maybe_translate_to_chinese(content, provider)
+                            if translation:
+                                content = translation
+                            if title and _chinese_ratio(title) < 0.20:
+                                try:
+                                    zh_title = await provider.chat([
+                                        {"role": "system", "content": "将英文标题翻译成简洁的中文（10-25字）。直接输出译文，不加任何标记。"},
+                                        {"role": "user", "content": title},
+                                    ])
+                                    zh_title = zh_title.strip().strip('"').lstrip("# ")
+                                    if zh_title and _chinese_ratio(zh_title) >= 0.3:
+                                        title = zh_title
+                                except Exception:
+                                    pass
+
                         processed = await process_clip(
                             content,
                             title,
@@ -376,21 +401,9 @@ def clip(
                             lang,
                             notes_dir=notes_dir,
                         )
-                    # process_clip swallows provider/JSON errors internally and
-                    # returns a fallback dict with _llm_status='failed'; read
-                    # that here instead of assuming success.
                     llm_status = processed.pop("_llm_status", "ok")
                     llm_error = processed.pop("_llm_error", None)
-                    # Mirror service path: translate non-Chinese body when
-                    # user prefers Chinese so CLI clips also become readable.
-                    if lang.value == "zh" and llm_status == "ok":
-                        from neocortex.clipper import maybe_translate_to_chinese
-                        translation = await maybe_translate_to_chinese(content, provider)
-                        if translation:
-                            content = f"{content}\n\n---\n\n## 中文译文\n\n{translation}"
                 except Exception as exc:
-                    # Anything that escaped process_clip (e.g. create_provider
-                    # raising on bad config) is also a real failure.
                     llm_status = "failed"
                     llm_error = str(exc) or exc.__class__.__name__
 
@@ -418,7 +431,9 @@ def clip(
             summary=processed.get("summary", ""),
             relevance=processed.get("relevance", ""),
             priority="",
-            topic=processed.get("topic", "general"),
+            topic=processed.get("topic", "ai-practice"),
+            takeaways=processed.get("takeaways", []),
+            diagram=processed.get("diagram", ""),
             created_at=today.isoformat(),
             processed_at=today.isoformat() if processed.get("summary") else None,
             next_surface=(today + timedelta(days=3)).isoformat(),

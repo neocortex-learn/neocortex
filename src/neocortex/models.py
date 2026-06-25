@@ -460,6 +460,7 @@ class Clip(BaseModel):
     priority: str = ""
     topic: str = ""
     takeaways: list[str] = Field(default_factory=list)
+    diagram: str = ""
     created_at: str = ""
     processed_at: str | None = None
     promoted_to: str | None = None

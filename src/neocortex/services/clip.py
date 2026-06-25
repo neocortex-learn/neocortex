@@ -59,6 +59,7 @@ async def clip_text(
     source: str,
     *,
     process: bool | None = None,
+    force: bool = False,
     notes_dir: Path,
     cfg: AppConfig,
     profile: Profile,
@@ -75,21 +76,19 @@ async def clip_text(
     from neocortex.dedup import find_existing
     from neocortex.search import NoteIndex
 
-    # Dedup short-circuit before any work — saves HTTP fetch + LLM call.
-    # Only kicks in for URLs (find_existing returns None for pasted text).
-    pre_hit = find_existing(notes_dir, source)
-    if pre_hit is not None:
-        return _reused_clip_result(pre_hit, notes_dir, source)
+    if not force:
+        pre_hit = find_existing(notes_dir, source)
+        if pre_hit is not None:
+            return _reused_clip_result(pre_hit, notes_dir, source)
 
     fetched = await fetch_clip_content(source)
 
-    # Post-fetch dedup: site may have redirected to a canonical URL we've
-    # already stored under (e.g. trailing-slash variants).
-    canonical = fetched.get("source", source)
-    if canonical != source:
-        post_hit = find_existing(notes_dir, canonical)
-        if post_hit is not None:
-            return _reused_clip_result(post_hit, notes_dir, canonical)
+    if not force:
+        canonical = fetched.get("source", source)
+        if canonical != source:
+            post_hit = find_existing(notes_dir, canonical)
+            if post_hit is not None:
+                return _reused_clip_result(post_hit, notes_dir, canonical)
 
     # Hard fetch failure → don't save, don't process, return aborted result.
     if fetched.get("_fetch_status") == "failed":
@@ -156,6 +155,9 @@ async def clip_text(
 
                 provider = create_provider(cfg)
 
+                from neocortex.clipper import clean_content
+                content = await clean_content(content, provider)
+
                 if lang.value == "zh":
                     from neocortex.clipper import _chinese_ratio, maybe_translate_to_chinese
                     translation = await maybe_translate_to_chinese(content, provider)
@@ -208,6 +210,7 @@ async def clip_text(
         priority="",
         topic=processed.get("topic", "ai-practice"),
         takeaways=processed.get("takeaways", []),
+        diagram=processed.get("diagram", ""),
         created_at=today.isoformat(),
         processed_at=today.isoformat() if processed.get("summary") else None,
         next_surface=(today + timedelta(days=3)).isoformat(),

@@ -579,7 +579,13 @@ def save_clip(notes_dir: Path, clip: Clip) -> Path:
         body_parts.append("## 要点提炼\n")
         for t in clip.takeaways:
             body_parts.append(f"- {t}")
-        body_parts.append("\n---\n")
+        body_parts.append("")
+    if clip.diagram:
+        body_parts.append("\n```mermaid")
+        body_parts.append(clip.diagram)
+        body_parts.append("```\n")
+    if clip.takeaways or clip.diagram:
+        body_parts.append("---\n")
     body_parts.append(clip.content)
 
     md_content = "\n".join(frontmatter_lines) + "\n\n" + "\n".join(body_parts)

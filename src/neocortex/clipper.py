@@ -177,6 +177,12 @@ _FETCH_ERROR_MARKERS = (
     "页面不存在",
 )
 
+# Above this many extracted chars, a wall/error marker is treated as incidental
+# (a real page that merely *mentions* the phrase, or a third-party widget's
+# noscript fallback) rather than a hard fetch failure. Wall pages extract to
+# far less than this.
+_WALL_TEXT_THRESHOLD = 600
+
 
 def _failed_fetch_payload(source: str, error: str) -> dict:
     """Build a dict signalling hard fetch failure — caller must refuse to save."""
@@ -210,13 +216,20 @@ def _annotate_quality(payload: dict, extracted_text: str, source: str) -> dict:
     text = (extracted_text or "").strip()
     text_lower = text.lower()
 
-    # Hard errors first (override quality)
-    for marker in _FETCH_ERROR_MARKERS:
-        if marker in text_lower:
-            payload["_fetch_status"] = "failed"
-            payload["_fetch_error"] = f"page contains error marker: {marker!r}"
-            payload["_fetch_quality"] = "none"
-            return payload
+    # Hard errors first (override quality) — but only when extraction is short.
+    # A real wall page (JS wall / login wall / 404) extracts to almost nothing:
+    # the marker *is* essentially the whole body. When we've pulled a full
+    # article (thousands of chars), a stray marker is incidental noise — e.g. a
+    # Disqus comments "<noscript>Please enable JavaScript…</noscript>" fallback
+    # tacked onto the end of a complete pandoc-rendered post. Gating on length
+    # stops that fragment from nuking an otherwise-good 4KB clip.
+    if len(text) < _WALL_TEXT_THRESHOLD:
+        for marker in _FETCH_ERROR_MARKERS:
+            if marker in text_lower:
+                payload["_fetch_status"] = "failed"
+                payload["_fetch_error"] = f"page contains error marker: {marker!r}"
+                payload["_fetch_quality"] = "none"
+                return payload
 
     # Weak (but valid) extraction — save as bookmark, skip LLM
     if (not text or len(text) < 100) and source.startswith(("http://", "https://")):
@@ -252,6 +265,75 @@ def _chinese_ratio(text: str) -> float:
         if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF:
             cjk += 1
     return cjk / counted if counted else 0.0
+
+
+_JUNK_LINE_PATTERNS = [
+    re.compile(r"轻触查看原文"),
+    re.compile(r"向上滑动看下一个"),
+    re.compile(r"Scan with Weixin"),
+    re.compile(r"微信扫一扫可打开此内容"),
+    re.compile(r"×\s*分析"),
+    re.compile(r"\[Cancel\]\(javascript"),
+    re.compile(r"\[Allow\]\(javascript"),
+    re.compile(r"\[Got It\]\(javascript"),
+    re.compile(r"Share\s+Comment\s+Favorite"),
+    re.compile(r"Video Mini Program"),
+    re.compile(r"轻点两下取消"),
+    re.compile(r"use this Mini Program"),
+    re.compile(r"^\s*[：:]\s*[，,。.]\s*$"),
+]
+
+_JUNK_BLOCK_PATTERNS = [
+    re.compile(r"\n---\n.*?go\.bytebytego\.com.*?\n---\n", re.DOTALL),
+    re.compile(r"\n---\n.*?\byou\.com\b.*?\n---\n", re.DOTALL | re.IGNORECASE),
+    re.compile(r"\n---\n.*?Subscribe now.*?\n---\n", re.DOTALL | re.IGNORECASE),
+    re.compile(r"\n---\n.*?你将获得.*?了解如何.*?\n---\n", re.DOTALL),
+]
+
+
+def _regex_clean(content: str) -> str:
+    for pat in _JUNK_BLOCK_PATTERNS:
+        content = pat.sub("\n---\n", content)
+
+    lines = content.split("\n")
+    cleaned_lines = []
+    for line in lines:
+        if any(p.search(line) for p in _JUNK_LINE_PATTERNS):
+            continue
+        cleaned_lines.append(line)
+    content = "\n".join(cleaned_lines)
+
+    content = re.sub(r"\n{4,}", "\n\n\n", content)
+    return content.strip()
+
+
+async def clean_content(content: str, provider: LLMProvider) -> str:
+    """Remove ads, newsletter boilerplate, and social media UI junk.
+
+    Two-pass: regex strips known patterns, then LLM removes embedded ads
+    that regex can't catch (sponsored sections in newsletters, etc.).
+    """
+    if not content or len(content) < 200:
+        return content
+    content = _regex_clean(content)
+
+    try:
+        cleaned = await provider.chat([
+            {"role": "system", "content": (
+                "你是内容清洗器。删除文章中的嵌入式广告和推广段落，保留正文。\n"
+                "广告特征：与文章主题无关的产品推荐、带推广链接的段落、"
+                "'你将获得/了解更多/立即订阅/免费下载'等行动号召。\n"
+                "同时删除文末独立的自我推广段落（如'联系我聊一聊'、'关注我的LinkedIn'）。\n"
+                "保留所有正文、markdown格式、代码块、图片。直接输出结果。"
+            )},
+            {"role": "user", "content": content},
+        ])
+        cleaned = cleaned.strip()
+        if len(cleaned) < len(content) * 0.3:
+            return content
+        return cleaned
+    except Exception:
+        return content
 
 
 _TRANSLATE_GLOSSARY = """
@@ -417,12 +499,27 @@ async def process_clip(
         '  "related_concepts": ["concept1", "concept2"],\n'
         '  "auto_tags": ["tag1", "tag2", "tag3"],\n'
         f'  "topic": "MUST be one of: {CLIP_CATEGORIES_STR}",\n'
-        '  "takeaways": ["核心要点1", "核心要点2", "核心要点3"]\n'
+        '  "takeaways": ["核心要点1", "核心要点2", "核心要点3"],\n'
+        '  "diagram": "mermaid code or empty string"\n'
         "}\n\n"
         "takeaways: Extract 3-5 key takeaways from the fragment. Each should be a "
         "complete, self-contained sentence that captures an actionable insight or "
         "important idea. The reader should understand the article's value from "
         "takeaways alone without reading the full text.\n\n"
+        "diagram: Decide if this content benefits from a visual diagram. "
+        "Generate a diagram ONLY for content with clear structure: architecture, "
+        "multi-step processes, comparisons, timelines, or concept hierarchies. "
+        "Do NOT generate diagrams for opinion pieces, short tips, or narrative essays. "
+        "If a diagram is useful, output valid Mermaid code (mindmap, flowchart, or graph). "
+        "Use Chinese labels. If no diagram is needed, output empty string \"\".\n"
+        "Mermaid mindmap example:\n"
+        "mindmap\n"
+        "  root((主题))\n"
+        "    分支1\n"
+        "      细节A\n"
+        "      细节B\n"
+        "    分支2\n"
+        "      细节C\n\n"
         f"topic: Pick the SINGLE best match from [{CLIP_CATEGORIES_STR}]. "
         "ai-practice = how to USE AI tools (Claude Code, Codex, prompts, workflows). "
         "ai-architecture = how AI WORKS internally (LLM internals, agent architecture, system design). "
@@ -454,6 +551,7 @@ async def process_clip(
             "auto_tags": data.get("auto_tags", [])[:5],
             "topic": topic,
             "takeaways": data.get("takeaways", [])[:5],
+            "diagram": data.get("diagram", ""),
             "_llm_status": "ok",
             "_llm_error": None,
         }
@@ -488,6 +586,7 @@ def _fallback_process(content: str, title: str) -> dict:
         "auto_tags": tags,
         "topic": topic,
         "takeaways": [],
+        "diagram": "",
     }
 
 

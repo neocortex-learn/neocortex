@@ -30,6 +30,10 @@ class ClipRequest(BaseModel):
             "None = use cfg.clip_default_process (Q11 default-on)."
         ),
     )
+    force: bool = Field(
+        default=False,
+        description="Skip dedup check, re-clip even if the URL already exists.",
+    )
 
 
 def make_router(require_token) -> APIRouter:
@@ -51,6 +55,7 @@ def make_router(require_token) -> APIRouter:
         return await clip_text(
             req.source,
             process=req.process,
+            force=req.force,
             notes_dir=notes_dir,
             cfg=cfg,
             profile=profile,
