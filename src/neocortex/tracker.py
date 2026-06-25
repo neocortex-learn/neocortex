@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from urllib.parse import urlparse
 
 from neocortex.models import RecommendationRecord
@@ -69,11 +70,14 @@ def get_unlocked_recommendations(
 def expire_stale_recommendations(
     records: list[RecommendationRecord],
     max_age_days: int = 30,
+    *,
+    today: date | None = None,
 ) -> list[RecommendationRecord]:
     """Mark recommendations older than max_age_days as skipped."""
-    from datetime import date, timedelta
+    from datetime import timedelta
 
-    cutoff = (date.today() - timedelta(days=max_age_days)).isoformat()
+    ref = today or date.today()
+    cutoff = (ref - timedelta(days=max_age_days)).isoformat()
     for rec in records:
         if rec.status == "pending" and rec.created_at < cutoff:
             rec.status = "skipped"

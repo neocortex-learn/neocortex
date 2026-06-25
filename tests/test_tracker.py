@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from neocortex.models import RecommendationRecord, Resource
 from neocortex.tracker import (
     _extract_keywords,
@@ -171,22 +173,24 @@ class TestMatchLevel3:
 
 
 class TestExpireStale:
+    REF = date(2026, 4, 1)
+
     def test_expires_old_pending(self):
         old = _rec(created_at="2025-01-01")
-        result = expire_stale_recommendations([old])
+        result = expire_stale_recommendations([old], today=self.REF)
         assert result[0].status == "skipped"
 
     def test_keeps_recent_pending(self):
         recent = _rec(created_at="2026-03-20")
-        result = expire_stale_recommendations([recent])
+        result = expire_stale_recommendations([recent], today=self.REF)
         assert result[0].status == "pending"
 
     def test_skips_completed(self):
         completed = _rec(created_at="2025-01-01", status="completed")
-        result = expire_stale_recommendations([completed])
+        result = expire_stale_recommendations([completed], today=self.REF)
         assert result[0].status == "completed"
 
     def test_custom_max_age(self):
         recent = _rec(created_at="2026-03-10")
-        result = expire_stale_recommendations([recent], max_age_days=5)
+        result = expire_stale_recommendations([recent], max_age_days=5, today=self.REF)
         assert result[0].status == "skipped"

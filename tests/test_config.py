@@ -114,8 +114,9 @@ class TestDirectories:
         assert d.is_dir()
 
     def test_get_notes_dir_creates_directory(self, tmp_path, monkeypatch):
-        # With no config file, get_notes_dir falls back to ~/Documents/Neocortex
+        # With no config file and no layout root, falls back to ~/Documents/Neocortex
         monkeypatch.setattr("neocortex.config._config_path", lambda: tmp_path / "nonexistent.json")
+        monkeypatch.setattr("neocortex.config._layout_root", lambda: None)
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         notes = get_notes_dir()
         assert notes.exists()

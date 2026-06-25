@@ -9,6 +9,7 @@ Uses mock LLM to avoid real API calls.
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -249,7 +250,7 @@ class TestClosedLoopE2E:
         save_recommendations([old_rec, recent_rec])
 
         records = load_recommendations()
-        records = expire_stale_recommendations(records)
+        records = expire_stale_recommendations(records, today=date(2026, 4, 1))
         save_recommendations(records)
 
         final = load_recommendations()
