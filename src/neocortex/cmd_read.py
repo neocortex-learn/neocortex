@@ -44,6 +44,387 @@ def _resolve_topic_dir(notes_dir: Path, doc, outline, prof: Profile) -> Path:
     return notes_dir / "general"
 
 
+def _find_duplicate_read(notes_dir: Path, source: str, force: bool) -> Path | None:
+    """Mirror services/read.py: short-circuit if this URL was already deep-read.
+
+    Saves 30s-3min and ~$0.05 per duplicate. --force bypasses dedup when
+    re-reading is intentional.
+    """
+    if force:
+        return None
+    from neocortex.dedup import find_existing, normalize_source_url
+    norm = normalize_source_url(source)
+    if not norm:
+        return None
+    return find_existing(notes_dir, norm)
+
+
+async def _run_scan_mode(doc, prof: Profile, provider, lang) -> None:
+    """Quick scan: 1-line summary + priority rating, no notes saved."""
+    from neocortex.reader.teacher import generate_scan_summary
+
+    with console.status(f"  {t('scan_analyzing', lang)}"):
+        result = await generate_scan_summary(doc, prof, provider)
+
+    console.print()
+    priority_colors = {"P0": "red bold", "P1": "yellow", "P2": "dim"}
+    style = priority_colors.get(result.get("priority", "P2"), "dim")
+    console.print(f"  [{style}]{result.get('priority', 'P2')}[/{style}] {result.get('summary', doc.title)}")
+    if result.get("relevant_gaps"):
+        gaps_str = ", ".join(result["relevant_gaps"][:5])
+        console.print(f"  [dim]{t('scan_gaps', lang)}: {gaps_str}[/dim]")
+    console.print()
+
+
+async def _generate_and_display_outline(doc, prof: Profile, provider, lang):
+    """Generate the reading outline and render it as a marker-annotated list."""
+    from neocortex.reader.teacher import generate_outline
+
+    with console.status(f"  {t('analyzing', lang)}"):
+        outline = await generate_outline(doc, prof, provider)
+
+    console.print()
+    console.print(f"  [bold]{t('read_outline_title', lang, title=doc.title)}[/bold]")
+    console.print("  " + "━" * 52)
+    console.print()
+
+    marker_icons = {"skip": "✓", "brief": "△", "deep": "★"}
+    marker_styles = {"skip": "dim", "brief": "yellow", "deep": "bold green"}
+    marker_keys = {"skip": "read_marker_skip", "brief": "read_marker_brief", "deep": "read_marker_deep"}
+
+    for item in outline.items:
+        icon = marker_icons.get(item.marker, "△")
+        style = marker_styles.get(item.marker, "")
+        marker_text = t(marker_keys.get(item.marker, "read_marker_brief"), lang)
+        line = Text()
+        line.append(f"  {icon}  ", style=style)
+        line.append(f"{item.title:<40}", style=style)
+        line.append(f" {marker_text}", style="dim")
+        if item.reason:
+            line.append(f" ({item.reason})", style="dim")
+        console.print(line)
+
+    console.print()
+    return outline
+
+
+def _confirm_outline(lang) -> bool:
+    confirm = Prompt.ask(
+        f"  [bold]?[/bold] {t('read_outline_confirm', lang)}",
+        choices=["y", "n", "Y", "N"],
+        default="y",
+        console=console,
+    )
+    return confirm.lower() != "n"
+
+
+def _write_read_note(
+    notes_dir: Path,
+    doc,
+    outline,
+    prof: Profile,
+    notes_content: str,
+    source: str,
+    focus: str | None,
+) -> tuple[Path, str, str]:
+    """Resolve the topic dir, build frontmatter, and write the note to disk.
+
+    Returns (note_path, full_content, safe_title).
+    """
+    safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in doc.title)
+    safe_title = safe_title.strip().replace(" ", "-").lower()[:60]
+    if not safe_title:
+        safe_title = "note"
+    today = date.today().isoformat()
+
+    # 按 profile domain 分类存储
+    topic_dir = _resolve_topic_dir(notes_dir, doc, outline, prof)
+    topic_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"{safe_title}-{today}.md"
+    note_path = topic_dir / filename
+    counter = 1
+    while note_path.exists():
+        counter += 1
+        filename = f"{safe_title}-{today}-{counter}.md"
+        note_path = topic_dir / filename
+
+    # Build frontmatter
+    frontmatter_lines = [
+        "---",
+        f"title: \"{doc.title.replace(chr(34), chr(39))}\"",
+        f"source: \"{source.replace(chr(34), chr(39))}\"",
+        f"date: {today}",
+    ]
+    # Add tags from outline markers
+    deep_topics = [item.title for item in outline.items if item.marker == "deep"]
+    if deep_topics:
+        frontmatter_lines.append("tags:")
+        for topic in deep_topics[:5]:
+            safe_tag = topic.strip().replace(" ", "-").lower()[:30]
+            if safe_tag:
+                frontmatter_lines.append(f"  - {safe_tag}")
+    if focus:
+        frontmatter_lines.append(f"focus: \"{focus}\"")
+    frontmatter_lines.append("---")
+    frontmatter_lines.append("")
+
+    full_content = "\n".join(frontmatter_lines) + notes_content
+    note_path.write_text(full_content, encoding="utf-8")
+
+    return note_path, full_content, safe_title
+
+
+def _render_diagrams_and_html(
+    full_content: str,
+    note_path: Path,
+    doc,
+    source: str,
+    lang,
+    notes_dir: Path,
+    safe_title: str,
+) -> None:
+    """Render Mermaid diagrams to SVG and generate the HTML companion file."""
+    from neocortex.reader.visual import generate_html_note, has_mermaid_diagrams, render_mermaid_to_svg
+
+    if not has_mermaid_diagrams(full_content):
+        return
+
+    # SVG pre-rendering: replace Mermaid blocks with inline images
+    with console.status(f"  {t('read_rendering_diagrams', lang)}"):
+        rendered = render_mermaid_to_svg(full_content, notes_dir, safe_title)
+    if rendered != full_content:
+        note_path.write_text(rendered, encoding="utf-8")
+        svg_count = rendered.count("](diagrams/")
+        console.print(f"  [green]{t('read_svg_saved', lang, count=str(svg_count))}[/green]")
+
+    # HTML companion for full interactive view
+    html_content = generate_html_note(full_content, doc.title, source, lang.value)
+    html_path = note_path.with_suffix(".html")
+    html_path.write_text(html_content, encoding="utf-8")
+    console.print(f"  [green]{t('read_html_saved', lang, path=str(html_path))}[/green]")
+
+
+def _index_read_note(note_path: Path, notes_dir: Path, doc) -> None:
+    """Index the final content on disk (after all rendering/SVG overwrites)."""
+    from neocortex.config import get_data_dir
+    from neocortex.search import NoteIndex
+
+    final_content = note_path.read_text(encoding="utf-8")
+    note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
+    try:
+        rel = str(note_path.relative_to(notes_dir))
+    except ValueError:
+        rel = note_path.name
+    note_index.index_note(rel, doc.title, final_content)
+
+
+async def _maybe_generate_flashcards(
+    doc, outline, notes_content: str, prof: Profile, provider, notes_dir: Path, note_path: Path, lang,
+) -> None:
+    import uuid as _uuid
+
+    from neocortex.config import save_flashcards
+    from neocortex.models import Flashcard
+    from neocortex.reader.teacher import generate_flashcards
+
+    try:
+        with console.status(f"  {t('flashcard_generating', lang)}"):
+            raw_cards = await generate_flashcards(doc, outline, notes_content, prof, provider)
+        if raw_cards:
+            cards = [Flashcard(
+                id=str(_uuid.uuid4())[:8],
+                source_note=note_path.name,
+                question=c["question"],
+                answer=c["answer"],
+                concept=c.get("concept", ""),
+                difficulty=c.get("difficulty", "medium"),
+                knowledge_layer=c.get("knowledge_layer", "conceptual"),
+                next_review=date.today().isoformat(),
+            ) for c in raw_cards]
+            save_flashcards(notes_dir, note_path.stem, cards)
+            console.print(f"  [green]{t('flashcard_created', lang, count=str(len(cards)))}[/green]")
+    except Exception:
+        pass
+
+
+async def _maybe_generate_exercises(
+    doc, outline, notes_content: str, prof: Profile, provider, note_path: Path, lang,
+) -> None:
+    try:
+        from neocortex.reader.teacher import generate_exercises
+        with console.status(f"  {t('exercise_generating', lang)}"):
+            exercises_content = await generate_exercises(doc, outline, notes_content, prof, provider)
+        if exercises_content and exercises_content.strip():
+            exercises_path = note_path.with_suffix(".exercises.md")
+            ex_content = (
+                f"---\ntype: exercise\nsource: \"{doc.title}\"\ndate: {date.today().isoformat()}\n---\n\n"
+                f"# Exercises: {doc.title}\n\n{exercises_content}"
+            )
+            exercises_path.write_text(ex_content, encoding="utf-8")
+            console.print(f"  [green]{t('exercise_created', lang, path=exercises_path.name)}[/green]")
+    except Exception:
+        pass
+
+
+async def _maybe_compile_note(note_path: Path, notes_dir: Path, prof: Profile, provider, lang) -> None:
+    try:
+        from neocortex.compiler import compile_note
+        with console.status(f"  {t('compile_updating', lang)}"):
+            compile_result = await compile_note(note_path, notes_dir, prof, provider, lang)
+        if compile_result.concepts_created + compile_result.concepts_updated > 0:
+            console.print(
+                f"  [green]{t('compile_done', lang, created=str(compile_result.concepts_created), updated=str(compile_result.concepts_updated))}[/green]"
+            )
+        if compile_result.conflicts:
+            for conflict in compile_result.conflicts:
+                conflict_type = conflict.get("type", "genuine")
+                type_key = f"conflict_{conflict_type}"
+                type_label = t(type_key, lang)
+                console.print(f"  [yellow]⚡ {t('conflict_detected', lang)}: {type_label}[/yellow]")
+                console.print(f"    {conflict.get('explanation', '')}")
+                hint = conflict.get("resolution_hint", "")
+                if hint:
+                    console.print(f"    [dim]{hint}[/dim]")
+    except Exception:
+        pass
+
+
+async def _maybe_generate_audio(notes_content: str, note_path: Path, lang) -> None:
+    from neocortex.tts import prepare_text_for_speech, text_to_speech
+
+    audio_path = note_path.with_suffix(".mp3")
+    speech_text = prepare_text_for_speech(notes_content)
+    if not speech_text:
+        return
+    try:
+        with console.status(f"  {t('audio_generating', lang)}"):
+            await text_to_speech(speech_text, str(audio_path), lang.value)
+        console.print(f"  [green]{t('audio_saved', lang, path=str(audio_path))}[/green]")
+    except RuntimeError as exc:
+        console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
+
+
+def _maybe_auto_open(note_path: Path, cfg) -> None:
+    if not cfg.output_settings.auto_open:
+        return
+    import platform
+    import subprocess
+    opener = "open" if platform.system() == "Darwin" else "xdg-open"
+    try:
+        subprocess.Popen([opener, str(note_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
+
+
+async def _run_post_save_steps(
+    doc, outline, notes_content: str, prof: Profile, provider, notes_dir: Path, note_path: Path, lang, cfg,
+    flashcards: bool, exercises: bool, compile: bool, full: bool, audio: bool,
+    source: str, focus: str | None,
+) -> None:
+    """Optional post-save steps (flashcards/exercises/compile/audio/auto-open),
+    then logging, recommendation matching, feedback, and reflection collection."""
+    do_flashcards = flashcards or full
+    do_exercises = exercises or full
+    do_compile = compile or full
+
+    if do_flashcards:
+        await _maybe_generate_flashcards(doc, outline, notes_content, prof, provider, notes_dir, note_path, lang)
+
+    if do_exercises:
+        await _maybe_generate_exercises(doc, outline, notes_content, prof, provider, note_path, lang)
+
+    if do_compile:
+        await _maybe_compile_note(note_path, notes_dir, prof, provider, lang)
+
+    if audio:
+        await _maybe_generate_audio(notes_content, note_path, lang)
+
+    _maybe_auto_open(note_path, cfg)
+
+    from neocortex.config import append_log
+    append_log("read", doc.title)
+
+    _match_and_update_recommendations(lang, prof, source, doc.title, str(note_path))
+
+    _collect_feedback(lang, prof, source, doc.title, focus, note_path)
+
+    import random
+
+    if random.random() < 0.4:
+        _collect_reflection(lang, prof, note_path, provider)
+
+
+async def _run_read_pipeline(
+    source: str,
+    scan: bool,
+    focus: str | None,
+    question: str | None,
+    audio: bool,
+    deep: bool,
+    yes: bool,
+    flashcards: bool,
+    exercises: bool,
+    compile: bool,
+    full: bool,
+    force: bool,
+    lang,
+    prof: Profile,
+    provider,
+    cfg,
+) -> None:
+    from neocortex.config import get_notes_dir
+    from neocortex.reader.fetcher import ContentFetcher
+    from neocortex.reader.teacher import generate_notes
+
+    notes_dir = get_notes_dir()
+
+    existing = _find_duplicate_read(notes_dir, source, force)
+    if existing:
+        console.print(f"  [yellow]{t('read_reused', lang, path=str(existing))}[/yellow]")
+        return
+
+    fetcher = ContentFetcher(provider=provider)
+
+    with console.status(f"  {t('read_fetching', lang)}"):
+        doc = await fetcher.fetch(source)
+
+    if scan:
+        await _run_scan_mode(doc, prof, provider, lang)
+        return
+
+    outline = await _generate_and_display_outline(doc, prof, provider, lang)
+
+    if not yes and not _confirm_outline(lang):
+        return
+
+    with console.status(f"  {t('read_generating', lang)}"):
+        notes_content = await generate_notes(
+            doc, outline, prof, provider,
+            focus=focus,
+            question=question,
+            deep=deep,
+        )
+
+    notes_dir = get_notes_dir()
+    note_path, full_content, safe_title = _write_read_note(
+        notes_dir, doc, outline, prof, notes_content, source, focus,
+    )
+
+    console.print()
+    console.print(f"  [green]{t('read_saved', lang, path=str(note_path))}[/green]")
+
+    _render_diagrams_and_html(full_content, note_path, doc, source, lang, notes_dir, safe_title)
+
+    _index_read_note(note_path, notes_dir, doc)
+
+    # Optional steps — only run when explicitly requested
+    await _run_post_save_steps(
+        doc, outline, notes_content, prof, provider, notes_dir, note_path, lang, cfg,
+        flashcards, exercises, compile, full, audio, source, focus,
+    )
+
+
 @app.command()
 def read(
     source: str = typer.Argument(..., help="URL, PDF, or file path"),
@@ -60,7 +441,7 @@ def read(
     force: bool = typer.Option(False, "--force", "-f", help="跳过 URL 去重，强制重读重存"),
 ) -> None:
     """Read a URL/file and generate personalized notes."""
-    from neocortex.config import get_data_dir, get_notes_dir, load_config, load_profile
+    from neocortex.config import load_config, load_profile
     from neocortex.llm import create_provider
 
     cfg = load_config()
@@ -74,264 +455,10 @@ def read(
         console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
         raise typer.Exit(1)
 
-    async def _run_read() -> None:
-        from neocortex.reader.fetcher import ContentFetcher
-        from neocortex.reader.teacher import generate_notes, generate_outline
-
-        notes_dir = get_notes_dir()
-
-        # Mirror services/read.py: short-circuit if this URL was already
-        # deep-read. Saves 30s–3min and ~$0.05 per duplicate. --scan and
-        # --deep also benefit; they all start from the fetched doc.
-        # --force bypasses dedup when re-reading is intentional.
-        if not force:
-            from neocortex.dedup import find_existing, normalize_source_url
-            norm = normalize_source_url(source)
-            if norm:
-                existing = find_existing(notes_dir, norm)
-                if existing:
-                    console.print(
-                        f"  [yellow]{t('read_reused', lang, path=str(existing))}[/yellow]"
-                    )
-                    return
-
-        fetcher = ContentFetcher(provider=provider)
-
-        with console.status(f"  {t('read_fetching', lang)}"):
-            doc = await fetcher.fetch(source)
-
-        if scan:
-            with console.status(f"  {t('scan_analyzing', lang)}"):
-                from neocortex.reader.teacher import generate_scan_summary
-
-                result = await generate_scan_summary(doc, prof, provider)
-
-            console.print()
-            priority_colors = {"P0": "red bold", "P1": "yellow", "P2": "dim"}
-            style = priority_colors.get(result.get("priority", "P2"), "dim")
-            console.print(f"  [{style}]{result.get('priority', 'P2')}[/{style}] {result.get('summary', doc.title)}")
-            if result.get("relevant_gaps"):
-                gaps_str = ", ".join(result["relevant_gaps"][:5])
-                console.print(f"  [dim]{t('scan_gaps', lang)}: {gaps_str}[/dim]")
-            console.print()
-            return
-
-        with console.status(f"  {t('analyzing', lang)}"):
-            outline = await generate_outline(doc, prof, provider)
-
-        console.print()
-        console.print(f"  [bold]{t('read_outline_title', lang, title=doc.title)}[/bold]")
-        console.print("  " + "\u2501" * 52)
-        console.print()
-
-        marker_icons = {"skip": "\u2713", "brief": "\u25b3", "deep": "\u2605"}
-        marker_styles = {"skip": "dim", "brief": "yellow", "deep": "bold green"}
-        marker_keys = {"skip": "read_marker_skip", "brief": "read_marker_brief", "deep": "read_marker_deep"}
-
-        for item in outline.items:
-            icon = marker_icons.get(item.marker, "\u25b3")
-            style = marker_styles.get(item.marker, "")
-            marker_text = t(marker_keys.get(item.marker, "read_marker_brief"), lang)
-            line = Text()
-            line.append(f"  {icon}  ", style=style)
-            line.append(f"{item.title:<40}", style=style)
-            line.append(f" {marker_text}", style="dim")
-            if item.reason:
-                line.append(f" ({item.reason})", style="dim")
-            console.print(line)
-
-        console.print()
-        if not yes:
-            confirm = Prompt.ask(
-                f"  [bold]?[/bold] {t('read_outline_confirm', lang)}",
-                choices=["y", "n", "Y", "N"],
-                default="y",
-                console=console,
-            )
-            if confirm.lower() == "n":
-                return
-
-        with console.status(f"  {t('read_generating', lang)}"):
-            notes_content = await generate_notes(
-                doc, outline, prof, provider,
-                focus=focus,
-                question=question,
-                deep=deep,
-            )
-
-        notes_dir = get_notes_dir()
-        safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in doc.title)
-        safe_title = safe_title.strip().replace(" ", "-").lower()[:60]
-        if not safe_title:
-            safe_title = "note"
-        today = date.today().isoformat()
-
-        # 按 profile domain 分类存储
-        topic_dir = _resolve_topic_dir(notes_dir, doc, outline, prof)
-        topic_dir.mkdir(parents=True, exist_ok=True)
-
-        filename = f"{safe_title}-{today}.md"
-        note_path = topic_dir / filename
-        counter = 1
-        while note_path.exists():
-            counter += 1
-            filename = f"{safe_title}-{today}-{counter}.md"
-            note_path = topic_dir / filename
-        # Build frontmatter
-        frontmatter_lines = [
-            "---",
-            f"title: \"{doc.title.replace(chr(34), chr(39))}\"",
-            f"source: \"{source.replace(chr(34), chr(39))}\"",
-            f"date: {today}",
-        ]
-        # Add tags from outline markers
-        deep_topics = [item.title for item in outline.items if item.marker == "deep"]
-        if deep_topics:
-            frontmatter_lines.append("tags:")
-            for topic in deep_topics[:5]:
-                safe_tag = topic.strip().replace(" ", "-").lower()[:30]
-                if safe_tag:
-                    frontmatter_lines.append(f"  - {safe_tag}")
-        if focus:
-            frontmatter_lines.append(f"focus: \"{focus}\"")
-        frontmatter_lines.append("---")
-        frontmatter_lines.append("")
-
-        full_content = "\n".join(frontmatter_lines) + notes_content
-        note_path.write_text(full_content, encoding="utf-8")
-
-        console.print()
-        console.print(f"  [green]{t('read_saved', lang, path=str(note_path))}[/green]")
-
-        # Render Mermaid diagrams to SVG and generate HTML companion
-        from neocortex.reader.visual import generate_html_note, has_mermaid_diagrams, render_mermaid_to_svg
-
-        if has_mermaid_diagrams(full_content):
-            # SVG pre-rendering: replace Mermaid blocks with inline images
-            with console.status(f"  {t('read_rendering_diagrams', lang)}"):
-                rendered = render_mermaid_to_svg(full_content, notes_dir, safe_title)
-            if rendered != full_content:
-                note_path.write_text(rendered, encoding="utf-8")
-                svg_count = rendered.count("](diagrams/")
-                console.print(f"  [green]{t('read_svg_saved', lang, count=str(svg_count))}[/green]")
-
-            # HTML companion for full interactive view
-            html_content = generate_html_note(full_content, doc.title, source, lang.value)
-            html_path = note_path.with_suffix(".html")
-            html_path.write_text(html_content, encoding="utf-8")
-            console.print(f"  [green]{t('read_html_saved', lang, path=str(html_path))}[/green]")
-
-        # Index the final content on disk (after all rendering/SVG overwrites)
-        from neocortex.search import NoteIndex
-        final_content = note_path.read_text(encoding="utf-8")
-        note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
-        try:
-            rel = str(note_path.relative_to(notes_dir))
-        except ValueError:
-            rel = note_path.name
-        note_index.index_note(rel, doc.title, final_content)
-
-        # Optional steps — only run when explicitly requested
-        do_flashcards = flashcards or full
-        do_exercises = exercises or full
-        do_compile = compile or full
-
-        if do_flashcards:
-            import uuid as _uuid
-            from neocortex.reader.teacher import generate_flashcards
-            from neocortex.config import save_flashcards
-            from neocortex.models import Flashcard
-
-            try:
-                with console.status(f"  {t('flashcard_generating', lang)}"):
-                    raw_cards = await generate_flashcards(doc, outline, notes_content, prof, provider)
-                if raw_cards:
-                    cards = [Flashcard(
-                        id=str(_uuid.uuid4())[:8],
-                        source_note=note_path.name,
-                        question=c["question"],
-                        answer=c["answer"],
-                        concept=c.get("concept", ""),
-                        difficulty=c.get("difficulty", "medium"),
-                        knowledge_layer=c.get("knowledge_layer", "conceptual"),
-                        next_review=date.today().isoformat(),
-                    ) for c in raw_cards]
-                    save_flashcards(notes_dir, note_path.stem, cards)
-                    console.print(f"  [green]{t('flashcard_created', lang, count=str(len(cards)))}[/green]")
-            except Exception:
-                pass
-
-        if do_exercises:
-            try:
-                from neocortex.reader.teacher import generate_exercises
-                with console.status(f"  {t('exercise_generating', lang)}"):
-                    exercises_content = await generate_exercises(doc, outline, notes_content, prof, provider)
-                if exercises_content and exercises_content.strip():
-                    exercises_path = note_path.with_suffix(".exercises.md")
-                    ex_content = (
-                        f"---\ntype: exercise\nsource: \"{doc.title}\"\ndate: {date.today().isoformat()}\n---\n\n"
-                        f"# Exercises: {doc.title}\n\n{exercises_content}"
-                    )
-                    exercises_path.write_text(ex_content, encoding="utf-8")
-                    console.print(f"  [green]{t('exercise_created', lang, path=exercises_path.name)}[/green]")
-            except Exception:
-                pass
-
-        if do_compile:
-            try:
-                from neocortex.compiler import compile_note
-                with console.status(f"  {t('compile_updating', lang)}"):
-                    compile_result = await compile_note(note_path, notes_dir, prof, provider, lang)
-                if compile_result.concepts_created + compile_result.concepts_updated > 0:
-                    console.print(f"  [green]{t('compile_done', lang, created=str(compile_result.concepts_created), updated=str(compile_result.concepts_updated))}[/green]")
-                if compile_result.conflicts:
-                    for conflict in compile_result.conflicts:
-                        conflict_type = conflict.get("type", "genuine")
-                        type_key = f"conflict_{conflict_type}"
-                        type_label = t(type_key, lang)
-                        console.print(f"  [yellow]\u26a1 {t('conflict_detected', lang)}: {type_label}[/yellow]")
-                        console.print(f"    {conflict.get('explanation', '')}")
-                        hint = conflict.get("resolution_hint", "")
-                        if hint:
-                            console.print(f"    [dim]{hint}[/dim]")
-            except Exception:
-                pass
-
-        if audio:
-            from neocortex.tts import prepare_text_for_speech, text_to_speech
-
-            audio_path = note_path.with_suffix(".mp3")
-            speech_text = prepare_text_for_speech(notes_content)
-            if speech_text:
-                try:
-                    with console.status(f"  {t('audio_generating', lang)}"):
-                        await text_to_speech(speech_text, str(audio_path), lang.value)
-                    console.print(f"  [green]{t('audio_saved', lang, path=str(audio_path))}[/green]")
-                except RuntimeError as exc:
-                    console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
-
-        if cfg.output_settings.auto_open:
-            import platform
-            import subprocess
-            opener = "open" if platform.system() == "Darwin" else "xdg-open"
-            try:
-                subprocess.Popen([opener, str(note_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except OSError:
-                pass
-
-        from neocortex.config import append_log
-        append_log("read", doc.title)
-
-        _match_and_update_recommendations(lang, prof, source, doc.title, str(note_path))
-
-        _collect_feedback(lang, prof, source, doc.title, focus, note_path)
-
-        import random
-
-        if random.random() < 0.4:
-            _collect_reflection(lang, prof, note_path, provider)
-
-    run_async(_run_read())
+    run_async(_run_read_pipeline(
+        source, scan, focus, question, audio, deep, yes, flashcards, exercises, compile, full, force,
+        lang, prof, provider, cfg,
+    ))
 
 
 def _match_and_update_recommendations(
@@ -392,7 +519,7 @@ def _match_and_update_recommendations(
 
     for gap_name in matched.related_gaps:
         new_status = update_gap_status(gap_name, prof)
-        status_label = {"gap": "gap", "learning": "learning", "verified": "verified \u2713", "known": "known \u2713\u2713"}
+        status_label = {"gap": "gap", "learning": "learning", "verified": "verified ✓", "known": "known ✓✓"}
         console.print(f"  [dim]{t('recommend_gap_updated', lang, gap=gap_name, status=status_label.get(new_status, new_status))}[/dim]")
         if new_status == "learning":
             gap_progress = load_gap_progress()
