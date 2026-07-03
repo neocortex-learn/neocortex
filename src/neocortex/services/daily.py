@@ -13,7 +13,6 @@ days-ago. The HTTP path will not block on LLM by default — see ``with_llm``.
 from __future__ import annotations
 
 import json as json_lib
-import re
 from datetime import date
 from pathlib import Path
 
@@ -51,7 +50,7 @@ async def build_briefing(
     ``with_llm=True`` triggers one batched LLM call to summarise "what's
     changed" — slower (1–3s), better signal.
     """
-    from neocortex.config import get_data_dir, load_clips
+    from neocortex.config import load_clips
     from neocortex.config import get_due_flashcards
 
     today = date.today()

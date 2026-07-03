@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 from datetime import date
 from pathlib import Path
 
@@ -11,7 +11,6 @@ from rich.prompt import Prompt
 from rich.text import Text
 
 from neocortex.cli import (
-    _get_lang,
     _maybe_migrate_notes,
     app,
     calibrate,
@@ -61,7 +60,7 @@ def read(
     force: bool = typer.Option(False, "--force", "-f", help="跳过 URL 去重，强制重读重存"),
 ) -> None:
     """Read a URL/file and generate personalized notes."""
-    from neocortex.config import get_data_dir, get_notes_dir, load_config, load_profile, save_profile
+    from neocortex.config import get_data_dir, get_notes_dir, load_config, load_profile
     from neocortex.llm import create_provider
 
     cfg = load_config()
@@ -332,7 +331,7 @@ def read(
         if random.random() < 0.4:
             _collect_reflection(lang, prof, note_path, provider)
 
-    asyncio.run(_run_read())
+    run_async(_run_read())
 
 
 def _match_and_update_recommendations(

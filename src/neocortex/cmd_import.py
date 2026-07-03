@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 from pathlib import Path
 
 import typer
@@ -79,4 +79,4 @@ def import_data(
 
         console.print(f"  [green]{t('import_done', lang)}[/green]")
 
-    asyncio.run(_run_import())
+    run_async(_run_import())

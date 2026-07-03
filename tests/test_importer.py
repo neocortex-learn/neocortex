@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 
-import pytest
 
-from neocortex.importer.chatgpt import ParsedMessage, parse_chatgpt_export
+from neocortex.importer.chatgpt import parse_chatgpt_export
 from neocortex.importer.claude import parse_claude_export
 from neocortex.importer.merger import cross_validate, merge_insights_to_profile
 from neocortex.models import (

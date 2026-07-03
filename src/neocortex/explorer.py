@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import httpx
 
@@ -128,8 +128,6 @@ def _build_prompt(
     language: Language,
     already_read: list[str] | None = None,
 ) -> str:
-    domains = list(profile.skills.domains.keys())
-    gaps = _collect_gaps(profile)
     goal = ""
     if profile.persona and profile.persona.learning_goal:
         goal = profile.persona.learning_goal.value
@@ -150,7 +148,7 @@ def _build_prompt(
     already_read_text = ""
     if already_read:
         already_read_text = (
-            f"\nArticles the user has ALREADY read (skip these, set priority to 'skip'):\n"
+            "\nArticles the user has ALREADY read (skip these, set priority to 'skip'):\n"
             + "\n".join(f"- {t}" for t in already_read[:20])
             + "\n"
         )
@@ -160,7 +158,7 @@ def _build_prompt(
     return (
         "You are a learning advisor. The user found a promising author/site and wants to "
         "know which articles are worth reading.\n\n"
-        f"User skill domains and gaps:\n"
+        "User skill domains and gaps:\n"
         + "\n".join(domain_descriptions) + "\n\n"
         f"User learning goal: {goal or '(not set)'}\n"
         f"{already_read_text}\n"

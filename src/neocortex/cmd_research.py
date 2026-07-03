@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 
 import typer
 
-from neocortex.cli import _get_lang, console, discover_app
+from neocortex.cli import console, discover_app
 from neocortex.i18n import t
 
 
@@ -121,10 +121,9 @@ def research(
 
         from neocortex.reader.fetcher import ContentFetcher
         from neocortex.reader.teacher import generate_notes, generate_outline
-        from neocortex.config import get_data_dir, get_notes_dir, save_profile
+        from neocortex.config import get_data_dir, get_notes_dir
         from neocortex.search import NoteIndex
         from datetime import date
-        from pathlib import Path
 
         notes_dir = get_notes_dir()
         fetcher = ContentFetcher(provider=provider)
@@ -165,7 +164,7 @@ def research(
                     f"title: \"{doc.title.replace(chr(34), chr(39))}\"",
                     f"source: \"{url.replace(chr(34), chr(39))}\"",
                     f"date: {today}",
-                    f"via: research",
+                    "via: research",
                     f"research_topic: \"{topic.replace(chr(34), chr(39))}\"",
                 ]
                 deep_topics = [item.title for item in outline.items if item.marker == "deep"]
@@ -204,4 +203,4 @@ def research(
             console.print(f"  [bold green]{t('research_done', lang, count=str(len(generated)))}[/bold green]")
             console.print()
 
-    asyncio.run(_run())
+    run_async(_run())

@@ -21,6 +21,8 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e ".[dev]" || pip install -e .
-          pip install pytest pytest-asyncio
+          pip install pytest pytest-asyncio ruff
+      - name: Run ruff
+        run: python -m ruff check src/ tests/
       - name: Run tests
         run: python -m pytest tests/ -q

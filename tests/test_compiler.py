@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -23,9 +22,7 @@ from neocortex.compiler import (
     insert_wikilinks,
 )
 from neocortex.models import (
-    CompileResult,
     ConceptEntry,
-    ConceptRef,
     DomainSkill,
     Language,
     Profile,
@@ -280,9 +277,9 @@ class TestGenerateIndex:
         ]
         result = generate_index(notes_dir, concepts, profile, Language.EN)
         lines = result.split("\n")
-        a_line = next(l for l in lines if "[[A]]" in l)
-        b_line = next(l for l in lines if "[[B]]" in l)
-        c_line = next(l for l in lines if "[[C]]" in l)
+        a_line = next(ln for ln in lines if "[[A]]" in ln)
+        b_line = next(ln for ln in lines if "[[B]]" in ln)
+        c_line = next(ln for ln in lines if "[[C]]" in ln)
         assert "\u2605\u2605\u2605" in a_line
         assert "\u2605\u2605\u2606" in b_line
         assert "\u2605\u2606\u2606" in c_line
@@ -461,7 +458,7 @@ class TestCompileNote:
             "## One-liner\nBody.\n\n## Core Points\n- Point.\n\n## Open Questions\n- Q?",
         ]
 
-        result = await compile_note(note, notes_dir, profile, mock_provider, Language.EN)
+        await compile_note(note, notes_dir, profile, mock_provider, Language.EN)
 
         content = note.read_text(encoding="utf-8")
         assert "[[Event Sourcing" in content

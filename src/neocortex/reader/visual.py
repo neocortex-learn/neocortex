@@ -120,12 +120,12 @@ def markdown_to_html_body(md_text: str) -> str:
         # Code blocks
         if line.strip().startswith("```"):
             if in_mermaid:
-                html_parts.append(f'<div class="mermaid">\n{"".join(l + chr(10) for l in code_lines)}</div>')
+                html_parts.append(f'<div class="mermaid">\n{"".join(ln + chr(10) for ln in code_lines)}</div>')
                 in_mermaid = False
                 i += 1
                 continue
             if in_code:
-                html_parts.append(f'<pre><code class="language-{code_lang}">{"".join(_esc(l) + chr(10) for l in code_lines)}</code></pre>')
+                html_parts.append(f'<pre><code class="language-{code_lang}">{"".join(_esc(ln) + chr(10) for ln in code_lines)}</code></pre>')
                 in_code = False
                 i += 1
                 continue

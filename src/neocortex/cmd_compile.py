@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 
 import typer
 
-from neocortex.cli import _get_lang, console, kb_app
+from neocortex.cli import console, kb_app
 from neocortex.i18n import t
 
 
@@ -109,4 +109,4 @@ def compile(
             from neocortex.cmd_verify import _save_verify_report
             _save_verify_report(notes_dir, v_report)
 
-    asyncio.run(_run_compile())
+    run_async(_run_compile())

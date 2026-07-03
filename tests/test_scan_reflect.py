@@ -217,7 +217,6 @@ class TestWriteReflectionToFrontmatter:
 
     def test_preserves_existing_content(self, tmp_path: Path):
         note = _make_note(tmp_path)
-        original = note.read_text(encoding="utf-8")
 
         _write_reflection_to_frontmatter(note, {"application": "use at work"})
 

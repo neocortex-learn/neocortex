@@ -126,7 +126,7 @@ class TestFindExisting:
 
     def test_picks_most_recent_when_legacy_dupes(self, vault, monkeypatch):
         import time
-        first = self._write_note(vault, "a.md", "https://example.com/x")
+        self._write_note(vault, "a.md", "https://example.com/x")
         time.sleep(0.01)
         second = self._write_note(vault, "b.md", "https://example.com/x")
         assert find_existing(vault, "https://example.com/x") == second

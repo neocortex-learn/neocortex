@@ -112,9 +112,9 @@ Output valid JSON with this exact structure:
             try:
                 data = json.loads(response[start:end])
             except json.JSONDecodeError:
-                raise ValueError(f"Failed to parse outline from LLM response")
+                raise ValueError("Failed to parse outline from LLM response")
         else:
-            raise ValueError(f"Failed to parse outline from LLM response")
+            raise ValueError("Failed to parse outline from LLM response")
 
     items: list[OutlineItem] = []
     for raw_item in data.get("items", []):

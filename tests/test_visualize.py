@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-import json
 import os
 import time
 from datetime import date, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from neocortex.cmd_visualize import _concept_slug, _node_style, _star_rating
 from neocortex.models import (
-    ConceptEntry,
     DomainSkill,
-    Language,
     Outline,
     OutlineItem,
     Persona,

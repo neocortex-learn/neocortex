@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 import json as json_lib
 import sys
 from datetime import date
-from pathlib import Path
 
 import typer
 from rich.prompt import Prompt
 
-from neocortex.cli import _get_lang, app, console, learn_app
+from neocortex.cli import _get_lang, console, learn_app
 from neocortex.i18n import t
 from neocortex.models import Language
 
@@ -74,7 +73,7 @@ def recommend(
                 probe_type=probe_type,
             )
 
-        probe = asyncio.run(_run_probe())
+        probe = run_async(_run_probe())
 
         if probe.get("questions"):
             if probe.get("context"):
@@ -112,7 +111,7 @@ def recommend(
                         probe_type=probe_type,
                     )
 
-                result = asyncio.run(_run_eval())
+                result = run_async(_run_eval())
                 delta = result.get("confidence_delta", 0.0)
                 new_conf = update_skill_confidence(prof, target["name"], target["type"], delta)
 
@@ -156,7 +155,7 @@ def recommend(
         with console.status(f"  {t('recommend_generating', lang)}"):
             return await generate_recommendations(prof, provider, count, lang, records=existing_records)
 
-    recs = asyncio.run(_run())
+    recs = run_async(_run())
 
     if not recs:
         console.print(f"  [yellow]{t('recommend_empty', lang)}[/yellow]")
@@ -272,7 +271,7 @@ def _run_plan(
         with console.status(f"  {t('plan_generating', lang)}"):
             return await generate_plan(prof, provider, weeks, lang)
 
-    plan_md = asyncio.run(_run())
+    plan_md = run_async(_run())
 
     today = date.today().isoformat()
     plan_md = plan_md.replace("{date}", today)
@@ -445,7 +444,7 @@ def converge(
         with console.status(f"  {t('converge_generating', lang)}"):
             return await generate_convergence_report(notes, cadence, prof, provider, lang)
 
-    report = asyncio.run(_run())
+    report = run_async(_run())
 
     console.print()
     from rich.markdown import Markdown
@@ -473,9 +472,8 @@ def opportunities(
     limit: int = typer.Option(10, help="Max results"),
 ) -> None:
     """Find open source and job opportunities matching your skills."""
-    from neocortex.config import load_config, load_profile
+    from neocortex.config import load_profile
 
-    cfg = load_config()
     prof = load_profile()
     lang = _get_lang()
 
@@ -494,7 +492,7 @@ def opportunities(
             with console.status(f"  {t('opp_searching', lang)}"):
                 return await find_oss_opportunities(prof, limit)
 
-        opps = asyncio.run(_run())
+        opps = run_async(_run())
 
         if not opps:
             console.print(f"  [yellow]{t('opp_empty', lang)}[/yellow]")

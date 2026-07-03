@@ -10,7 +10,7 @@ from neocortex.explorer import (
     batch_scan_articles,
     extract_article_links,
 )
-from neocortex.models import DomainSkill, Language, Profile, Skills
+from neocortex.models import DomainSkill, Profile, Skills
 
 
 SAMPLE_RSS = """<?xml version="1.0" encoding="UTF-8"?>

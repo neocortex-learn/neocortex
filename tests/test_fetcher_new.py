@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from neocortex.reader.fetcher import ContentFetcher, Document, Section
+from neocortex.reader.fetcher import ContentFetcher, Document
 
 
 # ── URL safety filter ──

@@ -197,7 +197,6 @@ class TestClipDedup:
     with ``reused=true`` instead of writing a second file."""
 
     def test_same_url_returns_existing(self, client, tmp_path, monkeypatch):
-        from pathlib import Path
 
         monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
         monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: tmp_path)
@@ -262,8 +261,6 @@ class TestReadDedupRedirect:
     """
 
     def test_redirect_to_canonical_hits_dedup(self, tmp_path, monkeypatch):
-        from datetime import date
-        from pathlib import Path
         from neocortex.models import AppConfig, Profile
         from neocortex.reader.fetcher import Document
         from neocortex.services.read import read_url

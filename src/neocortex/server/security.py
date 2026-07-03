@@ -16,7 +16,6 @@ Mitigations (all stacked, defense in depth):
 from __future__ import annotations
 
 import secrets
-from typing import Iterable
 
 from fastapi import HTTPException, Request, status
 from starlette.middleware.base import BaseHTTPMiddleware

@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 import json as json_lib
-import sys
-from datetime import date
 from pathlib import Path
 
 import typer
@@ -14,8 +12,6 @@ from rich.table import Table
 from rich.text import Text
 
 from neocortex.cli import (
-    BAR_TOTAL,
-    LEVEL_PROGRESS,
     _format_display_name,
     _format_lines,
     _get_lang,
@@ -261,7 +257,7 @@ def scan(
             console.print(f"  [green bold]{t('scan_complete', lang)}[/green bold]")
             console.print(f"  [dim]{n_langs} languages · {n_domains} domains · {n_gaps} gaps[/dim]")
 
-    asyncio.run(_run_scan())
+    run_async(_run_scan())
 
 
 @profile_app.callback(invoke_without_command=True)

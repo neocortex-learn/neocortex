@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from neocortex.models import Language, Profile, Skills, DomainSkill, SkillLevel
+from neocortex.models import Profile, Skills, DomainSkill, SkillLevel
 from neocortex.researcher import (
     SearchResult,
     analyze_gaps_for_query,
@@ -54,7 +54,7 @@ class TestWebSearch:
         ]
 
         with patch("ddgs.DDGS", return_value=mock_ddgs_instance):
-            results = web_search("test", max_results=3)
+            web_search("test", max_results=3)
 
         mock_ddgs_instance.text.assert_called_once_with("test", max_results=3)
 

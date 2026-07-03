@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 from datetime import date
 from pathlib import Path
 
@@ -19,7 +19,6 @@ from neocortex.cli import (
     kb_app,
 )
 from neocortex.i18n import t
-from neocortex.models import Language
 
 
 @kb_app.command()
@@ -28,7 +27,7 @@ def notes(
     open_note: bool = typer.Option(False, "--open", help="Open matched note in editor"),
 ) -> None:
     """List or search your knowledge base."""
-    from neocortex.config import get_data_dir, get_notes_dir
+    from neocortex.config import get_notes_dir
 
     lang = _get_lang()
     _maybe_migrate_notes()
@@ -164,7 +163,7 @@ def card(
         html_path.write_text(html, encoding="utf-8")
 
         png_path = target.with_suffix(".card.png")
-        success = asyncio.run(render_card_to_png(html_path, png_path))
+        success = run_async(render_card_to_png(html_path, png_path))
 
     if success:
         console.print(f"  [green]{t('card_saved', lang, path=str(png_path))}[/green]")
@@ -232,7 +231,7 @@ def ask(
         with console.status(f"  {t('ask_thinking', lang)}"):
             return await ask_question(question, prof, provider, lang)
 
-    answer = asyncio.run(_run())
+    answer = run_async(_run())
 
     console.print()
     from rich.markdown import Markdown
@@ -252,7 +251,7 @@ def ask(
                 return await evaluate_insight_value(question, answer, provider)
 
         try:
-            should_save = asyncio.run(_evaluate())
+            should_save = run_async(_evaluate())
         except Exception:
             should_save = False
 
@@ -275,7 +274,7 @@ def ask(
                 pass
 
         try:
-            asyncio.run(_compile_insight())
+            run_async(_compile_insight())
         except Exception:
             pass
 
@@ -338,7 +337,7 @@ def _run_chat() -> None:
         empty_count = 0
 
         try:
-            answer = asyncio.run(_send(stripped))
+            answer = run_async(_send(stripped))
         except KeyboardInterrupt:
             console.print("\n")
             continue
@@ -381,7 +380,7 @@ def _run_chat() -> None:
 
         with console.status(f"  {t('insight_evaluating', lang)}"):
             try:
-                saved_count = asyncio.run(_save_valuable_pairs())
+                saved_count = run_async(_save_valuable_pairs())
             except Exception:
                 pass
 

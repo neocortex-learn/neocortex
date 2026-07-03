@@ -27,7 +27,6 @@ from neocortex.models import (
     DomainSkill,
     GapProgress,
     IntegrationSkill,
-    Language,
     Profile,
     RecommendationRecord,
     Resource,

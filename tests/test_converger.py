@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import date, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -15,7 +14,6 @@ from neocortex.models import Language, Persona, Profile, Role, LearningGoal
 
 class TestGatherRecentNotes:
     def test_collects_recent_files(self, tmp_path):
-        today = date.today()
         f1 = tmp_path / "note1.md"
         f1.write_text("# First Note\nSome content here.", encoding="utf-8")
 

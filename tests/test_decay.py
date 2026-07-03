@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from neocortex.decay import (
-    DECAY_THRESHOLD,
     MAX_CONFIDENCE,
-    MONTHLY_DECAY_RATE,
     boost_confidence,
     decayed_confidence,
     knowledge_complexity,

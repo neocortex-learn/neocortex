@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from neocortex.models import Opportunity, Profile, SkillLevel
+from neocortex.models import Profile, SkillLevel
 
 _LEVEL_WEIGHTS = {
     SkillLevel.BEGINNER: 0.25,

@@ -6,7 +6,7 @@ import json
 from datetime import date
 from pathlib import Path
 
-from neocortex.models import Profile, ProfileSnapshot, Skills, SkillLevel
+from neocortex.models import Profile, ProfileSnapshot, SkillLevel
 
 
 def save_snapshot(profile: Profile, data_dir: Path, notes_count: int = 0) -> None:

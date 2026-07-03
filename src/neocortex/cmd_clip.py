@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 import subprocess
 import uuid
 from datetime import date, timedelta
+from pathlib import Path
 
 import typer
 
@@ -263,7 +264,7 @@ def clip(
                 # 直接进入 read pipeline
                 from neocortex.reader.fetcher import ContentFetcher
                 from neocortex.reader.teacher import generate_notes, generate_outline
-                from neocortex.config import get_data_dir, save_profile
+                from neocortex.config import get_data_dir
                 from neocortex.search import NoteIndex
                 from neocortex.cmd_read import _resolve_topic_dir
                 from neocortex.llm import create_provider
@@ -478,7 +479,7 @@ def clip(
 
         _print_clip_result(result, lang, fallback_title=raw_input[:50])
 
-    asyncio.run(_run())
+    run_async(_run())
 
 
 _CLIP_TYPE_ICONS: dict[str, str] = {
@@ -497,7 +498,7 @@ def inbox(
     synthesize: bool = typer.Option(False, "--synthesize", help="Synthesize clip clusters into notes"),
 ) -> None:
     """Manage your clip inbox."""
-    from neocortex.config import get_notes_dir, load_clips, save_clip
+    from neocortex.config import get_notes_dir, load_clips
 
     lang = _get_lang()
     notes_dir = get_notes_dir()
@@ -668,11 +669,10 @@ def _inbox_auto(inbox_clips: list, notes_dir, lang) -> None:
 
         console.print(f"  [green]{t('inbox_auto_done', lang, count=str(updated))}[/green]")
 
-    asyncio.run(_run())
+    run_async(_run())
 
 
 def _inbox_synthesize(all_clips: list, notes_dir, lang) -> None:
-    import json as json_lib
     import os
     import tempfile
 
@@ -769,7 +769,7 @@ def _inbox_synthesize(all_clips: list, notes_dir, lang) -> None:
 
         console.print(f"  [green]{t('inbox_synthesize_done', lang, count=str(synthesized_count))}[/green]")
 
-    asyncio.run(_run())
+    run_async(_run())
 
 
 def _print_clip_result(result, lang: str, fallback_title: str = "") -> None:

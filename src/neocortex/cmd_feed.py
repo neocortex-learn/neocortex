@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 
 import typer
 from rich.table import Table
@@ -19,11 +19,7 @@ def feed(
 ) -> None:
     """Manage RSS feeds and discover relevant articles."""
     from neocortex.config import (
-        load_config,
-        load_feed_history,
         load_feeds,
-        load_profile,
-        save_feed_history,
         save_feeds,
     )
 
@@ -183,4 +179,4 @@ def _handle_fetch(feeds: list[dict], lang: str) -> None:
         console.print(f"  [dim]{t('feed_read_hint', lang)}[/dim]")
         console.print()
 
-    asyncio.run(_run())
+    run_async(_run())

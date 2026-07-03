@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import json
-import os
-import time
-from datetime import date, timedelta
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import date
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -99,7 +95,7 @@ class TestMonthlyReflectionGeneration:
         ]
 
         with patch("neocortex.config.load_belief_changes", return_value=belief_changes):
-            result = await _generate_monthly_reflection(
+            await _generate_monthly_reflection(
                 sample_notes, sample_concepts, profile_with_gaps, mock_provider, Language.ZH, 30,
             )
 
@@ -124,7 +120,7 @@ class TestMonthlyReflectionGeneration:
     async def test_monthly_english_output(self, mock_provider, sample_notes, sample_concepts, profile_with_gaps):
         from neocortex.cmd_visualize import _generate_monthly_reflection
 
-        result = await _generate_monthly_reflection(
+        await _generate_monthly_reflection(
             sample_notes, sample_concepts, profile_with_gaps, mock_provider, Language.EN, 30,
         )
 
@@ -136,9 +132,6 @@ class TestMonthlyReflectionInDigest:
     def test_monthly_saves_insight_file(self, notes_dir, profile_with_gaps):
         today = date.today().isoformat()
         (notes_dir / "note1.md").write_text("# Note 1\nContent.", encoding="utf-8")
-
-        from neocortex.converger import gather_recent_notes
-        recent = gather_recent_notes(notes_dir, days=30)
 
         insights_dir = notes_dir / "insights"
         insights_dir.mkdir(parents=True, exist_ok=True)

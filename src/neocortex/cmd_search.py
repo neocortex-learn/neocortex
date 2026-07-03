@@ -67,7 +67,6 @@ def search(
 
         # Show snippet if available
         snippet = r.get("snippet", "")
-        score = r.get("score", 0)
 
         console.print(f"  {i}. {badge} [bold]{title}[/bold]")
         if snippet:

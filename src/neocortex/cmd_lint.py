@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 import os
 import re
 import tempfile
@@ -193,4 +193,4 @@ def lint(
         delta_str = f" ({delta:+d})" if prev_score is not None and (delta := report.score - prev_score) != 0 else ""
         append_log("lint", f"score: {report.score}{delta_str}")
 
-    asyncio.run(_run_lint())
+    run_async(_run_lint())

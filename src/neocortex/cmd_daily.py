@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 import json as json_lib
 import re
 from datetime import date, timedelta
 from pathlib import Path
 
-import typer
 
 from neocortex.cli import _get_lang, app, console
 from neocortex.i18n import t
@@ -101,7 +100,7 @@ def _get_context_updates(surfacing: list, notes_dir, lang) -> list[dict]:
         return []
 
     try:
-        results = asyncio.run(_run())
+        results = run_async(_run())
     except Exception:
         results = []
 

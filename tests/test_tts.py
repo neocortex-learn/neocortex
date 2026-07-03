@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from neocortex.tts import (
-    MAX_CHUNK_CHARS,
     VOICES,
     _concatenate_mp3,
     _split_text,

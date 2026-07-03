@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 import json as json_lib
 import sys
-from datetime import date
 from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.prompt import Prompt
-from rich.table import Table
 from rich.text import Text
 
 from neocortex.i18n import t
@@ -22,10 +20,8 @@ from neocortex.models import (
     LearningGoal,
     LearningStyle,
     Persona,
-    Profile,
     Role,
     SkillLevel,
-    TopicRead,
 )
 
 app = typer.Typer(help="Neocortex — AI-powered developer learning assistant")
@@ -463,7 +459,7 @@ def init() -> None:
             notes_count = len(list(get_notes_dir().glob("*.md")))
             save_snapshot(prof, get_data_dir(), notes_count)
 
-    asyncio.run(_run_init_scan())
+    run_async(_run_init_scan())
 
     # ── Step 4: Show result + next steps ──
     console.print()

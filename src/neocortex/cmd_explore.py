@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 import uuid
 from datetime import date, timedelta
 
@@ -146,10 +146,9 @@ def explore(
         if selected and not no_read:
             from neocortex.reader.fetcher import ContentFetcher
             from neocortex.reader.teacher import generate_notes, generate_outline
-            from neocortex.config import get_data_dir, save_profile
+            from neocortex.config import get_data_dir
             from neocortex.search import NoteIndex
             from neocortex.cmd_read import _resolve_topic_dir
-            from rich.prompt import Prompt as ReadPrompt
 
             fetcher = ContentFetcher(provider=provider)
 
@@ -185,7 +184,7 @@ def explore(
                         f"title: \"{doc.title.replace(chr(34), chr(39))}\"",
                         f"source: \"{article_url.replace(chr(34), chr(39))}\"",
                         f"date: {today_str}",
-                        f"via: explore",
+                        "via: explore",
                     ]
                     deep_topics = [item.title for item in outline.items if item.marker == "deep"]
                     if deep_topics:
@@ -220,4 +219,4 @@ def explore(
 
             console.print()
 
-    asyncio.run(_run())
+    run_async(_run())

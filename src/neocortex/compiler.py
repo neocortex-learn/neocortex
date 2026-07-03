@@ -1047,7 +1047,7 @@ async def _generate_relationship_cards(
     language: Language,
 ) -> None:
     """Generate relationship cards for concept pairs with evidence_count >= 2."""
-    from neocortex.config import load_flashcards, save_flashcards
+    from neocortex.config import load_flashcards
 
     concepts_dir = notes_dir / "concepts"
 

@@ -71,7 +71,7 @@ def _search_good_first_issues(language: str) -> list[dict]:
         issues = []
         for item in items:
             repo = item.get("repository", {})
-            labels = [l.get("name", "") for l in item.get("labels", [])]
+            labels = [lbl.get("name", "") for lbl in item.get("labels", [])]
             difficulty = "beginner"
             if any("medium" in la.lower() or "intermediate" in la.lower() for la in labels):
                 difficulty = "intermediate"

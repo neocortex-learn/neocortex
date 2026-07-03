@@ -16,7 +16,6 @@ from neocortex.models import (
     Profile,
 )
 from neocortex.reader.chunker import (
-    Chunk,
     _is_cjk_heavy,
     chunk_content,
     estimate_tokens,

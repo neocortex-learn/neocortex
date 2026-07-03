@@ -102,7 +102,6 @@ def _search_knowledge_base(notes_dir: Path, query: str, language: Language) -> s
             content_type = "note"
 
         # Truncate long content, keep most relevant part
-        snippet = r.get("snippet", "")
         if len(content) > 800:
             content = content[:800]
 

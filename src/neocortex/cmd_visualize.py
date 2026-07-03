@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 import re
 import sys
 from datetime import date, timedelta
-from pathlib import Path
 
 import typer
 from rich.prompt import Prompt
@@ -302,7 +301,7 @@ def digest(
                 )
 
             with console.status(f"  {t('converge_generating', lang)}"):
-                convergence_content = asyncio.run(_gen())
+                convergence_content = run_async(_gen())
         except Exception:
             pass
 
@@ -322,7 +321,7 @@ def digest(
                 )
 
             with console.status(f"  {t('reflect_monthly_generating', lang)}"):
-                monthly_content = asyncio.run(_gen_monthly())
+                monthly_content = run_async(_gen_monthly())
         except Exception:
             pass
 

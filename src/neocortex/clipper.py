@@ -465,7 +465,6 @@ async def process_clip(
     1 LLM call, returns:
     {summary, relevance, related_concepts, auto_tags, topic, takeaways}
     """
-    domains = list(profile.skills.domains.keys())
     gaps: list[str] = []
     for d in profile.skills.domains.values():
         gaps.extend(d.gaps)
@@ -684,7 +683,6 @@ async def _fetch_wechat_clip(source: str) -> dict:
     import shutil
     import subprocess
     import tempfile
-    from pathlib import Path
 
     content: str | None = None
 

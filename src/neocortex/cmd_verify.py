@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+from neocortex._async import run_async
 import os
 import re
 import tempfile
@@ -371,4 +371,4 @@ def verify(
         delta_str = f" ({delta:+d})" if prev is not None and (delta := report.fidelity_score - prev) != 0 else ""
         append_log("verify", f"fidelity: {report.fidelity_score}{delta_str}, {report.concepts_verified} concepts")
 
-    asyncio.run(_run_verify())
+    run_async(_run_verify())
