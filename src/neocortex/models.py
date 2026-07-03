@@ -523,6 +523,7 @@ class AskResult(BaseModel):
     elapsed_seconds: float = 0.0
     aborted: bool = False
     abort_reason: str | None = None
+    warnings: list[str] = Field(default_factory=list)  # 非致命失败（如洞察评估挂了）
 
 
 class ConceptMap(BaseModel):

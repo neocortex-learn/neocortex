@@ -57,6 +57,7 @@ async def ask_question(
         )
 
     saved_rel: str | None = None
+    warnings: list[str] = []
     try:
         if await evaluate_insight_value(question, answer, provider):
             path = save_insight(question, answer, lang)
@@ -64,10 +65,14 @@ async def ask_question(
                 saved_rel = str(path.relative_to(notes_dir))
             else:
                 saved_rel = str(path)
-    except Exception:
+    except Exception as exc:
         # Evaluator / save failure shouldn't blow up the answer the user
-        # already has — silent skip matches the CLI behaviour.
+        # already has — degrade to "not saved" but surface it via warnings
+        # so the GUI can tell "evaluated as not valuable" from "eval broke".
+        from neocortex.i18n import t
+
         saved_rel = None
+        warnings.append(t("insight_evaluate_failed", lang, error=str(exc) or exc.__class__.__name__))
 
     # Activity log so GUI-triggered asks appear in the timeline.
     try:
@@ -82,4 +87,5 @@ async def ask_question(
         answer=answer,
         saved_as_insight=saved_rel,
         elapsed_seconds=round(time.monotonic() - started, 2),
+        warnings=warnings,
     )

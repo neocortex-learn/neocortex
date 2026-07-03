@@ -302,8 +302,8 @@ def digest(
 
             with console.status(f"  {t('converge_generating', lang)}"):
                 convergence_content = run_async(_gen())
-        except Exception:
-            pass
+        except Exception as exc:
+            console.print(f"  [yellow]{t('digest_convergence_failed', lang, error=str(exc) or exc.__class__.__name__)}[/yellow]")
 
     if convergence_content:
         md_content += f"\n## Convergence\n\n{convergence_content}\n"
@@ -322,8 +322,8 @@ def digest(
 
             with console.status(f"  {t('reflect_monthly_generating', lang)}"):
                 monthly_content = run_async(_gen_monthly())
-        except Exception:
-            pass
+        except Exception as exc:
+            console.print(f"  [yellow]{t('digest_reflection_failed', lang, error=str(exc) or exc.__class__.__name__)}[/yellow]")
 
     if monthly_content:
         md_content += f"\n## {t('reflect_monthly_title', lang)}\n\n{monthly_content}\n"

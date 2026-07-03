@@ -469,6 +469,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "Synthesizing your learning...",
         "zh": "正在综合你的学习...",
     },
+    "digest_convergence_failed": {
+        "en": "Convergence section failed ({error}), digest saved without it",
+        "zh": "认知收敛章节生成失败（{error}），摘要中将缺少该章节",
+    },
+    "digest_reflection_failed": {
+        "en": "Monthly reflection section failed ({error}), digest saved without it",
+        "zh": "月度反思章节生成失败（{error}），摘要中将缺少该章节",
+    },
     "converge_saved": {
         "en": "Report saved: {path}",
         "zh": "报告已保存：{path}",
