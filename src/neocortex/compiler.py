@@ -324,17 +324,21 @@ async def generate_concept_entry(
             related_lines += f"- [[{rc}]]\n"
 
     aliases = _generate_aliases(name)
+    # f-string 表达式内不能出现反斜杠/同类引号（PEP 701 之前的 3.10/3.11），先在外面拼好
+    aliases_yaml = ", ".join('"' + a + '"' for a in aliases)
+    related_yaml = ", ".join('"' + rc + '"' for rc in related_concepts)
+    sources_yaml = ", ".join('"' + fn + '"' for fn in note_filenames)
     frontmatter = (
         f"---\n"
         f"type: concept\n"
         f"name: {name}\n"
-        f"aliases: [{', '.join(f'\"' + a + '\"' for a in aliases)}]\n"
-        f"related_concepts: [{', '.join(f'\"' + rc + '\"' for rc in related_concepts)}]\n"
+        f"aliases: [{aliases_yaml}]\n"
+        f"related_concepts: [{related_yaml}]\n"
         f"skill_level: {SkillLevel.BEGINNER.value}\n"
         f"confidence: 0.3\n"
         f"evidence_count: {len(source_notes)}\n"
         f"last_updated: {today}\n"
-        f"source_notes: [{', '.join(f'\"' + fn + '\"' for fn in note_filenames)}]\n"
+        f"source_notes: [{sources_yaml}]\n"
         f"---\n"
     )
 

@@ -1,4 +1,4 @@
-"""Runtime files: port / pid / token in ~/.neocortex/.
+"""Runtime files: port / pid / token in the data dir (config.get_data_dir()).
 
 Clients (SwiftUI, future CLI fallback) discover the running server by reading
 these files. Token file is 0600 so other local users can't grab it.

@@ -14,7 +14,6 @@ node_modules/
 *.sqlite
 .DS_Store
 .obsidian/
-uv.lock
 
 # repo 根偶发产物（不该长存）
 /log.md

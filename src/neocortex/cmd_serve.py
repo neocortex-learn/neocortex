@@ -26,7 +26,7 @@ def serve(
 ) -> None:
     """Run the local HTTP server on 127.0.0.1 with token auth.
 
-    Writes runtime files to ~/.neocortex/:
+    Writes runtime files to the data dir (config.get_data_dir()):
         - server.pid    — this process's PID
         - server.port   — bound port
         - server-token  — bearer token (0600)
@@ -35,6 +35,7 @@ def serve(
     """
     import uvicorn
 
+    from neocortex.config import get_data_dir
     from neocortex.server.app import create_app
     from neocortex.server.runtime import cleanup_runtime, provision_runtime
 
@@ -53,7 +54,7 @@ def serve(
     console.print()
     console.print(f"  [green]Neocortex server[/green] listening on http://127.0.0.1:{secrets.port}")
     console.print(f"  [dim]pid:[/dim] {secrets.pid}")
-    console.print(f"  [dim]token file:[/dim] ~/.neocortex/server-token (0600)")
+    console.print(f"  [dim]token file:[/dim] {get_data_dir() / 'server-token'} (0600)")
     if show_token:
         console.print(f"  [yellow]token:[/yellow] {secrets.token}")
     console.print(f"  [dim]healthz:[/dim] curl http://127.0.0.1:{secrets.port}/healthz")

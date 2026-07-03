@@ -3,10 +3,10 @@
 ## 项目概述
 Neocortex 是一个 AI 驱动的个人知识库工具。Python CLI + 本地 HTTP/WebSocket server。
 
-**配套客户端**：SwiftUI macOS App 在另一个 repo `~/Documents/neocortex-mac/`
-（独立 git，无 submodule 关系），通过 `~/.neocortex/server.{pid,port}` + `server-token`
-做服务发现 + HTTP 调用本仓库的 server。改 UI 渲染 / 全局快捷键 / vault 浏览器
-请去那个 repo；本仓库专注后端、数据模型、知识库引擎、API 协议。详见
+**配套客户端**：AppKit macOS App 在同级目录 `../mac/`（独立 git repo，无 submodule
+关系），通过 `<root>/data/server.{pid,port}` + `server-token` 做服务发现 + HTTP 调用
+本仓库的 server（legacy 散装安装回退到 `~/.neocortex/`）。改 UI 渲染 / 全局快捷键 /
+vault 浏览器请去那个 repo；本仓库专注后端、数据模型、知识库引擎、API 协议。详见
 `docs/SERVER.md` 的契约描述。
 
 核心理念：把知识库当代码仓库管——有 intake（clip），有 compile（概念提取），有 search（检索），有 health check（lint/verify）。
@@ -64,12 +64,12 @@ src/neocortex/
 ├── cmd_clip.py     # 顶层：clip + inbox
 ├── cmd_daily.py    # 顶层：daily（含 _show_health_pulse — lint/fidelity 趋势）
 ├── cmd_search.py   # 顶层：search（FTS5 + 向量混合检索）
-├── cmd_serve.py    # 顶层：serve（启动 FastAPI 本地 server，写 ~/.neocortex/server.{pid,port} + server-token）
+├── cmd_serve.py    # 顶层：serve（启动 FastAPI 本地 server，写 <root>/data/server.{pid,port} + server-token）
 ├── cmd_explore.py  # discover 组：explore
 ├── cmd_research.py # discover 组：research
 ├── cmd_feed.py     # discover 组：feed
 ├── clipper.py      # 碎片捕获处理引擎（URL/文本/截图，默认零 LLM）
-├── dedup.py        # URL 规范化 + frontmatter 查重（仅 services 层调用，CLI 路径暂不去重）
+├── dedup.py        # URL 规范化 + frontmatter 查重（services 层与 CLI clip/read 都接入，--force 跳过）
 ├── compiler.py     # 概念编译引擎（提取、生成、wikilink、索引、语义链接）
 ├── converger.py    # 认知收敛（跨笔记综合高层理解）
 ├── decay.py        # 知识信心衰减（Hidalgo 年衰减 50% 模型）
@@ -120,7 +120,8 @@ src/neocortex/
   （`null` / `tauri://localhost`）+ 变更方法强制 `Content-Type: application/json`。
   WebSocket 在 `validate_ws_handshake()` 中复用同一组检查（Starlette HTTP 中间件不拦 WS）。
 - **`server/runtime.py`**：启动时随机分配端口 + 随机 token，写入
-  `~/.neocortex/server.{pid,port}` + `server-token`（token 文件 0600，从首次 syscall 起就是 0600）。
+  `<root>/data/server.{pid,port}` + `server-token`（token 文件 0600，从首次 syscall 起就是 0600；
+  路径由 `config.get_data_dir()` 解析，legacy 散装安装回退 `~/.neocortex/`）。
   GUI 客户端读这三个文件做服务发现。
 - **关键约束**：CLI 不依赖 services（`cmd_clip.py` / `cmd_read.py` 直接调引擎），
   只有 server 路由强制走 services；将来 CLI 收敛到 services 是单独的迁移工作。
@@ -141,8 +142,8 @@ src/neocortex/
 | POST | `/api/daily/surface` | 标记 clip 已浮现，推进调度 |
 | GET | `/api/map` | 返回 Mermaid 概念图源码 |
 
-**注意**：CLI 路径下 clip/read **不去重**，去重只在 services 层（`services/clip.py:75`、
-`services/read.py:123` 调 `dedup.find_existing`）。commit 33a3884 描述与代码现状有出入。
+**注意**：clip/read 的去重在 services 层和 CLI 路径**都已接入**（commit 7dda34f），
+`--force` 可跳过（commit fd2ae27）。
 
 ## 实验性功能开关
 
@@ -221,8 +222,8 @@ gap → (首次阅读) → learning → (reads≥2 + Probe≥solid) → verified
 
 ### 知识管理（参考 Readwise/Obsidian）
 笔记存储三层分离：
-- **应用数据**（`~/.neocortex/`）：config、profile、数据库、缓存。用户不需要碰。
-- **用户笔记**（`~/Documents/Neocortex/`，可配置）：纯 Markdown 文件，Finder 直接可见。
+- **应用数据**（`<root>/data/`，legacy 安装为 `~/.neocortex/`）：config、profile、数据库、缓存。用户不需要碰。
+- **用户笔记**（`<root>/vault/`，可配置）：纯 Markdown 文件，Finder 直接可见。
   通过 `neocortex profile config --notes-dir <path>` 可指向 Obsidian vault 或任意目录。
 - **Frontmatter 元数据**：每篇笔记头部包含 source、date、tags、related_gaps 等 YAML 字段，
   兼容 Obsidian 图谱视图和其他知识管理工具。

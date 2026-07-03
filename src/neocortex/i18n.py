@@ -1004,6 +1004,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "feed_not_found": {"en": "Feed not found: {url}", "zh": "未找到订阅：{url}"},
     "feed_invalid": {"en": "Invalid RSS feed: {url}", "zh": "无效的 RSS 源：{url}"},
     "feed_fetching": {"en": "Fetching feeds...", "zh": "正在拉取订阅..."},
+    "feed_provider_failed": {
+        "en": "LLM provider unavailable ({error}), showing unfiltered feed items",
+        "zh": "LLM provider 初始化失败（{error}），将展示未经盲区筛选的订阅",
+    },
     "feed_filtering": {"en": "Filtering by your skill gaps...", "zh": "正在按技能盲区筛选..."},
     "feed_no_new": {"en": "No new articles found.", "zh": "没有新文章。"},
     "feed_results": {

@@ -138,8 +138,8 @@ def _handle_fetch(feeds: list[dict], lang: str) -> None:
         try:
             from neocortex.llm import create_provider
             provider = create_provider(cfg)
-        except (ValueError, Exception):
-            pass
+        except Exception as exc:
+            console.print(f"  [yellow]{t('feed_provider_failed', lang, error=exc)}[/yellow]")
 
     async def _run() -> None:
         from neocortex.feeder import fetch_feeds, filter_by_gaps
