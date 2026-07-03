@@ -47,6 +47,519 @@ def _try_paste_image() -> str:
     return ""
 
 
+class _ClipAbort(Exception):
+    """Raised by a clip-pipeline stage to unwind to _run() after already
+    printing a user-facing message (mirrors the original inline bare `return`)."""
+
+
+_SCREENSHOT_OCR_PROMPT = (
+    "Please extract ALL text from this screenshot. "
+    "Transcribe verbatim. Preserve structure (headings, lists, paragraphs). "
+    "If there are non-text elements (images, charts), briefly describe them. "
+    "Output clean markdown."
+)
+
+_IMAGE_MEDIA_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+}
+
+
+def _is_vision_unsupported_error(exc: Exception) -> bool:
+    msg = str(exc)
+    return "image_url" in msg or "image" in msg.lower() and "unsupported" in msg.lower()
+
+
+def _copy_image_to_notes_dir(img_path: str) -> None:
+    import shutil
+
+    from neocortex.config import get_notes_dir
+
+    img_dest_dir = get_notes_dir() / "images"
+    img_dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = img_dest_dir / Path(img_path).name
+    if not dest.exists():
+        shutil.copy2(img_path, str(dest))
+
+
+def _detect_multi_images(sources: list[str] | None) -> list[str]:
+    """Detect multiple image file paths among positional sources (merged into one clip)."""
+    if not sources or len(sources) <= 1:
+        return []
+    image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
+    imgs = [s for s in sources if Path(s).expanduser().exists() and Path(s).suffix.lower() in image_exts]
+    return [str(Path(s).expanduser()) for s in imgs] if imgs else []
+
+
+def _gather_raw_input(sources: list[str] | None, source: str | None, paste: bool) -> str:
+    """Resolve the raw clip input from --paste (image or text) or positional source arg."""
+    paste_image_path = ""
+    raw_input = ""
+    if paste:
+        paste_image_path = _try_paste_image()
+        if not paste_image_path:
+            try:
+                result = subprocess.run(
+                    ["pbpaste"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                from neocortex.clipper import _sanitize_text
+                raw_input = _sanitize_text(result.stdout.strip())
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+    if paste_image_path:
+        raw_input = paste_image_path
+    elif not raw_input and source:
+        raw_input = source
+
+    return raw_input
+
+
+def _find_duplicate_clip(notes_dir: Path, raw_input: str, force: bool) -> Path | None:
+    """Mirror services/clip.py: short-circuit if this URL was already clipped.
+
+    Avoids duplicate notes + the LLM tagging round-trip. --force bypasses
+    dedup (useful when content changed or the prior clip was incomplete).
+    """
+    if force:
+        return None
+    from neocortex.dedup import find_existing, normalize_source_url
+    norm = normalize_source_url(raw_input)
+    if not norm:
+        return None
+    return find_existing(notes_dir, norm)
+
+
+def _print_fetch_failure(fetched: dict, lang) -> None:
+    """A: refuse to save when fetch produced garbage; otherwise LLM will
+    hallucinate concepts about the error page and pollute the graph."""
+    from rich.markup import escape as _esc
+    err = fetched.get("_fetch_error") or "unknown"
+    console.print()
+    console.print(f"  [red]⚠ {t('clip_fetch_failed', lang, error=_esc(err))}[/red]")
+    console.print(f"  [dim]{t('clip_fetch_failed_hint', lang)}[/dim]")
+    console.print()
+
+
+async def _ocr_multi_images(multi_images: list[str], cfg, lang) -> dict:
+    """OCR each image sequentially, merge into one clip's fetched-style dict.
+
+    Raises _ClipAbort (message already printed) if no LLM key is configured
+    or the provider doesn't support vision.
+    """
+    if not cfg.provider or not cfg.api_key:
+        console.print(f"  [red]{t('clip_image_needs_llm', lang)}[/red]")
+        raise _ClipAbort()
+
+    from neocortex.llm import create_provider
+    provider = create_provider(cfg)
+
+    parts: list[str] = []
+    for idx, img_path in enumerate(multi_images, 1):
+        with console.status(f"  {t('clip_image_processing_n', lang, n=str(idx), total=str(len(multi_images)))}"):
+            img_data = Path(img_path).read_bytes()
+            suffix = Path(img_path).suffix.lower()
+            media_type = _IMAGE_MEDIA_TYPES.get(suffix, "image/png")
+            try:
+                part = await provider.describe_image(img_data, media_type, _SCREENSHOT_OCR_PROMPT)
+            except Exception as e:
+                if _is_vision_unsupported_error(e):
+                    console.print(f"  [red]{t('clip_image_no_vision', lang)}[/red]")
+                    raise _ClipAbort() from e
+                raise
+            parts.append(part)
+
+        _copy_image_to_notes_dir(img_path)
+
+    content = "\n\n".join(parts)
+    title = Path(multi_images[0]).stem
+    clip_source = ", ".join(Path(p).name for p in multi_images)
+    return {"title": title, "content": content, "clip_type": "screenshot", "source": clip_source}
+
+
+async def _ocr_single_image(image_path: str, cfg, lang) -> str:
+    """Run vision OCR on a single fetched image (e.g. pasted screenshot).
+
+    Raises _ClipAbort (message already printed) if no LLM key is configured
+    or the provider doesn't support vision.
+    """
+    if not cfg.provider or not cfg.api_key:
+        console.print(f"  [red]{t('clip_image_needs_llm', lang)}[/red]")
+        raise _ClipAbort()
+
+    from neocortex.llm import create_provider
+    provider = create_provider(cfg)
+
+    img_data = Path(image_path).read_bytes()
+    suffix = Path(image_path).suffix.lower()
+    media_type = _IMAGE_MEDIA_TYPES.get(suffix, "image/png")
+    with console.status(f"  {t('clip_image_processing', lang)}"):
+        try:
+            content = await provider.describe_image(img_data, media_type, _SCREENSHOT_OCR_PROMPT)
+        except Exception as e:
+            if _is_vision_unsupported_error(e):
+                console.print(f"  [red]{t('clip_image_no_vision', lang)}[/red]")
+                raise _ClipAbort() from e
+            raise
+
+    _copy_image_to_notes_dir(image_path)
+    return content
+
+
+def _prompt_promote_to_read(lang, word_count: int) -> str:
+    """自动检测内容长度，长文章提示升级为 read."""
+    from rich.prompt import Prompt as ClipPrompt
+
+    console.print()
+    console.print(f"  [dim]{t('clip_long_detected', lang, words=str(word_count))}[/dim]")
+    return ClipPrompt.ask(
+        f"  [bold]?[/bold] {t('clip_or_read', lang)}",
+        choices=["c", "r"],
+        default="r",
+        console=console,
+    )
+
+
+async def _promote_clip_to_read_note(clip_source: str, cfg, profile, notes_dir: Path, lang) -> None:
+    """Run the full read pipeline for a long bookmark the user chose to promote."""
+    from neocortex.cmd_read import _resolve_topic_dir
+    from neocortex.config import get_data_dir
+    from neocortex.llm import create_provider
+    from neocortex.reader.fetcher import ContentFetcher
+    from neocortex.reader.teacher import generate_notes, generate_outline
+    from neocortex.search import NoteIndex
+
+    try:
+        provider = create_provider(cfg)
+    except ValueError as exc:
+        console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
+        return
+
+    fetcher = ContentFetcher(provider=provider)
+    with console.status(f"  {t('read_fetching', lang)}"):
+        doc = await fetcher.fetch(clip_source)
+
+    with console.status(f"  {t('analyzing', lang)}"):
+        outline = await generate_outline(doc, profile, provider)
+
+    with console.status(f"  {t('read_generating', lang)}"):
+        notes_content = await generate_notes(doc, outline, profile, provider)
+
+    topic_dir = _resolve_topic_dir(notes_dir, doc, outline, profile)
+    topic_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in doc.title)
+    safe_title = safe_title.strip().replace(" ", "-").lower()[:60] or "note"
+    today_str = date.today().isoformat()
+    filename = f"{safe_title}-{today_str}.md"
+    note_path = topic_dir / filename
+    counter = 1
+    while note_path.exists():
+        counter += 1
+        filename = f"{safe_title}-{today_str}-{counter}.md"
+        note_path = topic_dir / filename
+
+    frontmatter_lines = [
+        "---",
+        f"title: \"{doc.title.replace(chr(34), chr(39))}\"",
+        f"source: \"{clip_source.replace(chr(34), chr(39))}\"",
+        f"date: {today_str}",
+    ]
+    deep_topics = [item.title for item in outline.items if item.marker == "deep"]
+    if deep_topics:
+        frontmatter_lines.append("tags:")
+        for dt in deep_topics[:5]:
+            safe_tag = dt.strip().replace(" ", "-").lower()[:30]
+            if safe_tag:
+                frontmatter_lines.append(f"  - {safe_tag}")
+    frontmatter_lines.append("---")
+    frontmatter_lines.append("")
+
+    full_content = "\n".join(frontmatter_lines) + notes_content
+    note_path.write_text(full_content, encoding="utf-8")
+    console.print(f"  [green]{t('read_saved', lang, path=str(note_path))}[/green]")
+
+    note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
+    try:
+        rel = str(note_path.relative_to(notes_dir))
+    except ValueError:
+        rel = note_path.name
+    note_index.index_note(rel, doc.title, full_content)
+
+    console.print()
+
+
+def _resolve_llm_intent(process: bool | None, cfg, weak_fetch: bool) -> tuple[bool, str]:
+    """Resolve effective LLM intent per Q11 and the default llm_status.
+
+    process=True  → user explicitly opted in
+    process=False → user explicitly opted out (--no-process)
+    process=None  → config-driven default (clip_default_process)
+
+    P2: weak fetch forces LLM skip regardless of user intent — there's
+    nothing meaningful to process and concept pollution is the risk.
+    """
+    if process is True:
+        user_wants_llm = True
+    elif process is False:
+        user_wants_llm = False
+    else:
+        user_wants_llm = cfg.clip_default_process
+
+    llm_status = "skipped_user_opt_out"
+    if weak_fetch and user_wants_llm:
+        user_wants_llm = False
+        llm_status = "skipped_weak_fetch"
+
+    return user_wants_llm, llm_status
+
+
+async def _run_clip_llm_processing(
+    content: str,
+    title: str,
+    profile,
+    notes_dir: Path,
+    cfg,
+    lang,
+    user_wants_llm: bool,
+    llm_status: str,
+) -> tuple[str, str, dict, str, str | None]:
+    """Clean/translate content and classify it via LLM (summary, tags, related concepts).
+
+    Track LLM status explicitly per §5.1 — no silent swallowing.
+    Returns (content, title, processed, llm_status, llm_error).
+    """
+    processed = {
+        "summary": "",
+        "relevance": "",
+        "related_concepts": [],
+        "auto_tags": [],
+        "topic": "general",
+    }
+    llm_error: str | None = None
+
+    if not user_wants_llm:
+        return content, title, processed, llm_status, llm_error
+
+    if not (cfg.provider and cfg.api_key):
+        return content, title, processed, "skipped_no_key", llm_error
+
+    try:
+        from neocortex.llm import create_provider
+
+        provider = create_provider(cfg)
+
+        from neocortex.clipper import (
+            _chinese_ratio,
+            clean_content,
+            maybe_translate_to_chinese,
+            process_clip,
+        )
+
+        with console.status(f"  {t('clip_processing', lang)}"):
+            content = await clean_content(content, provider)
+
+            if lang.value == "zh":
+                translation = await maybe_translate_to_chinese(content, provider)
+                if translation:
+                    content = translation
+                if title and _chinese_ratio(title) < 0.20:
+                    try:
+                        zh_title = await provider.chat([
+                            {"role": "system", "content": "将英文标题翻译成简洁的中文（10-25字）。直接输出译文，不加任何标记。"},
+                            {"role": "user", "content": title},
+                        ])
+                        zh_title = zh_title.strip().strip('"').lstrip("# ")
+                        if zh_title and _chinese_ratio(zh_title) >= 0.3:
+                            title = zh_title
+                    except Exception:
+                        pass
+
+            processed = await process_clip(
+                content,
+                title,
+                profile,
+                provider,
+                lang,
+                notes_dir=notes_dir,
+            )
+        llm_status = processed.pop("_llm_status", "ok")
+        llm_error = processed.pop("_llm_error", None)
+    except Exception as exc:
+        llm_status = "failed"
+        llm_error = str(exc) or exc.__class__.__name__
+
+    return content, title, processed, llm_status, llm_error
+
+
+def _resolve_effective_title(title: str, content: str, processed: dict) -> str:
+    """Problem #4 fix: plain-text clips return title="" from fetch.
+
+    Generate a fallback so inbox/search/concept refs aren't blank.
+    """
+    if title:
+        return title
+    summary = processed.get("summary", "").strip()
+    if summary:
+        return summary[:40] + ("…" if len(summary) > 40 else "")
+    if content:
+        first_line = content.strip().split("\n", 1)[0]
+        return first_line[:40] + ("…" if len(first_line) > 40 else "")
+    return title
+
+
+def _index_saved_clip(notes_dir: Path, saved_path: Path, clip_obj, raw_input: str) -> None:
+    try:
+        from neocortex.config import get_data_dir
+        from neocortex.search import NoteIndex
+
+        idx = NoteIndex(get_data_dir() / "neocortex.sqlite")
+        try:
+            rel = str(saved_path.relative_to(notes_dir))
+        except ValueError:
+            rel = saved_path.name
+        idx.index_note(rel, clip_obj.title or raw_input[:50], clip_obj.content)
+    except Exception:
+        pass
+
+
+def _save_and_report_clip(
+    clip_source: str,
+    content: str,
+    effective_title: str,
+    clip_type: str,
+    processed: dict,
+    llm_status: str,
+    llm_error: str | None,
+    notes_dir: Path,
+    raw_input: str,
+    lang,
+) -> None:
+    from neocortex.config import append_log, save_clip
+    from neocortex.models import Clip, ClipResult
+
+    today = date.today()
+    clip_obj = Clip(
+        id=uuid.uuid4().hex[:8],
+        source=clip_source,
+        content=content,
+        title=effective_title,
+        clip_type=clip_type,
+        auto_tags=processed.get("auto_tags", []),
+        related_concepts=processed.get("related_concepts", []),
+        status="inbox",
+        summary=processed.get("summary", ""),
+        relevance=processed.get("relevance", ""),
+        priority="",
+        topic=processed.get("topic", "ai-practice"),
+        takeaways=processed.get("takeaways", []),
+        diagram=processed.get("diagram", ""),
+        created_at=today.isoformat(),
+        processed_at=today.isoformat() if processed.get("summary") else None,
+        next_surface=(today + timedelta(days=3)).isoformat(),
+    )
+
+    saved_path = save_clip(notes_dir, clip_obj)
+
+    _index_saved_clip(notes_dir, saved_path, clip_obj, raw_input)
+
+    # Link clip to concept pages (boost evidence_count) and capture deltas.
+    existing_cluster_delta = []
+    new_or_pending_clusters: list[str] = []
+    related_notes = []
+    if clip_obj.related_concepts:
+        existing_cluster_delta = _link_clip_to_concepts(notes_dir, clip_obj)
+        new_or_pending_clusters = _compute_new_or_pending(notes_dir, clip_obj.related_concepts)
+        related_notes = _find_related_notes(notes_dir, clip_obj, saved_path=saved_path)
+
+    append_log("clip", clip_obj.title or raw_input[:50])
+
+    result = ClipResult(
+        saved_path=str(saved_path),
+        clip=clip_obj,
+        llm_status=llm_status,
+        llm_error=llm_error,
+        existing_cluster_delta=existing_cluster_delta,
+        new_or_pending_clusters=new_or_pending_clusters,
+        related_notes=related_notes,
+    )
+
+    _print_clip_result(result, lang, fallback_title=raw_input[:50])
+
+
+async def _run_clip_pipeline(
+    multi_images: list[str],
+    raw_input: str,
+    cfg,
+    profile,
+    notes_dir: Path,
+    force: bool,
+    process: bool | None,
+    lang,
+) -> None:
+    try:
+        if multi_images:
+            fetched = await _ocr_multi_images(multi_images, cfg, lang)
+        else:
+            existing = _find_duplicate_clip(notes_dir, raw_input, force)
+            if existing:
+                console.print(f"  [yellow]{t('clip_reused', lang, path=str(existing))}[/yellow]")
+                return
+
+            from neocortex.clipper import fetch_clip_content
+            with console.status(f"  {t('clip_fetching', lang)}"):
+                fetched = await fetch_clip_content(raw_input)
+    except _ClipAbort:
+        return
+
+    if fetched.get("_fetch_status") == "failed":
+        _print_fetch_failure(fetched, lang)
+        return
+
+    title = fetched["title"]
+    content = fetched["content"]
+    clip_type = fetched["clip_type"]
+    clip_source = fetched["source"]
+
+    # P2 fix: weak fetch (short body but not an error) — save as bookmark
+    # but force-skip LLM to avoid hallucinating on near-empty content.
+    # This preserves the "I just want to save this URL" bookmark use case
+    # that the original 100-char hard-reject was killing.
+    weak_fetch = fetched.get("_fetch_quality") == "weak"
+
+    # Single image clip: use LLM to describe/OCR the image
+    image_path = fetched.get("_image_path")
+    if image_path and not content:
+        try:
+            content = await _ocr_single_image(image_path, cfg, lang)
+        except _ClipAbort:
+            return
+        clip_type = "screenshot"
+
+    word_count = len(content.split())
+    is_url = raw_input.startswith(("http://", "https://"))
+    if is_url and word_count > 500 and clip_type == "bookmark":
+        choice = _prompt_promote_to_read(lang, word_count)
+        if choice == "r":
+            await _promote_clip_to_read_note(clip_source, cfg, profile, notes_dir, lang)
+            return
+
+    user_wants_llm, llm_status = _resolve_llm_intent(process, cfg, weak_fetch)
+    content, title, processed, llm_status, llm_error = await _run_clip_llm_processing(
+        content, title, profile, notes_dir, cfg, lang, user_wants_llm, llm_status,
+    )
+
+    effective_title = _resolve_effective_title(title, content, processed)
+
+    _save_and_report_clip(
+        clip_source, content, effective_title, clip_type,
+        processed, llm_status, llm_error, notes_dir, raw_input, lang,
+    )
+
+
 @app.command()
 def clip(
     sources: list[str] = typer.Argument(None, help="URL, text, or file paths to clip (multiple images merged)"),
@@ -66,44 +579,13 @@ def clip(
     to force-skip, or set ``clip_default_process=false`` in config.json.
     Pass multiple image files to merge them into one clip.
     """
-    from neocortex.config import get_notes_dir, load_config, load_profile, save_clip
-    from neocortex.models import Clip
+    from neocortex.config import get_notes_dir, load_config, load_profile
 
     lang = _get_lang()
     source = sources[0] if sources and len(sources) == 1 else None
 
-    raw_input = ""
-    paste_image_path = ""
-    multi_images: list[str] = []
-
-    # Check for multiple image files
-    if sources and len(sources) > 1:
-        from pathlib import Path as _P
-        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
-        imgs = [s for s in sources if _P(s).expanduser().exists() and _P(s).suffix.lower() in image_exts]
-        if imgs:
-            multi_images = [str(_P(s).expanduser()) for s in imgs]
-
-    if not multi_images:
-        if paste:
-            paste_image_path = _try_paste_image()
-            if not paste_image_path:
-                try:
-                    result = subprocess.run(
-                        ["pbpaste"],
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-                    from neocortex.clipper import _sanitize_text
-                    raw_input = _sanitize_text(result.stdout.strip())
-                except (OSError, subprocess.TimeoutExpired):
-                    pass
-
-        if paste_image_path:
-            raw_input = paste_image_path
-        elif not raw_input and source:
-            raw_input = source
+    multi_images = _detect_multi_images(sources)
+    raw_input = "" if multi_images else _gather_raw_input(sources, source, paste)
 
     if not raw_input and not multi_images:
         console.print(f"  [dim]{t('clip_empty', lang)}[/dim]")
@@ -113,373 +595,7 @@ def clip(
     profile = load_profile()
     notes_dir = get_notes_dir()
 
-    async def _run() -> None:
-        from neocortex.clipper import fetch_clip_content, process_clip
-
-        # Multi-image clip: OCR each image sequentially, merge into one clip
-        if multi_images:
-            if not cfg.provider or not cfg.api_key:
-                console.print(f"  [red]{t('clip_image_needs_llm', lang)}[/red]")
-                return
-            from neocortex.llm import create_provider
-            from pathlib import Path as _Path
-            provider = create_provider(cfg)
-            media_types = {
-                ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
-            }
-            parts: list[str] = []
-            for idx, img_path in enumerate(multi_images, 1):
-                with console.status(f"  {t('clip_image_processing_n', lang, n=str(idx), total=str(len(multi_images)))}"):
-                    img_data = _Path(img_path).read_bytes()
-                    suffix = _Path(img_path).suffix.lower()
-                    media_type = media_types.get(suffix, "image/png")
-                    try:
-                        part = await provider.describe_image(
-                            img_data, media_type,
-                            "Please extract ALL text from this screenshot. "
-                            "Transcribe verbatim. Preserve structure (headings, lists, paragraphs). "
-                            "If there are non-text elements (images, charts), briefly describe them. "
-                            "Output clean markdown.",
-                        )
-                    except Exception as e:
-                        if "image_url" in str(e) or "image" in str(e).lower() and "unsupported" in str(e).lower():
-                            console.print(f"  [red]{t('clip_image_no_vision', lang)}[/red]")
-                            return
-                        raise
-                    parts.append(part)
-
-                # Copy image to notes dir
-                from neocortex.config import get_notes_dir as _get_notes_dir
-                img_dest_dir = _get_notes_dir() / "images"
-                img_dest_dir.mkdir(parents=True, exist_ok=True)
-                import shutil
-                dest = img_dest_dir / _Path(img_path).name
-                if not dest.exists():
-                    shutil.copy2(img_path, str(dest))
-
-            content = "\n\n".join(parts)
-            title = _Path(multi_images[0]).stem
-            clip_type = "screenshot"
-            clip_source = ", ".join(_Path(p).name for p in multi_images)
-            # Skip to saving
-            fetched = {"title": title, "content": content, "clip_type": clip_type, "source": clip_source}
-        else:
-            # Mirror services/clip.py: short-circuit if this URL was already
-            # clipped. Avoids duplicate notes + the LLM tagging round-trip.
-            # --force bypasses dedup (useful when content changed or the prior
-            # clip was incomplete, e.g. fetched before image relocation fix).
-            if not force:
-                from neocortex.dedup import find_existing, normalize_source_url
-                norm = normalize_source_url(raw_input)
-                if norm:
-                    existing = find_existing(notes_dir, norm)
-                    if existing:
-                        console.print(
-                            f"  [yellow]{t('clip_reused', lang, path=str(existing))}[/yellow]"
-                        )
-                        return
-
-            with console.status(f"  {t('clip_fetching', lang)}"):
-                fetched = await fetch_clip_content(raw_input)
-
-        # A: refuse to save when fetch produced garbage; otherwise LLM will
-        # hallucinate concepts about the error page and pollute the graph.
-        if fetched.get("_fetch_status") == "failed":
-            from rich.markup import escape as _esc
-            err = fetched.get("_fetch_error") or "unknown"
-            console.print()
-            console.print(f"  [red]⚠ {t('clip_fetch_failed', lang, error=_esc(err))}[/red]")
-            console.print(f"  [dim]{t('clip_fetch_failed_hint', lang)}[/dim]")
-            console.print()
-            return
-
-        title = fetched["title"]
-        content = fetched["content"]
-        clip_type = fetched["clip_type"]
-        clip_source = fetched["source"]
-
-        # P2 fix: weak fetch (short body but not an error) — save as bookmark
-        # but force-skip LLM to avoid hallucinating on near-empty content.
-        # This preserves the "I just want to save this URL" bookmark use case
-        # that the original 100-char hard-reject was killing.
-        weak_fetch = fetched.get("_fetch_quality") == "weak"
-
-        # Single image clip: use LLM to describe/OCR the image
-        image_path = fetched.get("_image_path")
-        if image_path and not content:
-            if not cfg.provider or not cfg.api_key:
-                console.print(f"  [red]{t('clip_image_needs_llm', lang)}[/red]")
-                return
-            from neocortex.llm import create_provider
-            provider = create_provider(cfg)
-            from pathlib import Path as _Path
-            img_data = _Path(image_path).read_bytes()
-            suffix = _Path(image_path).suffix.lower()
-            media_types = {
-                ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
-            }
-            media_type = media_types.get(suffix, "image/png")
-            with console.status(f"  {t('clip_image_processing', lang)}"):
-                try:
-                    content = await provider.describe_image(
-                        img_data, media_type,
-                        "Please extract ALL text from this screenshot. "
-                        "Transcribe verbatim. Preserve structure (headings, lists, paragraphs). "
-                        "If there are non-text elements (images, charts), briefly describe them. "
-                        "Output clean markdown.",
-                    )
-                except Exception as e:
-                    if "image_url" in str(e) or "image" in str(e).lower() and "unsupported" in str(e).lower():
-                        console.print(f"  [red]{t('clip_image_no_vision', lang)}[/red]")
-                        return
-                    raise
-            clip_type = "screenshot"
-
-            # Copy image to notes dir for reference
-            from neocortex.config import get_notes_dir as _get_notes_dir
-            img_dest_dir = _get_notes_dir() / "images"
-            img_dest_dir.mkdir(parents=True, exist_ok=True)
-            import shutil
-            dest = img_dest_dir / _Path(image_path).name
-            if not dest.exists():
-                shutil.copy2(image_path, str(dest))
-
-        # 自动检测内容长度，长文章提示升级为 read
-        word_count = len(content.split())
-        is_url = raw_input.startswith(("http://", "https://"))
-        if is_url and word_count > 500 and clip_type == "bookmark":
-            from rich.prompt import Prompt as ClipPrompt
-
-            console.print()
-            console.print(f"  [dim]{t('clip_long_detected', lang, words=str(word_count))}[/dim]")
-            choice = ClipPrompt.ask(
-                f"  [bold]?[/bold] {t('clip_or_read', lang)}",
-                choices=["c", "r"],
-                default="r",
-                console=console,
-            )
-            if choice == "r":
-                # 直接进入 read pipeline
-                from neocortex.reader.fetcher import ContentFetcher
-                from neocortex.reader.teacher import generate_notes, generate_outline
-                from neocortex.config import get_data_dir
-                from neocortex.search import NoteIndex
-                from neocortex.cmd_read import _resolve_topic_dir
-                from neocortex.llm import create_provider
-
-                try:
-                    provider = create_provider(cfg)
-                except ValueError as exc:
-                    console.print(f"  [red]{t('error', lang)}: {exc}[/red]")
-                    return
-
-                fetcher = ContentFetcher(provider=provider)
-                with console.status(f"  {t('read_fetching', lang)}"):
-                    doc = await fetcher.fetch(clip_source)
-
-                with console.status(f"  {t('analyzing', lang)}"):
-                    outline = await generate_outline(doc, profile, provider)
-
-                with console.status(f"  {t('read_generating', lang)}"):
-                    notes_content = await generate_notes(doc, outline, profile, provider)
-
-                topic_dir = _resolve_topic_dir(notes_dir, doc, outline, profile)
-                topic_dir.mkdir(parents=True, exist_ok=True)
-
-                safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in doc.title)
-                safe_title = safe_title.strip().replace(" ", "-").lower()[:60] or "note"
-                today_str = date.today().isoformat()
-                filename = f"{safe_title}-{today_str}.md"
-                note_path = topic_dir / filename
-                counter = 1
-                while note_path.exists():
-                    counter += 1
-                    filename = f"{safe_title}-{today_str}-{counter}.md"
-                    note_path = topic_dir / filename
-
-                frontmatter_lines = [
-                    "---",
-                    f"title: \"{doc.title.replace(chr(34), chr(39))}\"",
-                    f"source: \"{clip_source.replace(chr(34), chr(39))}\"",
-                    f"date: {today_str}",
-                ]
-                deep_topics = [item.title for item in outline.items if item.marker == "deep"]
-                if deep_topics:
-                    frontmatter_lines.append("tags:")
-                    for dt in deep_topics[:5]:
-                        safe_tag = dt.strip().replace(" ", "-").lower()[:30]
-                        if safe_tag:
-                            frontmatter_lines.append(f"  - {safe_tag}")
-                frontmatter_lines.append("---")
-                frontmatter_lines.append("")
-
-                full_content = "\n".join(frontmatter_lines) + notes_content
-                note_path.write_text(full_content, encoding="utf-8")
-                console.print(f"  [green]{t('read_saved', lang, path=str(note_path))}[/green]")
-
-                note_index = NoteIndex(get_data_dir() / "neocortex.sqlite")
-                try:
-                    rel = str(note_path.relative_to(notes_dir))
-                except ValueError:
-                    rel = note_path.name
-                note_index.index_note(rel, doc.title, full_content)
-
-                console.print()
-                return
-
-        from neocortex.models import ClipResult
-
-        processed = {
-            "summary": "",
-            "relevance": "",
-            "related_concepts": [],
-            "auto_tags": [],
-            "topic": "general",
-        }
-
-        # Resolve effective LLM intent per Q11:
-        #   process=True  → user explicitly opted in
-        #   process=False → user explicitly opted out (--no-process)
-        #   process=None  → config-driven default (clip_default_process)
-        if process is True:
-            user_wants_llm = True
-        elif process is False:
-            user_wants_llm = False
-        else:
-            user_wants_llm = cfg.clip_default_process
-
-        # Track LLM status explicitly per §5.1 — no silent swallowing.
-        llm_status = "skipped_user_opt_out"
-        llm_error: str | None = None
-
-        # P2: weak fetch forces LLM skip regardless of user intent — there's
-        # nothing meaningful to process and concept pollution is the risk.
-        if weak_fetch and user_wants_llm:
-            user_wants_llm = False
-            llm_status = "skipped_weak_fetch"
-
-        if user_wants_llm:
-            if not (cfg.provider and cfg.api_key):
-                llm_status = "skipped_no_key"
-            else:
-                try:
-                    from neocortex.llm import create_provider
-
-                    provider = create_provider(cfg)
-
-                    from neocortex.clipper import (
-                        _chinese_ratio,
-                        clean_content,
-                        maybe_translate_to_chinese,
-                    )
-
-                    with console.status(f"  {t('clip_processing', lang)}"):
-                        content = await clean_content(content, provider)
-
-                        if lang.value == "zh":
-                            translation = await maybe_translate_to_chinese(content, provider)
-                            if translation:
-                                content = translation
-                            if title and _chinese_ratio(title) < 0.20:
-                                try:
-                                    zh_title = await provider.chat([
-                                        {"role": "system", "content": "将英文标题翻译成简洁的中文（10-25字）。直接输出译文，不加任何标记。"},
-                                        {"role": "user", "content": title},
-                                    ])
-                                    zh_title = zh_title.strip().strip('"').lstrip("# ")
-                                    if zh_title and _chinese_ratio(zh_title) >= 0.3:
-                                        title = zh_title
-                                except Exception:
-                                    pass
-
-                        processed = await process_clip(
-                            content,
-                            title,
-                            profile,
-                            provider,
-                            lang,
-                            notes_dir=notes_dir,
-                        )
-                    llm_status = processed.pop("_llm_status", "ok")
-                    llm_error = processed.pop("_llm_error", None)
-                except Exception as exc:
-                    llm_status = "failed"
-                    llm_error = str(exc) or exc.__class__.__name__
-
-        # Problem #4 fix: plain-text clips return title="" from fetch.
-        # Generate a fallback so inbox/search/concept refs aren't blank.
-        effective_title = title
-        if not effective_title:
-            summary = processed.get("summary", "").strip()
-            if summary:
-                effective_title = summary[:40] + ("…" if len(summary) > 40 else "")
-            elif content:
-                first_line = content.strip().split("\n", 1)[0]
-                effective_title = first_line[:40] + ("…" if len(first_line) > 40 else "")
-
-        today = date.today()
-        clip_obj = Clip(
-            id=uuid.uuid4().hex[:8],
-            source=clip_source,
-            content=content,
-            title=effective_title,
-            clip_type=clip_type,
-            auto_tags=processed.get("auto_tags", []),
-            related_concepts=processed.get("related_concepts", []),
-            status="inbox",
-            summary=processed.get("summary", ""),
-            relevance=processed.get("relevance", ""),
-            priority="",
-            topic=processed.get("topic", "ai-practice"),
-            takeaways=processed.get("takeaways", []),
-            diagram=processed.get("diagram", ""),
-            created_at=today.isoformat(),
-            processed_at=today.isoformat() if processed.get("summary") else None,
-            next_surface=(today + timedelta(days=3)).isoformat(),
-        )
-
-        saved_path = save_clip(notes_dir, clip_obj)
-
-        try:
-            from neocortex.config import get_data_dir
-            from neocortex.search import NoteIndex
-
-            idx = NoteIndex(get_data_dir() / "neocortex.sqlite")
-            try:
-                rel = str(saved_path.relative_to(notes_dir))
-            except ValueError:
-                rel = saved_path.name
-            idx.index_note(rel, clip_obj.title or raw_input[:50], clip_obj.content)
-        except Exception:
-            pass
-
-        # Link clip to concept pages (boost evidence_count) and capture deltas.
-        existing_cluster_delta = []
-        new_or_pending_clusters: list[str] = []
-        related_notes = []
-        if clip_obj.related_concepts:
-            existing_cluster_delta = _link_clip_to_concepts(notes_dir, clip_obj)
-            new_or_pending_clusters = _compute_new_or_pending(notes_dir, clip_obj.related_concepts)
-            related_notes = _find_related_notes(notes_dir, clip_obj, saved_path=saved_path)
-
-        from neocortex.config import append_log
-        append_log("clip", clip_obj.title or raw_input[:50])
-
-        result = ClipResult(
-            saved_path=str(saved_path),
-            clip=clip_obj,
-            llm_status=llm_status,
-            llm_error=llm_error,
-            existing_cluster_delta=existing_cluster_delta,
-            new_or_pending_clusters=new_or_pending_clusters,
-            related_notes=related_notes,
-        )
-
-        _print_clip_result(result, lang, fallback_title=raw_input[:50])
-
-    run_async(_run())
+    run_async(_run_clip_pipeline(multi_images, raw_input, cfg, profile, notes_dir, force, process, lang))
 
 
 _CLIP_TYPE_ICONS: dict[str, str] = {
@@ -529,7 +645,7 @@ def _inbox_list(inbox_clips: list, lang) -> None:
 
     console.print()
     console.print(f"  [bold]{t('inbox_title', lang)}[/bold]")
-    console.print("  " + "\u2501" * 40)
+    console.print("  " + "━" * 40)
     console.print()
 
     if not inbox_clips:
@@ -672,11 +788,75 @@ def _inbox_auto(inbox_clips: list, notes_dir, lang) -> None:
     run_async(_run())
 
 
-def _inbox_synthesize(all_clips: list, notes_dir, lang) -> None:
+async def _synthesize_cluster(concept: str, clips_in_cluster: list, provider, notes_dir: Path) -> bool:
+    """Synthesize one concept cluster into a note. Returns True if a note was written."""
     import os
     import tempfile
 
-    from neocortex.config import load_config, save_clip
+    from neocortex.config import save_clip
+
+    clip_entries = []
+    for clip in clips_in_cluster:
+        clip_entries.append(
+            f"- Title: {clip.title or '(untitled)'}\n"
+            f"  Summary: {clip.summary or clip.content[:200]}\n"
+            f"  Source: {clip.source}"
+        )
+
+    prompt_text = (
+        f"The user collected {len(clips_in_cluster)} clips related to [[{concept}]]:\n\n"
+        + "\n".join(clip_entries)
+        + "\n\n"
+        "Synthesize these clips into a concise knowledge note:\n\n"
+        "## Threads\nWhat direction do these clips point toward?\n\n"
+        "## Consensus\nWhat common viewpoints emerge across sources?\n\n"
+        "## Divergence\nAny contradictions or different angles?\n\n"
+        "## Next steps\nWhat should the user explore further?\n\n"
+        "Write in the user's language. Be concise and sharp."
+    )
+
+    with console.status(f"  Synthesizing [[{concept}]]..."):
+        try:
+            note_content = await provider.chat([{"role": "user", "content": prompt_text}])
+        except Exception:
+            return False
+
+    slug = concept.strip().lower().replace(" ", "-")
+    note_path = notes_dir / f"synthesis-{slug}.md"
+    today = date.today().isoformat()
+    frontmatter = (
+        "---\n"
+        f"source: clip-synthesis\n"
+        f"date: {today}\n"
+        f"tags: [synthesis, {concept}]\n"
+        f"related_gaps: [{concept}]\n"
+        "---\n\n"
+        f"# Synthesis: {concept}\n\n"
+    )
+    full_content = frontmatter + note_content
+
+    fd, tmp_path = tempfile.mkstemp(dir=str(notes_dir), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(full_content)
+        os.replace(tmp_path, str(note_path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        return False
+
+    for clip in clips_in_cluster:
+        clip.status = "synthesized"
+        clip.processed_at = today
+        save_clip(notes_dir, clip)
+
+    return True
+
+
+def _inbox_synthesize(all_clips: list, notes_dir, lang) -> None:
+    from neocortex.config import load_config
 
     active_clips = [c for c in all_clips if c.status in ("inbox", "reference")]
     concept_groups: dict[str, list] = {}
@@ -706,66 +886,8 @@ def _inbox_synthesize(all_clips: list, notes_dir, lang) -> None:
 
         synthesized_count = 0
         for concept, clips_in_cluster in clusters.items():
-            clip_entries = []
-            for clip in clips_in_cluster:
-                clip_entries.append(
-                    f"- Title: {clip.title or '(untitled)'}\n"
-                    f"  Summary: {clip.summary or clip.content[:200]}\n"
-                    f"  Source: {clip.source}"
-                )
-
-            prompt_text = (
-                f"The user collected {len(clips_in_cluster)} clips related to [[{concept}]]:\n\n"
-                + "\n".join(clip_entries)
-                + "\n\n"
-                "Synthesize these clips into a concise knowledge note:\n\n"
-                "## Threads\nWhat direction do these clips point toward?\n\n"
-                "## Consensus\nWhat common viewpoints emerge across sources?\n\n"
-                "## Divergence\nAny contradictions or different angles?\n\n"
-                "## Next steps\nWhat should the user explore further?\n\n"
-                "Write in the user's language. Be concise and sharp."
-            )
-
-            with console.status(f"  Synthesizing [[{concept}]]..."):
-                try:
-                    note_content = await provider.chat(
-                        [{"role": "user", "content": prompt_text}],
-                    )
-                except Exception:
-                    continue
-
-            slug = concept.strip().lower().replace(" ", "-")
-            note_path = notes_dir / f"synthesis-{slug}.md"
-            today = date.today().isoformat()
-            frontmatter = (
-                "---\n"
-                f"source: clip-synthesis\n"
-                f"date: {today}\n"
-                f"tags: [synthesis, {concept}]\n"
-                f"related_gaps: [{concept}]\n"
-                "---\n\n"
-                f"# Synthesis: {concept}\n\n"
-            )
-            full_content = frontmatter + note_content
-
-            fd, tmp_path = tempfile.mkstemp(dir=str(notes_dir), suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    f.write(full_content)
-                os.replace(tmp_path, str(note_path))
-            except Exception:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                continue
-
-            for clip in clips_in_cluster:
-                clip.status = "synthesized"
-                clip.processed_at = today
-                save_clip(notes_dir, clip)
-
-            synthesized_count += 1
+            if await _synthesize_cluster(concept, clips_in_cluster, provider, notes_dir):
+                synthesized_count += 1
 
         console.print(f"  [green]{t('inbox_synthesize_done', lang, count=str(synthesized_count))}[/green]")
 
@@ -839,6 +961,76 @@ def _print_clip_result(result, lang: str, fallback_title: str = "") -> None:
     console.print()
 
 
+def _bump_concept_evidence(concept_path: Path, concept_name: str, clip_obj):
+    """Bump evidence_count and append the clip reference for a single concept file.
+
+    Returns a ClusterDelta if the count actually changed and the write
+    succeeded, else None (caller skips this concept).
+    """
+    import os
+    import re
+    import tempfile
+    from datetime import date as _date
+
+    from neocortex.models import ClusterDelta
+
+    try:
+        content = concept_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    # Check if this clip source is already referenced
+    clip_ref = f"clip:{clip_obj.id}"
+    if clip_ref in content:
+        return None
+
+    # Bump evidence_count
+    ec_match = re.search(r"^evidence_count:\s*(\d+)", content, re.MULTILINE)
+    old_count = int(ec_match.group(1)) if ec_match else 0
+    new_count = old_count + 1
+    if ec_match:
+        content = re.sub(
+            r"^evidence_count:\s*\d+",
+            f"evidence_count: {new_count}",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+
+    # Update last_updated
+    today = _date.today().isoformat()
+    content = re.sub(
+        r"^last_updated:\s*\S+",
+        f"last_updated: {today}",
+        content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+    # Append clip reference to source notes list in frontmatter
+    sn_match = re.search(r'^source_notes:\s*\[([^\]]*)\]', content, re.MULTILINE)
+    if sn_match:
+        existing = sn_match.group(1).strip()
+        new_list = f'{existing}, "{clip_ref}"' if existing else f'"{clip_ref}"'
+        content = content[:sn_match.start()] + f"source_notes: [{new_list}]" + content[sn_match.end():]
+
+    fd, tmp_path = tempfile.mkstemp(dir=str(concept_path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_path, str(concept_path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        return None
+
+    if ec_match:
+        return ClusterDelta(concept=concept_name, count_before=old_count, count_after=new_count)
+    return None
+
+
 def _link_clip_to_concepts(notes_dir: Path, clip_obj) -> list:
     """Link a clip's related_concepts to existing concept pages.
 
@@ -848,14 +1040,7 @@ def _link_clip_to_concepts(notes_dir: Path, clip_obj) -> list:
     here — caller should pair this with _compute_new_or_pending() to surface
     those as new/pending clusters.
     """
-    import os
-    import re
-    import tempfile
-    from datetime import date as _date
-
-    from neocortex.models import ClusterDelta
-
-    deltas: list[ClusterDelta] = []
+    deltas: list = []
     concepts_dir = notes_dir / "concepts"
     if not concepts_dir.exists():
         return deltas
@@ -866,68 +1051,9 @@ def _link_clip_to_concepts(notes_dir: Path, clip_obj) -> list:
         if not concept_path.exists():
             continue
 
-        try:
-            content = concept_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-
-        # Check if this clip source is already referenced
-        clip_ref = f"clip:{clip_obj.id}"
-        if clip_ref in content:
-            continue
-
-        # Bump evidence_count
-        ec_match = re.search(r"^evidence_count:\s*(\d+)", content, re.MULTILINE)
-        old_count = int(ec_match.group(1)) if ec_match else 0
-        new_count = old_count + 1
-        if ec_match:
-            content = re.sub(
-                r"^evidence_count:\s*\d+",
-                f"evidence_count: {new_count}",
-                content,
-                count=1,
-                flags=re.MULTILINE,
-            )
-
-        # Update last_updated
-        today = _date.today().isoformat()
-        content = re.sub(
-            r"^last_updated:\s*\S+",
-            f"last_updated: {today}",
-            content,
-            count=1,
-            flags=re.MULTILINE,
-        )
-
-        # Append clip reference to source notes list in frontmatter
-        sn_match = re.search(r'^source_notes:\s*\[([^\]]*)\]', content, re.MULTILINE)
-        if sn_match:
-            existing = sn_match.group(1).strip()
-            if existing:
-                new_list = f'{existing}, "{clip_ref}"'
-            else:
-                new_list = f'"{clip_ref}"'
-            content = content[:sn_match.start()] + f"source_notes: [{new_list}]" + content[sn_match.end():]
-
-        fd, tmp_path = tempfile.mkstemp(dir=str(concepts_dir), suffix=".tmp")
-        wrote = False
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-            os.replace(tmp_path, str(concept_path))
-            wrote = True
-        except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-
-        if wrote and ec_match:
-            deltas.append(ClusterDelta(
-                concept=concept_name,
-                count_before=old_count,
-                count_after=new_count,
-            ))
+        delta = _bump_concept_evidence(concept_path, concept_name, clip_obj)
+        if delta is not None:
+            deltas.append(delta)
 
     return deltas
 
