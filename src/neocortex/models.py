@@ -361,6 +361,8 @@ class CompileResult(BaseModel):
     wikilinks_inserted: int = 0
     index_updated: bool = False
     conflicts: list[dict] = Field(default_factory=list)
+    # 已翻译好的用户可见文案（如搜索索引重建失败），供 cmd_compile.py 展示。
+    warnings: list[str] = Field(default_factory=list)
 
 
 # ── Lint ──

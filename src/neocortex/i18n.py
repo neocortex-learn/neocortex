@@ -905,6 +905,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "{count} valuable insight(s) auto-saved to knowledge base",
         "zh": "已自动保存 {count} 条有价值的洞察到知识库",
     },
+    "insight_evaluate_failed": {
+        "en": "Insight value evaluation failed ({error}), skipped auto-save",
+        "zh": "洞察价值评估失败（{error}），已跳过自动保存",
+    },
 
     # ── Compile ──
     "compile_updating": {
@@ -938,6 +942,14 @@ STRINGS: dict[str, dict[str, str]] = {
     "compile_cached": {
         "en": "Using cache, {skipped} notes unchanged",
         "zh": "使用缓存，{skipped} 篇笔记未变化",
+    },
+    "compile_search_index_failed": {
+        "en": "Search index rebuild failed ({error}) — search results may be stale until the next compile",
+        "zh": "搜索索引重建失败（{error}），搜索结果可能过时，需等下次编译",
+    },
+    "compile_overview_failed": {
+        "en": "Overview generation failed ({error}) — overview.md was not updated",
+        "zh": "总览生成失败（{error}），overview.md 未更新",
     },
 
     # ── Lint ──

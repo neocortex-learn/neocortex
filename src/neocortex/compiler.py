@@ -13,6 +13,8 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from neocortex.llm.base import LLMProvider
 from neocortex.models import (
     CompileResult,
@@ -1159,11 +1161,18 @@ Output JSON array:
         if rel_path.exists():
             try:
                 raw_data = json.loads(rel_path.read_text(encoding="utf-8"))
-                if isinstance(raw_data, list):
-                    for rd_item in raw_data:
+            except (OSError, json.JSONDecodeError):
+                raw_data = None
+            if isinstance(raw_data, list):
+                for rd_item in raw_data:
+                    # One malformed entry shouldn't discard the whole batch —
+                    # skip it, keep the rest (was previously a single
+                    # except-Exception around the loop that silently dropped
+                    # every already-parsed card on the first bad item).
+                    try:
                         existing_cards.append(Flashcard.model_validate(rd_item))
-            except Exception:
-                pass
+                    except (ValidationError, TypeError):
+                        continue
         existing_cards.extend(cards)
         save_flashcards(notes_dir, "_relationships", existing_cards)
 
@@ -1327,14 +1336,16 @@ async def compile_all(
         from neocortex.search import NoteIndex
         search_index = NoteIndex(notes_dir / ".search.db")
         search_index.index_all(notes_dir)
-    except Exception:
-        pass
+    except Exception as exc:
+        from neocortex.i18n import t
+        result.warnings.append(t("compile_search_index_failed", language, error=str(exc) or exc.__class__.__name__))
 
     # Generate overview.md — narrative synthesis of the entire knowledge base
     try:
         await generate_overview(notes_dir, all_concepts, profile, provider, language)
-    except Exception:
-        pass
+    except Exception as exc:
+        from neocortex.i18n import t
+        result.warnings.append(t("compile_overview_failed", language, error=str(exc) or exc.__class__.__name__))
 
     return result
 

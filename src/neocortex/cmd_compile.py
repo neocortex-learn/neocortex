@@ -75,6 +75,9 @@ def compile(
                 f"  [dim]{t('compile_done', lang, created=str(result.concepts_created), updated=str(result.concepts_updated))}[/dim]"
             )
 
+        for warning in result.warnings:
+            console.print(f"  [yellow]{warning}[/yellow]")
+
         console.print()
 
         from neocortex.config import append_log

@@ -252,8 +252,9 @@ def ask(
 
         try:
             should_save = run_async(_evaluate())
-        except Exception:
+        except Exception as exc:
             should_save = False
+            console.print(f"  [dim]{t('insight_evaluate_failed', lang, error=str(exc) or exc.__class__.__name__)}[/dim]")
 
     if should_save:
         from neocortex.asker import save_insight
@@ -361,8 +362,10 @@ def _run_chat() -> None:
                 pairs[-1] = (q, msg["content"])
 
         saved_count = 0
+        eval_failed_count = 0
 
         async def _save_valuable_pairs() -> int:
+            nonlocal eval_failed_count
             count = 0
             for question, answer in pairs:
                 if not answer:
@@ -371,6 +374,7 @@ def _run_chat() -> None:
                     worthy = await evaluate_insight_value(question, answer, provider)
                 except Exception:
                     worthy = False
+                    eval_failed_count += 1
                 if worthy:
                     path = save_insight(question, answer, lang)
                     console.print(f"  [green]{t('insight_saved', lang, path=str(path))}[/green]")
@@ -381,9 +385,11 @@ def _run_chat() -> None:
         with console.status(f"  {t('insight_evaluating', lang)}"):
             try:
                 saved_count = run_async(_save_valuable_pairs())
-            except Exception:
-                pass
+            except Exception as exc:
+                console.print(f"  [dim]{t('insight_evaluate_failed', lang, error=str(exc) or exc.__class__.__name__)}[/dim]")
 
+        if eval_failed_count > 0:
+            console.print(f"  [dim]{t('insight_evaluate_failed', lang, error=f'{eval_failed_count} pair(s)')}[/dim]")
         if saved_count > 0:
             console.print(f"  [dim]{t('insight_auto_saved', lang, count=str(saved_count))}[/dim]")
         console.print()
