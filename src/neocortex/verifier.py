@@ -829,7 +829,12 @@ def update_concept_confidence(concept_path: Path, verification: ConceptVerificat
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(new_content)
         os.replace(tmp_path, str(concept_path))
-    except Exception:
+    except OSError:
+        # Called per-concept inside verify --fix's batch loop (no outer
+        # try/except) — unlike the sibling atomic-write helpers elsewhere,
+        # re-raising here would abort the whole batch after one bad file.
+        # Narrowed from bare Exception so a real bug in the surrounding
+        # code wouldn't get silently absorbed here instead.
         try:
             os.unlink(tmp_path)
         except OSError:

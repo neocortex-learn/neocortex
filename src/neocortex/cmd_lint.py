@@ -52,6 +52,7 @@ def _save_lint_report(notes_dir: Path, report: LintReport) -> Path:
             os.unlink(tmp_path)
         except OSError:
             pass
+        raise
 
     # Prune: keep only the latest 12 reports
     existing = sorted(reports_dir.glob("lint-*.md"), reverse=True)
