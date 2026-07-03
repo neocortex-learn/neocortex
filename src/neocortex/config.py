@@ -11,6 +11,7 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from pydantic import ValidationError
 
 from typing import Any
 
@@ -262,7 +263,7 @@ def load_recommendations(status: str | None = None) -> list[RecommendationRecord
             rec = RecommendationRecord.model_validate(item)
             if status is None or rec.status == status:
                 records.append(rec)
-        except Exception:
+        except (ValidationError, TypeError):
             continue
     return records
 
@@ -281,7 +282,7 @@ def load_gap_progress() -> dict[str, GapProgress]:
     for key, val in raw.items():
         try:
             result[key] = GapProgress.model_validate(val)
-        except Exception:
+        except (ValidationError, TypeError):
             continue
     return result
 

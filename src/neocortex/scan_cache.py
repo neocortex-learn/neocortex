@@ -7,6 +7,8 @@ import json
 import subprocess
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from neocortex.models import Skills
 
 
@@ -113,7 +115,7 @@ class ScanCache:
         if entry and entry.get("hash") == project_hash:
             try:
                 return Skills(**entry["skills"])
-            except Exception:
+            except (ValidationError, TypeError, KeyError):
                 return None
         return None
 
