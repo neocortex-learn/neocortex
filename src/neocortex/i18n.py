@@ -695,6 +695,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "{count} flashcards created",
         "zh": "已生成 {count} 张闪卡",
     },
+    "flashcard_generate_failed": {
+        "en": "Flashcard generation failed ({error}), skipped",
+        "zh": "闪卡生成失败（{error}），已跳过",
+    },
     "review_title": {
         "en": "Spaced Review",
         "zh": "间隔复习",
@@ -919,6 +923,10 @@ STRINGS: dict[str, dict[str, str]] = {
         "en": "{created} concepts created, {updated} updated",
         "zh": "新建 {created} 个概念，更新 {updated} 个",
     },
+    "compile_failed": {
+        "en": "Compilation failed ({error}), note saved without compiling",
+        "zh": "编译失败（{error}），笔记已保存但未编译入知识库",
+    },
     "compile_title": {
         "en": "Knowledge Base Compilation",
         "zh": "知识库编译",
@@ -1004,6 +1012,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "digest_period": {"en": "Period: last {days} days", "zh": "周期：最近 {days} 天"},
     "exercise_generating": {"en": "Generating exercises...", "zh": "正在生成练习..."},
     "exercise_created": {"en": "Exercises saved: {path}", "zh": "练习已保存：{path}"},
+    "exercise_generate_failed": {
+        "en": "Exercise generation failed ({error}), skipped",
+        "zh": "练习生成失败（{error}），已跳过",
+    },
 
     # ── Feed ──
     "feed_title": {"en": "RSS Feeds", "zh": "RSS 订阅"},
@@ -1158,9 +1170,17 @@ STRINGS: dict[str, dict[str, str]] = {
         "zh": "已升级 — 运行：neocortex read {url}",
     },
     "inbox_auto_done": {"en": "Processed {count} clips", "zh": "已处理 {count} 条碎片"},
+    "inbox_auto_failed": {
+        "en": "AI prioritization failed ({error}), no priorities assigned",
+        "zh": "AI 优先级排序失败（{error}），未分配任何优先级",
+    },
     "inbox_synthesize_done": {
         "en": "Synthesized {count} clusters into notes",
         "zh": "已将 {count} 个聚类综合为笔记",
+    },
+    "inbox_synthesize_cluster_failed": {
+        "en": "Synthesis failed for [[{concept}]] ({error}), skipped",
+        "zh": "[[{concept}]] 综合失败（{error}），已跳过",
     },
     "inbox_no_clusters": {
         "en": "No clusters found (need 3+ clips per concept)",

@@ -244,8 +244,8 @@ async def _maybe_generate_flashcards(
             ) for c in raw_cards]
             save_flashcards(notes_dir, note_path.stem, cards)
             console.print(f"  [green]{t('flashcard_created', lang, count=str(len(cards)))}[/green]")
-    except Exception:
-        pass
+    except Exception as exc:
+        console.print(f"  [yellow]{t('flashcard_generate_failed', lang, error=str(exc) or exc.__class__.__name__)}[/yellow]")
 
 
 async def _maybe_generate_exercises(
@@ -263,8 +263,8 @@ async def _maybe_generate_exercises(
             )
             exercises_path.write_text(ex_content, encoding="utf-8")
             console.print(f"  [green]{t('exercise_created', lang, path=exercises_path.name)}[/green]")
-    except Exception:
-        pass
+    except Exception as exc:
+        console.print(f"  [yellow]{t('exercise_generate_failed', lang, error=str(exc) or exc.__class__.__name__)}[/yellow]")
 
 
 async def _maybe_compile_note(note_path: Path, notes_dir: Path, prof: Profile, provider, lang) -> None:
@@ -286,8 +286,8 @@ async def _maybe_compile_note(note_path: Path, notes_dir: Path, prof: Profile, p
                 hint = conflict.get("resolution_hint", "")
                 if hint:
                     console.print(f"    [dim]{hint}[/dim]")
-    except Exception:
-        pass
+    except Exception as exc:
+        console.print(f"  [yellow]{t('compile_failed', lang, error=str(exc) or exc.__class__.__name__)}[/yellow]")
 
 
 async def _maybe_generate_audio(notes_content: str, note_path: Path, lang) -> None:

@@ -764,7 +764,8 @@ def _inbox_auto(inbox_clips: list, notes_dir, lang) -> None:
                     json_mode=True,
                 )
                 results = json_lib.loads(raw)
-            except Exception:
+            except Exception as exc:
+                console.print(f"  [yellow]{t('inbox_auto_failed', lang, error=str(exc) or exc.__class__.__name__)}[/yellow]")
                 results = []
 
         if not isinstance(results, list):
@@ -788,7 +789,7 @@ def _inbox_auto(inbox_clips: list, notes_dir, lang) -> None:
     run_async(_run())
 
 
-async def _synthesize_cluster(concept: str, clips_in_cluster: list, provider, notes_dir: Path) -> bool:
+async def _synthesize_cluster(concept: str, clips_in_cluster: list, provider, notes_dir: Path, lang) -> bool:
     """Synthesize one concept cluster into a note. Returns True if a note was written."""
     import os
     import tempfile
@@ -818,7 +819,10 @@ async def _synthesize_cluster(concept: str, clips_in_cluster: list, provider, no
     with console.status(f"  Synthesizing [[{concept}]]..."):
         try:
             note_content = await provider.chat([{"role": "user", "content": prompt_text}])
-        except Exception:
+        except Exception as exc:
+            console.print(
+                f"  [yellow]{t('inbox_synthesize_cluster_failed', lang, concept=concept, error=str(exc) or exc.__class__.__name__)}[/yellow]"
+            )
             return False
 
     slug = concept.strip().lower().replace(" ", "-")
@@ -840,7 +844,7 @@ async def _synthesize_cluster(concept: str, clips_in_cluster: list, provider, no
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(full_content)
         os.replace(tmp_path, str(note_path))
-    except Exception:
+    except OSError:
         try:
             os.unlink(tmp_path)
         except OSError:
@@ -886,7 +890,7 @@ def _inbox_synthesize(all_clips: list, notes_dir, lang) -> None:
 
         synthesized_count = 0
         for concept, clips_in_cluster in clusters.items():
-            if await _synthesize_cluster(concept, clips_in_cluster, provider, notes_dir):
+            if await _synthesize_cluster(concept, clips_in_cluster, provider, notes_dir, lang):
                 synthesized_count += 1
 
         console.print(f"  [green]{t('inbox_synthesize_done', lang, count=str(synthesized_count))}[/green]")
@@ -1019,7 +1023,7 @@ def _bump_concept_evidence(concept_path: Path, concept_name: str, clip_obj):
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
         os.replace(tmp_path, str(concept_path))
-    except Exception:
+    except OSError:
         try:
             os.unlink(tmp_path)
         except OSError:
@@ -1125,6 +1129,8 @@ def _find_related_notes(
     are no concepts to query against. saved_path is used to exclude the
     freshly-saved clip itself from results.
     """
+    import sqlite3
+
     from neocortex.config import get_data_dir
     from neocortex.models import RelatedNoteRef
     from neocortex.search import NoteIndex
@@ -1136,7 +1142,7 @@ def _find_related_notes(
         index = NoteIndex(get_data_dir() / "neocortex.sqlite")
         if not index.has_index():
             return []
-    except Exception:
+    except (sqlite3.Error, OSError):
         return []
 
     own_filename = ""
@@ -1150,7 +1156,7 @@ def _find_related_notes(
     for concept_name in clip_obj.related_concepts:
         try:
             hits = index.search(concept_name, limit=limit)
-        except Exception:
+        except sqlite3.Error:
             continue
         for hit in hits:
             fname = hit.get("filename", "")
