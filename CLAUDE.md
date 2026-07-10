@@ -98,23 +98,24 @@ src/neocortex/
 ├── matcher/        # 推荐匹配（base 策略 + GitHub 机会匹配）
 ├── importer/       # 聊天记录导入
 ├── services/       # 纯函数服务层（无 Rich/Typer/交互），HTTP server 入口
-│                   # clip / read / ask / daily / notes / visualize
+│                   # clip / read / ask / daily / notes / visualize / compile / review
 └── server/         # FastAPI 本地 server（Sprint 0）
     ├── app.py         # create_app() 工厂 + healthz + version
     ├── runtime.py     # PID/port/token 文件管理（0600）
     ├── security.py    # SecurityMiddleware + WS 握手校验
-    └── routes/        # 7 个 router：clip/read/notes/search/ask/daily/map
+    └── routes/        # 9 个 router：clip/read/notes/search/ask/daily/map/review/compile
 ```
 
 ## Server / Services 层（Sprint 0）
 
 **目的**：把 CLI 内部逻辑包装成 HTTP 友好的纯函数入口，给 GUI 客户端（SwiftUI / 未来 Tauri）调用。
 
-- **`services/*.py`**（6 个）：从 cmd_*.py 提取出来的纯异步函数，不带 Rich/Typer/Prompt。
+- **`services/*.py`**：从 cmd_*.py 提取出来的纯异步函数，不带 Rich/Typer/Prompt。
   公共接口示例：`services.clip.clip_text()`、`services.read.read_url(on_progress=...)`、
   `services.daily.build_briefing()`、`services.ask.ask_question()`、
-  `services.notes.delete_note()`、`services.visualize.build_concept_map()`。
-- **`server/app.py`**：`create_app(token, port) -> FastAPI`，注册 7 个路由 + healthz + version。
+  `services.notes.delete_note()`、`services.visualize.build_concept_map()`、
+  `services.compile.compile_notes()`、`services.review_events.create_review_session()`。
+- **`server/app.py`**：`create_app(token, port) -> FastAPI`，注册 9 个路由 + healthz + version。
   禁用 Swagger / OpenAPI（减少暴露面），不挂 CORS（依赖浏览器 SOP 隔离）。
 - **`server/security.py`**：四层防御 Bearer token + Host 严格匹配 + Origin 白名单
   （`null` / `tauri://localhost`）+ 变更方法强制 `Content-Type: application/json`。
@@ -141,6 +142,10 @@ src/neocortex/
 | GET | `/api/daily` | 今日浮现 briefing |
 | POST | `/api/daily/surface` | 标记 clip 已浮现，推进调度 |
 | GET | `/api/map` | 返回 Mermaid 概念图源码 |
+| POST | `/api/review/session` | 创建复习会话（幂等 request_id，服务端强制 ≤5 张） |
+| POST | `/api/review/action` | 评分/淘汰/撤销/回源/曝光（幂等 event_id） |
+| POST | `/api/compile` | 启动概念编译后台任务（已在跑返回 accepted=false） |
+| GET | `/api/compile/status` | 编译任务快照（idle/running/done/failed + 进度） |
 
 **注意**：clip/read 的去重在 services 层和 CLI 路径**都已接入**（commit 7dda34f），
 `--force` 可跳过（commit fd2ae27）。

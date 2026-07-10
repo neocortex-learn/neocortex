@@ -49,6 +49,7 @@ def create_app(token: str, port: int) -> FastAPI:
     # Resource routers
     from neocortex.server.routes.ask import make_router as _ask_router
     from neocortex.server.routes.clip import make_router as _clip_router
+    from neocortex.server.routes.compile import make_router as _compile_router
     from neocortex.server.routes.daily import make_router as _daily_router
     from neocortex.server.routes.map import make_router as _map_router
     from neocortex.server.routes.notes import make_router as _notes_router
@@ -67,5 +68,6 @@ def create_app(token: str, port: int) -> FastAPI:
     app.include_router(_daily_router(require_token))
     app.include_router(_map_router(require_token))
     app.include_router(_review_router(require_token))
+    app.include_router(_compile_router(require_token))
 
     return app

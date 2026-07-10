@@ -368,6 +368,23 @@ class CompileResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class CompileJobStatus(BaseModel):
+    """HTTP compile job 状态快照（POST /api/compile + GET /api/compile/status）。
+
+    compile 是分钟级长任务，HTTP 层用后台任务 + 轮询而不是同步阻塞。
+    ``accepted`` 只对 POST 响应有意义：False 表示已有任务在跑，本次未启动新任务。
+    """
+    state: str = "idle"  # idle | running | done | failed
+    accepted: bool = True
+    force: bool = False
+    current: int = 0
+    total: int = 0
+    started_at: str | None = None
+    finished_at: str | None = None
+    result: CompileResult | None = None
+    error: str | None = None
+
+
 # ── Lint ──
 
 class LintIssue(BaseModel):
