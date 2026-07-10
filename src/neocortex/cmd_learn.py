@@ -310,6 +310,7 @@ def _run_plan(
             pass
 
 
+@learn_app.command()
 def growth(
     json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
@@ -406,6 +407,7 @@ def growth(
     console.print()
 
 
+@learn_app.command()
 def converge(
     weekly: bool = typer.Option(False, "--weekly", help="Force weekly scope"),
     monthly: bool = typer.Option(False, "--monthly", help="Force monthly scope"),
