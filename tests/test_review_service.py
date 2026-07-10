@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from neocortex.models import Flashcard
-from neocortex.reviewer import get_review_session, is_active, is_due, sm2_update
+from neocortex.reviewer import get_review_session, is_active, sm2_update
 from neocortex.services.review import (
     GUI_QUALITY_MAP,
     MAX_SESSION_CARDS,
@@ -576,7 +576,10 @@ class TestConcurrentWrites:
 
         t1 = threading.Thread(target=work, args=("a1",))
         t2 = threading.Thread(target=work, args=("a2",))
-        t1.start(); t2.start(); t1.join(); t2.join()
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
 
         assert not errors
         data = {c["id"]: c for c in json.loads(path.read_text())}

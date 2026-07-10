@@ -113,6 +113,7 @@ class TestDirectories:
         assert d.exists()
         assert d.is_dir()
 
+    @pytest.mark.real_paths
     def test_get_notes_dir_creates_directory(self, tmp_path, monkeypatch):
         # With no config file and no layout root, falls back to ~/Documents/Neocortex
         monkeypatch.setattr("neocortex.config._config_path", lambda: tmp_path / "nonexistent.json")
@@ -123,6 +124,7 @@ class TestDirectories:
         assert notes.is_dir()
         assert notes == tmp_path / "Documents" / "Neocortex"
 
+    @pytest.mark.real_paths
     def test_get_notes_dir_uses_config(self, tmp_path, monkeypatch):
         # When config has a custom notes_dir, use it
         import json
