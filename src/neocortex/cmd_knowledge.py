@@ -406,9 +406,15 @@ def review(
     from rich.panel import Panel
     from rich.markdown import Markdown
 
-    from neocortex.config import get_notes_dir, load_flashcards, save_flashcards
-    from neocortex.models import Flashcard, ReviewStats
-    from neocortex.reviewer import get_review_session, sm2_update
+    from neocortex.config import get_notes_dir
+    from neocortex.models import ReviewStats
+    from neocortex.reviewer import get_review_session, is_active
+    from neocortex.services.review import (
+        CardNotFoundError,
+        grade_card,
+        load_stored_cards,
+        log_review_summary,
+    )
 
     lang = _get_lang()
     notes_dir = get_notes_dir()
@@ -417,7 +423,8 @@ def review(
         console.print(f"  [red]Invalid mode '{mode}'. Valid: default, diagnostic, drill, hard[/red]")
         raise typer.Exit(1)
 
-    all_cards = load_flashcards(notes_dir)
+    stored_cards = load_stored_cards(notes_dir)
+    all_cards = [s.card for s in stored_cards if is_active(s.card)]
     session_cards = get_review_session(all_cards, max_cards=count, mode=mode)
 
     console.print()
@@ -438,11 +445,6 @@ def review(
 
     stats = ReviewStats(date=date.today().isoformat())
     total_session = len(session_cards)
-
-    cards_by_note: dict[str, list[Flashcard]] = {}
-    for c in all_cards:
-        stem = Path(c.source_note).stem
-        cards_by_note.setdefault(stem, []).append(c)
 
     for i, card in enumerate(session_cards, 1):
         console.print(f"  [dim]{t('review_progress', lang, current=str(i), total=str(total_session))}[/dim]")
@@ -495,10 +497,15 @@ def review(
         quality_map = {"1": 0, "2": 1, "3": 3, "4": 4, "5": 5}
         quality = quality_map[answer]
 
-        sm2_update(card, quality)
-
-        if quality >= 3 and card.concept:
-            _boost_concept_confidence(notes_dir, card.concept)
+        # 评分 / 原子写回原存储文件 / 标准卡 concept boost 全在共享 service
+        # 里完成（含跨进程锁）；Typer 层只负责交互。
+        try:
+            grade_card(notes_dir, card.id, quality)
+        except CardNotFoundError:
+            console.print(f"  [red]card {card.id} disappeared from storage, skipped[/red]")
+            stats.skipped += 1
+            console.print()
+            continue
 
         stats.cards_reviewed += 1
         if quality >= 3:
@@ -506,20 +513,17 @@ def review(
         else:
             stats.incorrect += 1
 
-        note_stem = Path(card.source_note).stem
-        if note_stem in cards_by_note:
-            save_flashcards(notes_dir, note_stem, cards_by_note[note_stem])
-
         console.print()
 
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    # 重新从磁盘读：评分已由 service 落盘，内存里的 session 卡是旧快照。
+    refreshed = [s.card for s in load_stored_cards(notes_dir) if is_active(s.card)]
     tomorrow_due = sum(
-        1 for c in all_cards
+        1 for c in refreshed
         if c.next_review and c.next_review <= tomorrow
     )
 
-    from neocortex.config import append_log
-    append_log("review", f"{stats.cards_reviewed} cards, {stats.correct} correct")
+    log_review_summary(stats.cards_reviewed, stats.correct)
 
     console.print(f"  [bold green]{t('review_done', lang)}[/bold green]")
     console.print(f"  {t('review_stats', lang, reviewed=str(stats.cards_reviewed), correct=str(stats.correct), tomorrow=str(tomorrow_due))}")
@@ -527,64 +531,6 @@ def review(
     if rel_count > 0:
         console.print(f"  [dim]({rel_count} {t('review_relationship', lang)})[/dim]")
     console.print()
-
-
-def _boost_concept_confidence(notes_dir: Path, concept_name: str) -> None:
-    """Boost a concept's confidence after a successful review."""
-    import re as _re
-
-    from neocortex.decay import REVIEW_BOOST, boost_confidence, decayed_confidence
-
-    slug = concept_name.strip().lower().replace(" ", "-")
-    concept_path = notes_dir / "concepts" / f"{slug}.md"
-    if not concept_path.exists():
-        return
-
-    try:
-        content = concept_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return
-
-    conf_match = _re.search(r"^confidence:\s*([\d.]+)", content, _re.MULTILINE)
-    date_match = _re.search(r"^last_updated:\s*(\S+)", content, _re.MULTILINE)
-    if not conf_match:
-        return
-
-    old_conf = float(conf_match.group(1))
-    old_date = date_match.group(1) if date_match else ""
-    current = decayed_confidence(old_conf, old_date)
-    new_conf = boost_confidence(current, REVIEW_BOOST)
-    today = date.today().isoformat()
-
-    content = _re.sub(
-        r"^confidence:\s*[\d.]+",
-        f"confidence: {new_conf:.4f}",
-        content,
-        count=1,
-        flags=_re.MULTILINE,
-    )
-    content = _re.sub(
-        r"^last_updated:\s*\S+",
-        f"last_updated: {today}",
-        content,
-        count=1,
-        flags=_re.MULTILINE,
-    )
-
-    import os
-    import tempfile
-
-    fd, tmp_path = tempfile.mkstemp(dir=str(concept_path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp_path, str(concept_path))
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
 
 
 def _fts_search(query: str) -> list[dict] | None:

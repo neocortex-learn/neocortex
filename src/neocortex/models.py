@@ -322,6 +322,9 @@ class Flashcard(BaseModel):
     next_review: str = ""
     review_count: int = 0
     last_review: str | None = None
+    # 软淘汰标记：suspended 卡不进入任何复习队列/统计，但保留在原 JSON 里
+    # 以便撤销和质量分析。旧 JSON 没有该字段 → 默认 False（向后兼容）。
+    suspended: bool = False
 
 
 class ReviewStats(BaseModel):

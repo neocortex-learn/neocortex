@@ -374,28 +374,35 @@ def load_flashcards(notes_dir: Path) -> list[Flashcard]:
 
 def save_flashcards(notes_dir: Path, note_stem: str, cards: list[Flashcard]) -> None:
     import tempfile
+
+    # 与 review service 共用同一把跨进程写锁：compiler / cmd_read 生成卡片
+    # 与 CLI/HTTP 复习可能并发，整文件 os.replace 若不持锁会覆写刚落盘的
+    # SM-2 进度（最后写入者获胜）。
+    from neocortex.services.review import review_write_lock
+
     fc_dir = notes_dir / ".flashcards"
     fc_dir.mkdir(parents=True, exist_ok=True)
     path = fc_dir / f"{note_stem}.json"
     data = [c.model_dump(mode="json") for c in cards]
-    fd, tmp_path = tempfile.mkstemp(dir=str(fc_dir), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, str(path))
-    except Exception:
+    with review_write_lock(notes_dir):
+        fd, tmp_path = tempfile.mkstemp(dir=str(fc_dir), suffix=".tmp")
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, str(path))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
 
 def get_due_flashcards(notes_dir: Path) -> list[Flashcard]:
-    from datetime import date as _date
-    today = _date.today().isoformat()
+    # due/active 判断只有 reviewer.is_due / is_active 一份实现，这里只做组合。
+    from neocortex.reviewer import is_active, is_due
     all_cards = load_flashcards(notes_dir)
-    return [c for c in all_cards if not c.next_review or c.next_review <= today]
+    return [c for c in all_cards if is_active(c) and is_due(c)]
 
 
 def load_feeds() -> list[dict]:

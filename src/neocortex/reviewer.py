@@ -7,6 +7,19 @@ from datetime import date, timedelta
 from neocortex.models import Flashcard
 
 
+def is_active(card: Flashcard) -> bool:
+    """Suspended (软淘汰) cards are excluded from every queue and count."""
+    return not card.suspended
+
+
+def is_due(card: Flashcard, today: str | None = None) -> bool:
+    """The ONE due predicate. daily count / session queue / CLI 都必须走这里，
+    不允许在别处复制 `next_review <= today` 逻辑。"""
+    if today is None:
+        today = date.today().isoformat()
+    return not card.next_review or card.next_review <= today
+
+
 def sm2_update(card: Flashcard, quality: int) -> Flashcard:
     """Update flashcard SM-2 parameters based on user rating (0-5)."""
     quality = max(0, min(5, quality))
@@ -46,7 +59,7 @@ def get_review_session(
     - drill: only struggling cards (ease_factor < 2.0), ignore schedule
     - hard: due cards with ease_factor < 2.3 first, then others
     """
-    today = date.today().isoformat()
+    cards = [c for c in cards if is_active(c)]
 
     if mode == "diagnostic":
         return _diagnostic_session(cards, max_cards)
@@ -56,7 +69,7 @@ def get_review_session(
         return _hard_session(cards, max_cards)
 
     # Default: due cards, interleaved
-    due = [c for c in cards if not c.next_review or c.next_review <= today]
+    due = [c for c in cards if is_due(c)]
 
     def _sort_key(c: Flashcard) -> tuple[int, str]:
         if c.last_review:
@@ -85,8 +98,7 @@ def _drill_session(cards: list[Flashcard], max_cards: int) -> list[Flashcard]:
 
 def _hard_session(cards: list[Flashcard], max_cards: int) -> list[Flashcard]:
     """Due cards, but hard ones (ease_factor < 2.3) first."""
-    today = date.today().isoformat()
-    due = [c for c in cards if not c.next_review or c.next_review <= today]
+    due = [c for c in cards if is_due(c)]
     hard = [c for c in due if c.ease_factor < 2.3]
     normal = [c for c in due if c.ease_factor >= 2.3]
     combined = hard + normal

@@ -51,7 +51,7 @@ async def build_briefing(
     changed" — slower (1–3s), better signal.
     """
     from neocortex.config import load_clips
-    from neocortex.config import get_due_flashcards
+    from neocortex.services.review import get_review_queue_summary
 
     today = date.today()
     today_str = today.isoformat()
@@ -113,9 +113,10 @@ async def build_briefing(
     # Health pulse
     pulse = _build_health_pulse(notes_dir)
 
-    # Due flashcards (count only — GUI deep-links to /review CLI flow later)
+    # Due flashcards：必须来自共享 review service 的唯一实现，保证与
+    # POST /api/review/session 的 due_total 在同一快照下相等。
     try:
-        due_count = len(get_due_flashcards(notes_dir))
+        due_count = get_review_queue_summary(notes_dir).due_total
     except Exception:
         due_count = 0
 

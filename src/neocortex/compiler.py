@@ -13,7 +13,6 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
-from pydantic import ValidationError
 
 from neocortex.llm.base import LLMProvider
 from neocortex.models import (
@@ -1097,7 +1096,6 @@ async def _generate_relationship_batch(
     """Generate relationship flashcards for a batch of concept pairs."""
     import uuid
 
-    from neocortex.config import save_flashcards
     from neocortex.models import Flashcard
 
     lang_inst = "\u7528\u4e2d\u6587\u8f93\u51fa\u3002" if language == Language.ZH else "Output in English."
@@ -1156,25 +1154,24 @@ Output JSON array:
             ))
 
     if cards:
-        existing_cards: list[Flashcard] = []
+        # 读-改-写全程持复习写锁：GUI/CLI 评分会并发更新同一文件，不持锁
+        # 的话这里的整文件覆写会吃掉刚落盘的 SM-2 进度（最后写入者获胜）。
+        # 原始条目（包括当前模型解析不了的坏条目）原样保留，只追加新卡。
+        from neocortex.services.review import atomic_save_raw, review_write_lock
+
         rel_path = notes_dir / ".flashcards" / "_relationships.json"
-        if rel_path.exists():
-            try:
-                raw_data = json.loads(rel_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                raw_data = None
-            if isinstance(raw_data, list):
-                for rd_item in raw_data:
-                    # One malformed entry shouldn't discard the whole batch —
-                    # skip it, keep the rest (was previously a single
-                    # except-Exception around the loop that silently dropped
-                    # every already-parsed card on the first bad item).
-                    try:
-                        existing_cards.append(Flashcard.model_validate(rd_item))
-                    except (ValidationError, TypeError):
-                        continue
-        existing_cards.extend(cards)
-        save_flashcards(notes_dir, "_relationships", existing_cards)
+        rel_path.parent.mkdir(parents=True, exist_ok=True)
+        with review_write_lock(notes_dir):
+            raw_items: list = []
+            if rel_path.exists():
+                try:
+                    raw_data = json.loads(rel_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    raw_data = None
+                if isinstance(raw_data, list):
+                    raw_items = raw_data
+            raw_items.extend(c.model_dump(mode="json") for c in cards)
+            atomic_save_raw(rel_path, raw_items)
 
 
 # ── Full compile ──
