@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from neocortex.cmd_read import (
     _confirm_outline,
     _find_duplicate_read,
+    _flashcard_source_note,
     _maybe_auto_open,
     _resolve_topic_dir,
     _write_read_note,
@@ -164,6 +165,22 @@ class TestWriteReadNote:
 
         _, _, safe_title = _write_read_note(tmp_path, doc, outline, prof, "body", "https://x.com", focus=None)
         assert safe_title == "note"
+
+
+# ── flashcard source path ──
+
+
+class TestFlashcardSourceNote:
+    def test_uses_vault_relative_path(self, tmp_path):
+        note = tmp_path / "ai" / "same-name.md"
+        note.parent.mkdir()
+        note.write_text("x", encoding="utf-8")
+        assert _flashcard_source_note(tmp_path, note) == "ai/same-name.md"
+
+    def test_outside_vault_falls_back_to_basename(self, tmp_path):
+        vault = tmp_path / "vault"
+        outside = tmp_path / "outside.md"
+        assert _flashcard_source_note(vault, outside) == "outside.md"
 
 
 # ── _maybe_auto_open ──

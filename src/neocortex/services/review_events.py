@@ -45,6 +45,7 @@ from neocortex.services.review import (
     compute_outcome,
     find_stored_card,
     get_review_queue_summary,
+    load_stored_cards,
     resolve_source_path,
     review_write_lock,
     select_session_cards,
@@ -90,12 +91,15 @@ class ReviewEventStore:
                 """
                 CREATE TABLE IF NOT EXISTS review_sessions (
                     session_id TEXT PRIMARY KEY,
+                    request_id TEXT,
                     entry_point TEXT NOT NULL,
                     started_at TEXT NOT NULL,
                     completed_at TEXT,
                     due_total INTEGER NOT NULL,
                     offered_count INTEGER NOT NULL,
-                    offered_card_ids TEXT NOT NULL
+                    offered_card_ids TEXT NOT NULL,
+                    next_due_date TEXT,
+                    response_json TEXT
                 );
                 CREATE TABLE IF NOT EXISTS review_events (
                     event_id TEXT PRIMARY KEY,
@@ -116,24 +120,41 @@ class ReviewEventStore:
                     ON review_events(session_id);
                 """
             )
+            # Additive migration for databases created by the first review MVP.
+            # CREATE TABLE IF NOT EXISTS does not add columns to an existing table.
+            session_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(review_sessions)")
+            }
+            for name, ddl in (
+                ("request_id", "TEXT"),
+                ("next_due_date", "TEXT"),
+                ("response_json", "TEXT"),
+            ):
+                if name not in session_columns:
+                    conn.execute(f"ALTER TABLE review_sessions ADD COLUMN {name} {ddl}")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_review_sessions_request_id"
+                " ON review_sessions(request_id) WHERE request_id IS NOT NULL"
+            )
 
     # ── sessions ──
 
     def create_session(
         self, session_id: str, entry_point: str, due_total: int,
-        offered_card_ids: list[str],
+        offered_card_ids: list[str], *, request_id: str | None = None,
+        next_due_date: str | None = None,
     ) -> None:
         completed = _now() if not offered_card_ids else None
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO review_sessions"
-                " (session_id, entry_point, started_at, completed_at,"
-                "  due_total, offered_count, offered_card_ids)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                " (session_id, request_id, entry_point, started_at, completed_at,"
+                "  due_total, offered_count, offered_card_ids, next_due_date)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    session_id, entry_point, _now(), completed,
-                    due_total, len(offered_card_ids),
-                    json.dumps(offered_card_ids),
+                    session_id, request_id, entry_point, _now(), completed,
+                    due_total, len(offered_card_ids), json.dumps(offered_card_ids),
+                    next_due_date,
                 ),
             )
 
@@ -149,6 +170,25 @@ class ReviewEventStore:
         d["offered_card_ids"] = json.loads(d["offered_card_ids"])
         return d
 
+    def get_session_by_request_id(self, request_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM review_sessions WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["offered_card_ids"] = json.loads(d["offered_card_ids"])
+        return d
+
+    def set_session_response(self, session_id: str, response: dict) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE review_sessions SET response_json = ? WHERE session_id = ?",
+                (json.dumps(response, ensure_ascii=False), session_id),
+            )
+
     def session_count(self) -> int:
         with self._connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM review_sessions").fetchone()[0]
@@ -156,16 +196,21 @@ class ReviewEventStore:
     def _terminal_card_ids(self, conn: sqlite3.Connection, session_id: str) -> set[str]:
         """session 内每张卡按最后一个 applied 的卡片动作判断终态。"""
         rows = conn.execute(
-            "SELECT card_id, action FROM review_events"
-            " WHERE session_id = ? AND status = 'applied' AND card_id IS NOT NULL"
+            "SELECT card_id, action, status FROM review_events"
+            " WHERE session_id = ? AND status IN ('applied', 'stale')"
+            " AND card_id IS NOT NULL"
             " ORDER BY rowid",
             (session_id,),
         ).fetchall()
-        last: dict[str, str] = {}
+        last: dict[str, tuple[str, str]] = {}
         for row in rows:
             if row["action"] in CARD_ACTIONS:
-                last[row["card_id"]] = row["action"]
-        return {cid for cid, action in last.items() if action in _TERMINAL_ACTIONS}
+                last[row["card_id"]] = (row["action"], row["status"])
+        return {
+            cid
+            for cid, (action, status) in last.items()
+            if action in _TERMINAL_ACTIONS and status in ("applied", "stale")
+        }
 
     def refresh_session_completion(self, session_id: str) -> tuple[bool, int]:
         """重算 completed_at。返回 (是否完成, 剩余未终态卡数)。"""
@@ -290,6 +335,18 @@ def _finalize_card_event(
         store.refresh_session_completion(row["session_id"])
 
 
+def _mark_stale_and_refresh(store: ReviewEventStore, row: dict) -> None:
+    """Stale grade/suspend means another writer already handled this card.
+
+    It is terminal for the original offered session even though this event did
+    not apply its own snapshot; otherwise the Mac UI can advance while the
+    server permanently reports the session as incomplete.
+    """
+    store.mark_stale(row["event_id"])
+    if row.get("session_id"):
+        store.refresh_session_completion(row["session_id"])
+
+
 def recover_pending_events(notes_dir: Path, store: ReviewEventStore) -> None:
     """崩溃恢复：调用方必须已持有 review_write_lock。"""
     for row in store.pending_events():
@@ -297,7 +354,7 @@ def recover_pending_events(notes_dir: Path, store: ReviewEventStore) -> None:
         try:
             stored = find_stored_card(notes_dir, row["card_id"])
         except CardNotFoundError:
-            store.mark_stale(row["event_id"])
+            _mark_stale_and_refresh(store, row)
             continue
         current = snapshot_schedule(stored.card)
         if current == outcome.after:
@@ -319,7 +376,7 @@ def recover_pending_events(notes_dir: Path, store: ReviewEventStore) -> None:
             )
         else:
             # 卡片已被其他写者合法推进，不覆盖。
-            store.mark_stale(row["event_id"])
+            _mark_stale_and_refresh(store, row)
 
 
 def _card_action_response(
@@ -349,21 +406,45 @@ from neocortex.services.review import GUI_QUALITY_MAP  # noqa: E402
 
 def create_review_session(
     notes_dir: Path, store: ReviewEventStore, *, limit: int, entry_point: str,
+    request_id: str | None = None,
 ) -> dict:
-    """只有用户明确点击"开始复习"时调用。菜单刷新 / daily / 预取禁止调用。"""
+    """显式创建会话；``request_id`` 让超时重试返回同一个 session。
+
+    菜单刷新 / daily / 预取禁止调用。内部调用未传 request_id 时生成一个，
+    HTTP 契约则要求客户端提供稳定 UUID。
+    """
+    request_id = request_id or str(uuid.uuid4())
     with review_write_lock(notes_dir):
         recover_pending_events(notes_dir, store)
-        summary = get_review_queue_summary(notes_dir)
-        selected = select_session_cards(summary, limit)
-        session_id = str(uuid.uuid4())
-        store.create_session(
-            session_id, entry_point, summary.due_total,
-            [s.card.id for s in selected],
-        )
+        existing = store.get_session_by_request_id(request_id)
+        if existing is not None:
+            if existing.get("response_json"):
+                return json.loads(existing["response_json"])
+            session = existing
+        else:
+            summary = get_review_queue_summary(notes_dir)
+            selected = select_session_cards(summary, limit)
+            session_id = str(uuid.uuid4())
+            offered_card_ids = [s.card.id for s in selected]
+            store.create_session(
+                session_id, entry_point, summary.due_total, offered_card_ids,
+                request_id=request_id, next_due_date=summary.next_due_date,
+            )
+            session = {
+                "session_id": session_id,
+                "due_total": summary.due_total,
+                "offered_count": len(offered_card_ids),
+                "offered_card_ids": offered_card_ids,
+                "next_due_date": summary.next_due_date,
+            }
     # source 解析是只读的且可能对旧卡做全 vault rglob（大 vault 上很慢），
     # 移到锁外执行，避免长时间阻塞其他写者。
+    by_id = {s.card.id: s for s in load_stored_cards(notes_dir)}
     cards = []
-    for s in selected:
+    for card_id in session["offered_card_ids"]:
+        s = by_id.get(card_id)
+        if s is None:
+            continue
         source_path = resolve_source_path(notes_dir, s.card.source_note)
         cards.append({
             "card_id": s.card.id,
@@ -374,13 +455,15 @@ def create_review_session(
             "source_path": source_path,
             "source_available": source_path is not None,
         })
-    return {
-        "session_id": session_id,
-        "due_total": summary.due_total,
+    response = {
+        "session_id": session["session_id"],
+        "due_total": session["due_total"],
         "offered_count": len(cards),
-        "next_due_date": summary.next_due_date,
+        "next_due_date": session.get("next_due_date"),
         "cards": cards,
     }
+    store.set_session_response(session["session_id"], response)
+    return response
 
 
 def handle_review_action(
@@ -396,6 +479,13 @@ def handle_review_action(
         # 幂等：先查 event_id
         existing = store.get_event(event_id)
         if existing is not None:
+            if (
+                existing["action"] != action
+                or existing["session_id"] != session_id
+                or existing["card_id"] != card_id
+            ):
+                raise ReviewFlowError(
+                    409, "event_id already belongs to a different review action")
             if existing["status"] == "applied":
                 if existing["response_json"]:
                     return json.loads(existing["response_json"])

@@ -219,6 +219,19 @@ def _index_read_note(note_path: Path, notes_dir: Path, doc) -> None:
     note_index.index_note(rel, doc.title, final_content)
 
 
+def _flashcard_source_note(notes_dir: Path, note_path: Path) -> str:
+    """Store new-card sources as vault-relative paths when possible.
+
+    Legacy cards only stored a basename, which becomes ambiguous when two topic
+    folders contain the same filename. Keeping the fallback preserves callers
+    that intentionally write outside the configured vault.
+    """
+    try:
+        return note_path.resolve().relative_to(notes_dir.resolve()).as_posix()
+    except ValueError:
+        return note_path.name
+
+
 async def _maybe_generate_flashcards(
     doc, outline, notes_content: str, prof: Profile, provider, notes_dir: Path, note_path: Path, lang,
 ) -> None:
@@ -232,9 +245,10 @@ async def _maybe_generate_flashcards(
         with console.status(f"  {t('flashcard_generating', lang)}"):
             raw_cards = await generate_flashcards(doc, outline, notes_content, prof, provider)
         if raw_cards:
+            source_note = _flashcard_source_note(notes_dir, note_path)
             cards = [Flashcard(
                 id=str(_uuid.uuid4())[:8],
-                source_note=note_path.name,
+                source_note=source_note,
                 question=c["question"],
                 answer=c["answer"],
                 concept=c.get("concept", ""),

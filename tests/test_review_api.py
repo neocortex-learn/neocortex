@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -66,6 +67,16 @@ def _write_cards(vault: Path, stem: str, cards: list[dict]) -> Path:
     return path
 
 
+def _session_body(
+    *, limit: int = 5, entry_point: str = "menu", request_id: str | None = None,
+) -> dict:
+    return {
+        "request_id": request_id or str(uuid.uuid4()),
+        "limit": limit,
+        "entry_point": entry_point,
+    }
+
+
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     vault = tmp_path / "vault"
@@ -88,7 +99,7 @@ def env(tmp_path, monkeypatch):
 
 class TestSecurity:
     def test_session_requires_token(self, env):
-        r = env.client.post("/api/review/session", json={"limit": 5, "entry_point": "menu"})
+        r = env.client.post("/api/review/session", json=_session_body())
         assert r.status_code == 401
 
     def test_action_requires_token(self, env):
@@ -98,7 +109,7 @@ class TestSecurity:
     def test_wrong_host_rejected(self, env):
         r = env.client.post(
             "/api/review/session",
-            json={"limit": 5, "entry_point": "menu"},
+            json=_session_body(),
             headers={**AUTH, "Host": "evil.com"},
         )
         assert r.status_code == 400
@@ -106,7 +117,7 @@ class TestSecurity:
     def test_bad_origin_rejected(self, env):
         r = env.client.post(
             "/api/review/session",
-            json={"limit": 5, "entry_point": "menu"},
+            json=_session_body(),
             headers={**AUTH, "Origin": "https://evil.com"},
         )
         assert r.status_code == 403
@@ -145,7 +156,7 @@ class TestSessionCreation:
         _write_cards(env.vault, "note-a", [_card("a1"), _card("a2")])
         r = env.client.post(
             "/api/review/session",
-            json={"limit": 5, "entry_point": "menu"},
+            json=_session_body(),
             headers=AUTH,
         )
         assert r.status_code == 200
@@ -158,11 +169,31 @@ class TestSessionCreation:
         for key in ("card_id", "question", "answer", "concept", "source_path", "source_available"):
             assert key in card
 
+    def test_session_request_id_replay_returns_same_session(self, env):
+        _write_cards(env.vault, "note-a", [_card("a1"), _card("a2")])
+        request = _session_body(request_id="session-request-0001")
+        first = env.client.post("/api/review/session", json=request, headers=AUTH)
+        replay = env.client.post("/api/review/session", json=request, headers=AUTH)
+        assert first.status_code == replay.status_code == 200
+        assert replay.json() == first.json()
+        assert env.store.session_count() == 1
+
+    def test_legacy_session_without_request_id_remains_compatible(self, env):
+        _write_cards(env.vault, "note-a", [_card("a1")])
+        r = env.client.post(
+            "/api/review/session",
+            json={"limit": 5, "entry_point": "menu"},
+            headers=AUTH,
+        )
+        assert r.status_code == 200
+        assert r.json()["offered_count"] == 1
+        assert env.store.session_count() == 1
+
     def test_session_limit_clamped_to_five(self, env):
         _write_cards(env.vault, "note-a", [_card(f"c{i}") for i in range(9)])
         r = env.client.post(
             "/api/review/session",
-            json={"limit": 50, "entry_point": "menu"},
+            json=_session_body(limit=50),
             headers=AUTH,
         )
         body = r.json()
@@ -174,7 +205,7 @@ class TestSessionCreation:
         _write_cards(env.vault, "note-a", [_card("f1", next_review=NEXT_WEEK)])
         r = env.client.post(
             "/api/review/session",
-            json={"limit": 5, "entry_point": "menu"},
+            json=_session_body(),
             headers=AUTH,
         )
         assert r.status_code == 200
@@ -195,7 +226,7 @@ class TestSessionCreation:
         daily = env.client.get("/api/daily", headers=AUTH).json()
         session = env.client.post(
             "/api/review/session",
-            json={"limit": 5, "entry_point": "menu"},
+            json=_session_body(),
             headers=AUTH,
         ).json()
         assert daily["due_flashcard_count"] == session["due_total"] == 2
@@ -209,7 +240,7 @@ class TestSessionCreation:
         ])
         body = env.client.post(
             "/api/review/session",
-            json={"limit": 5, "entry_point": "menu"},
+            json=_session_body(),
             headers=AUTH,
         ).json()
         by_id = {c["card_id"]: c for c in body["cards"]}
@@ -225,7 +256,7 @@ class TestSessionCreation:
 def _start_session(env, limit=5) -> dict:
     return env.client.post(
         "/api/review/session",
-        json={"limit": limit, "entry_point": "test"},
+        json=_session_body(limit=limit, entry_point="test"),
         headers=AUTH,
     ).json()
 
@@ -399,6 +430,20 @@ class TestIdempotency:
             ).fetchone()[0]
         assert n == 1
 
+    def test_event_id_cannot_be_reused_for_different_action(self, env):
+        _write_cards(env.vault, "note-a", [_card("a1")])
+        s = _start_session(env)
+        first = _action(
+            env, event_id="ev-bound-0001", action="good",
+            session_id=s["session_id"], card_id="a1",
+        )
+        assert first.status_code == 200
+        mismatch = _action(
+            env, event_id="ev-bound-0001", action="easy",
+            session_id=s["session_id"], card_id="a1",
+        )
+        assert mismatch.status_code == 409
+
 
 class TestCrashRecovery:
     """两个崩溃窗口 + 状态漂移，都通过 service 层直接注入故障。"""
@@ -497,6 +542,8 @@ class TestCrashRecovery:
         assert env.store.get_event("ev-crash-03")["status"] == "stale"
         # 卡片状态保持 CLI 的结果，未被覆盖
         assert json.loads(path.read_text())[0] == state_after_cli
+        # 对原 session 而言，该卡已被其他写者处理，是终态而非永久未完成。
+        assert env.store.get_session(s["session_id"])["completed_at"] is not None
 
     def test_recovery_restores_session_consistency(self, env, monkeypatch):
         # 恢复后事件与卡片状态一致，session 完成态正确

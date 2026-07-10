@@ -103,6 +103,8 @@ class ReviewOutcome:
     """
 
     card_id: str
+    # ``.flashcards`` 内的单文件相对引用（例如 ``note-a.json``）。不能持久化
+    # 绝对路径，否则整个 Neocortex layout 移动后 pending 事件无法恢复。
     storage_path: str
     action: str  # "grade" / "suspend" / "restore"
     quality: int | None
@@ -170,6 +172,7 @@ def get_review_queue_summary(notes_dir: Path, today: str | None = None) -> Revie
         [s.card for s in active],
         max_cards=len(active) or 1,
         mode="default",
+        today=today,
     )
     queue: list[StoredCard] = []
     seen: set[str] = set()
@@ -227,6 +230,40 @@ def snapshot_schedule(card: Flashcard) -> dict:
     return {name: getattr(card, name) for name in SCHEDULE_FIELDS}
 
 
+def _storage_reference(notes_dir: Path, storage_path: Path) -> str:
+    """把真实卡片文件收敛为 ``.flashcards`` 内的安全、可移动引用。"""
+    fc_dir = (notes_dir / ".flashcards").resolve()
+    candidate = storage_path.resolve()
+    try:
+        rel = candidate.relative_to(fc_dir)
+    except ValueError as exc:
+        raise ReviewServiceError(f"card storage escapes .flashcards: {storage_path}") from exc
+    if len(rel.parts) != 1 or rel.suffix != ".json":
+        raise ReviewServiceError(f"invalid card storage reference: {rel}")
+    return rel.as_posix()
+
+
+def _resolve_storage_reference(notes_dir: Path, storage_ref: str) -> Path:
+    """解析持久化的卡片文件引用，并兼容旧版绝对路径 pending 事件。
+
+    旧版绝对路径只取安全 basename，再映射到**当前** layout 的 ``.flashcards``；
+    这样移动项目后仍能恢复，也不会按 SQLite 中的路径写出 vault。
+    """
+    raw = Path(storage_ref)
+    if not storage_ref or raw.name != storage_ref and not raw.is_absolute():
+        raise ReviewServiceError(f"invalid card storage reference: {storage_ref!r}")
+    name = raw.name if raw.is_absolute() else storage_ref
+    if name in ("", ".", "..") or Path(name).suffix != ".json" or Path(name).name != name:
+        raise ReviewServiceError(f"invalid card storage reference: {storage_ref!r}")
+    fc_dir = (notes_dir / ".flashcards").resolve()
+    candidate = (fc_dir / name).resolve()
+    try:
+        candidate.relative_to(fc_dir)
+    except ValueError as exc:
+        raise ReviewServiceError(f"card storage escapes .flashcards: {storage_ref!r}") from exc
+    return candidate
+
+
 # ── compute（不落盘）──
 
 
@@ -263,7 +300,7 @@ def compute_outcome(
 
     return ReviewOutcome(
         card_id=card.id,
-        storage_path=str(stored.storage_path),
+        storage_path=_storage_reference(notes_dir, stored.storage_path),
         action=action,
         quality=quality,
         before=before,
@@ -326,7 +363,7 @@ def apply_outcome(notes_dir: Path, outcome: ReviewOutcome) -> None:
     模型无法解析的坏条目 / 版本偏移条目）**原样保留**——容错读取绝不能
     变成破坏性写回。目标卡缺失则整次失败且不写文件。
     """
-    path = Path(outcome.storage_path)
+    path = _resolve_storage_reference(notes_dir, outcome.storage_path)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

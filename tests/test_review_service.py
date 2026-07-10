@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from neocortex.services.review import (
     GUI_QUALITY_MAP,
     MAX_SESSION_CARDS,
     CardNotFoundError,
+    ReviewServiceError,
     apply_outcome,
     clamp_session_limit,
     compute_outcome,
@@ -152,6 +154,16 @@ class TestQueueSummary:
         s = get_review_queue_summary(vault)
         assert s.due_total == 0
         assert s.next_due_date is None
+
+    def test_explicit_today_controls_default_queue(self, vault):
+        _write_cards(vault, "note-a", [
+            _card("old", next_review="2026-01-01"),
+            _card("later", next_review="2026-02-01"),
+        ])
+        s = get_review_queue_summary(vault, today="2026-01-15")
+        assert [c.card.id for c in s.queue] == ["old"]
+        assert s.due_total == 1
+        assert s.next_due_date == "2026-02-01"
 
 
 class TestSuspendedInReviewerModes:
@@ -336,6 +348,51 @@ class TestApplyIdempotent:
         assert json.loads(path.read_text())[0] == first_card
         assert (concepts / "know-x.md").read_text(encoding="utf-8") == first_concept
         assert first_card["review_count"] == 1
+
+    def test_pending_outcome_survives_layout_move(self, tmp_path):
+        old_vault = tmp_path / "old-layout" / "vault"
+        old_vault.mkdir(parents=True)
+        _write_cards(old_vault, "note-a", [_card("a1")])
+        outcome = compute_outcome(
+            old_vault, find_stored_card(old_vault, "a1"), "grade", quality=4)
+
+        assert outcome.storage_path == "note-a.json"
+        new_vault = tmp_path / "moved-layout" / "vault"
+        new_vault.parent.mkdir()
+        old_vault.rename(new_vault)
+
+        apply_outcome(new_vault, outcome)
+        card = json.loads(
+            (new_vault / ".flashcards" / "note-a.json").read_text())[0]
+        assert card["review_count"] == 1
+
+    def test_legacy_absolute_pending_path_uses_safe_basename_after_move(self, tmp_path):
+        old_vault = tmp_path / "old-vault"
+        old_vault.mkdir()
+        old_path = _write_cards(old_vault, "note-a", [_card("a1")])
+        outcome = compute_outcome(
+            old_vault, find_stored_card(old_vault, "a1"), "grade", quality=4)
+        legacy = replace(outcome, storage_path=str(old_path))
+
+        new_vault = tmp_path / "new-vault"
+        old_vault.rename(new_vault)
+        apply_outcome(new_vault, legacy)
+        assert json.loads(
+            (new_vault / ".flashcards" / "note-a.json").read_text())[0][
+                "review_count"] == 1
+
+    def test_persisted_storage_reference_cannot_escape_flashcards(self, vault):
+        _write_cards(vault, "note-a", [_card("a1")])
+        outcome = compute_outcome(
+            vault, find_stored_card(vault, "a1"), "grade", quality=4)
+        outside = vault / "outside.json"
+        outside.write_text(json.dumps([_card("a1")]), encoding="utf-8")
+        before = outside.read_text(encoding="utf-8")
+
+        with pytest.raises(ReviewServiceError):
+            apply_outcome(vault, replace(outcome, storage_path="../outside.json"))
+
+        assert outside.read_text(encoding="utf-8") == before
 
 
 # ── 多模型 review 修复的回归锁定 ──

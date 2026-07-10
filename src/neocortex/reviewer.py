@@ -50,6 +50,7 @@ def get_review_session(
     cards: list[Flashcard],
     max_cards: int = 20,
     mode: str = "default",
+    today: str | None = None,
 ) -> list[Flashcard]:
     """Select cards for review session.
 
@@ -66,10 +67,10 @@ def get_review_session(
     if mode == "drill":
         return _drill_session(cards, max_cards)
     if mode == "hard":
-        return _hard_session(cards, max_cards)
+        return _hard_session(cards, max_cards, today=today)
 
     # Default: due cards, interleaved
-    due = [c for c in cards if is_due(c)]
+    due = [c for c in cards if is_due(c, today)]
 
     def _sort_key(c: Flashcard) -> tuple[int, str]:
         if c.last_review:
@@ -96,9 +97,11 @@ def _drill_session(cards: list[Flashcard], max_cards: int) -> list[Flashcard]:
     return struggling[:max_cards]
 
 
-def _hard_session(cards: list[Flashcard], max_cards: int) -> list[Flashcard]:
+def _hard_session(
+    cards: list[Flashcard], max_cards: int, today: str | None = None,
+) -> list[Flashcard]:
     """Due cards, but hard ones (ease_factor < 2.3) first."""
-    due = [c for c in cards if is_due(c)]
+    due = [c for c in cards if is_due(c, today)]
     hard = [c for c in due if c.ease_factor < 2.3]
     normal = [c for c in due if c.ease_factor >= 2.3]
     combined = hard + normal

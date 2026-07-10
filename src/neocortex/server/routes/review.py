@@ -15,6 +15,10 @@ from pydantic import BaseModel, Field
 
 
 class SessionRequest(BaseModel):
+    # Optional only for one-version compatibility with an already-installed Mac
+    # binary. Current clients always send a stable key; legacy calls work but
+    # cannot receive create-session idempotency guarantees.
+    request_id: str | None = Field(None, min_length=8, max_length=128)
     limit: int = Field(5, ge=1, description="服务端强制上限 5")
     entry_point: str = Field(..., min_length=1, max_length=64)
 
@@ -43,6 +47,7 @@ def make_router(require_token) -> APIRouter:
         return create_review_session(
             get_notes_dir(), _store(),
             limit=req.limit, entry_point=req.entry_point,
+            request_id=req.request_id,
         )
 
     @router.post("/review/action", dependencies=[Depends(require_token)])
