@@ -716,6 +716,29 @@ class TestDailyEndpoint:
         # Date present
         assert len(body["date"]) == 10  # YYYY-MM-DD
 
+    def test_uncompiled_count_reads_real_compile_cache_shape(
+        self, client, tmp_path, monkeypatch,
+    ):
+        from neocortex.compiler import CompileCache
+
+        notes_dir = tmp_path / "vault"
+        note = notes_dir / "clips" / "compiled.md"
+        note.parent.mkdir(parents=True)
+        note.write_text("already compiled", encoding="utf-8")
+        monkeypatch.setattr("neocortex.config.get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr("neocortex.config.get_notes_dir", lambda: notes_dir)
+
+        cache = CompileCache(tmp_path / "compile_cache.json", notes_root=notes_dir)
+        cache.update(note)
+        cache.save()
+
+        r = client.get(
+            "/api/daily",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["uncompiled_count"] == 0
+
     def test_surfacing_clip_appears(self, client, tmp_path, monkeypatch):
         """Clip with next_surface ≤ today and status=inbox → in surfacing."""
         from datetime import date, timedelta

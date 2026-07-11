@@ -32,15 +32,9 @@ def compile(
     notes_dir = get_notes_dir()
 
     async def _run_compile() -> None:
-        from neocortex.compiler import compile_all
+        from neocortex.compiler import collect_compilable_notes, compile_all
 
-        md_files = [
-            f for f in notes_dir.rglob("*.md")
-            if "concepts" not in f.parts
-            and "insights" not in f.parts
-            and f.name != "INDEX.md"
-            and "diagrams" not in f.parts
-        ]
+        md_files = collect_compilable_notes(notes_dir)
 
         if not md_files:
             console.print(f"  {t('compile_no_notes', lang)}")

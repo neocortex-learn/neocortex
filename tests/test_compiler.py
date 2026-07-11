@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -9,6 +10,7 @@ import pytest
 
 from neocortex.compiler import (
     CompileCache,
+    collect_compilable_notes,
     collect_all_concepts,
     _parse_concept_frontmatter,
     compile_all,
@@ -349,6 +351,68 @@ class TestCompileCache:
 
         cache = CompileCache(cache_path)
         assert cache.is_changed(note) is True
+
+    def test_valid_json_with_wrong_shape_is_ignored(self, tmp_path):
+        cache_path = tmp_path / "cache.json"
+        cache_path.write_text("[]", encoding="utf-8")
+        note = tmp_path / "note.md"
+        note.write_text("Hello", encoding="utf-8")
+
+        cache = CompileCache(cache_path)
+        assert cache.is_changed(note) is True
+
+    def test_relative_cache_survives_notes_root_move(self, tmp_path):
+        cache_path = tmp_path / "cache.json"
+        old_root = tmp_path / "old-vault"
+        old_note = old_root / "clips" / "note.md"
+        old_note.parent.mkdir(parents=True)
+        old_note.write_text("Hello", encoding="utf-8")
+
+        cache = CompileCache(cache_path, notes_root=old_root)
+        cache.update(old_note)
+        cache.save()
+
+        new_root = tmp_path / "new-vault"
+        old_root.rename(new_root)
+        moved_note = new_root / "clips" / "note.md"
+        assert CompileCache(cache_path, notes_root=new_root).is_changed(moved_note) is False
+
+    def test_legacy_absolute_cache_survives_layout_move(self, tmp_path):
+        cache_path = tmp_path / "cache.json"
+        legacy_note = tmp_path / "legacy" / "note.md"
+        legacy_note.parent.mkdir()
+        legacy_note.write_text("Hello", encoding="utf-8")
+        digest = hashlib.sha256(b"Hello").hexdigest()
+        cache_path.write_text(json.dumps({str(legacy_note): digest}), encoding="utf-8")
+
+        new_root = tmp_path / "vault"
+        moved_note = new_root / "clips" / "note.md"
+        moved_note.parent.mkdir(parents=True)
+        moved_note.write_text("Hello", encoding="utf-8")
+
+        assert CompileCache(cache_path, notes_root=new_root).is_changed(moved_note) is False
+
+
+class TestCollectCompilableNotes:
+    def test_excludes_compiler_generated_files(self, tmp_path):
+        notes = tmp_path / "vault"
+        source = notes / "clips" / "source.md"
+        source.parent.mkdir(parents=True)
+        source.write_text("source", encoding="utf-8")
+        for relative in (
+            "INDEX.md",
+            "overview.md",
+            "log.md",
+            "concepts/concept.md",
+            "insights/insight.md",
+            "diagrams/map.md",
+            "_reports/lint.md",
+        ):
+            path = notes / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("generated", encoding="utf-8")
+
+        assert collect_compilable_notes(notes) == [source]
 
 
 # ── Concept frontmatter parsing ──

@@ -557,18 +557,38 @@ def _extract_date_from_filename(filename: str) -> str | None:
 # ── Compile cache ──
 
 
+_NON_SOURCE_DIRS = {"concepts", "insights", "diagrams", "_reports", ".flashcards"}
+_NON_SOURCE_FILES = {"INDEX.md", "overview.md", "log.md"}
+
+
+def collect_compilable_notes(notes_dir: Path) -> list[Path]:
+    """Return user-authored notes that may feed concept compilation.
+
+    Generated summaries, reports, indexes, and activity logs must never feed the
+    compiler back into itself.  Keeping this filter beside ``compile_all`` also
+    gives the CLI, HTTP service, and Daily briefing one source of truth.
+    """
+    return sorted(
+        f for f in notes_dir.rglob("*.md")
+        if not _NON_SOURCE_DIRS.intersection(f.relative_to(notes_dir).parts)
+        and f.name not in _NON_SOURCE_FILES
+    )
+
+
 class CompileCache:
     """Track compiled note content hashes to avoid reprocessing unchanged notes."""
 
-    def __init__(self, cache_path: Path) -> None:
+    def __init__(self, cache_path: Path, notes_root: Path | None = None) -> None:
         self._path = cache_path
+        self._notes_root = notes_root.resolve() if notes_root is not None else None
         self._data = self._load()
 
     def _load(self) -> dict[str, str]:
         if not self._path.exists():
             return {}
         try:
-            return json.loads(self._path.read_text(encoding="utf-8"))
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
         except (json.JSONDecodeError, OSError):
             return {}
 
@@ -578,14 +598,33 @@ class CompileCache:
         except (OSError, UnicodeDecodeError):
             return True
         current_hash = hashlib.sha256(content.encode()).hexdigest()
-        return self._data.get(str(note_path)) != current_hash
+        key = self._key(note_path)
+        if self._data.get(key) == current_hash:
+            return False
+
+        # Compatibility with pre-layout caches that stored absolute paths.  A
+        # unique basename + identical content is sufficient to recognize the
+        # same note after the whole Neocortex folder (or a topic folder) moves.
+        legacy_matches = [
+            digest for cached_path, digest in self._data.items()
+            if Path(cached_path).name == note_path.name
+        ]
+        return not (len(legacy_matches) == 1 and legacy_matches[0] == current_hash)
 
     def update(self, note_path: Path) -> None:
         try:
             content = note_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return
-        self._data[str(note_path)] = hashlib.sha256(content.encode()).hexdigest()
+        self._data[self._key(note_path)] = hashlib.sha256(content.encode()).hexdigest()
+
+    def _key(self, note_path: Path) -> str:
+        if self._notes_root is not None:
+            try:
+                return note_path.resolve().relative_to(self._notes_root).as_posix()
+            except ValueError:
+                pass
+        return str(note_path)
 
     def save(self) -> None:
         fd, tmp_path = tempfile.mkstemp(
@@ -1190,19 +1229,13 @@ async def compile_all(
 
     result = CompileResult()
 
-    md_files = sorted(
-        f for f in notes_dir.rglob("*.md")
-        if "concepts" not in f.parts
-        and "insights" not in f.parts
-        and f.name != "INDEX.md"
-        and "diagrams" not in f.parts
-    )
+    md_files = collect_compilable_notes(notes_dir)
 
     if not md_files:
         return result
 
     cache_path = get_data_dir() / "compile_cache.json"
-    cache = CompileCache(cache_path)
+    cache = CompileCache(cache_path, notes_root=notes_dir)
 
     changed_files: list[Path] = []
     for f in md_files:

@@ -233,26 +233,12 @@ async def _llm_context_updates(surfacing, notes_dir: Path, cfg: AppConfig) -> li
 
 
 def _uncompiled_count(notes_dir: Path) -> int:
+    from neocortex.compiler import CompileCache, collect_compilable_notes
     from neocortex.config import get_data_dir
 
     cache_path = get_data_dir() / "compile_cache.json"
-    compiled: set[str] = set()
-    if cache_path.exists():
-        try:
-            data = json_lib.loads(cache_path.read_text(encoding="utf-8"))
-            compiled = set(data.get("files", {}).keys())
-        except (OSError, json_lib.JSONDecodeError, TypeError):
-            compiled = set()
-
-    count = 0
-    for md in notes_dir.rglob("*.md"):
-        if any(p in md.parts for p in ("concepts", "insights", "diagrams")):
-            continue
-        if md.name in ("INDEX.md", "overview.md", "log.md"):
-            continue
-        if md.name not in compiled and str(md) not in compiled:
-            count += 1
-    return count
+    cache = CompileCache(cache_path, notes_root=notes_dir)
+    return sum(cache.is_changed(note) for note in collect_compilable_notes(notes_dir))
 
 
 def _build_health_pulse(notes_dir: Path) -> HealthPulse:

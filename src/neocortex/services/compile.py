@@ -15,18 +15,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from neocortex.compiler import collect_compilable_notes
 from neocortex.models import AppConfig, CompileResult, Language, Profile
-
-
-def collect_compilable_notes(notes_dir: Path) -> list[Path]:
-    """Mirror cmd_compile's source-note filter (single source of truth)."""
-    return [
-        f for f in notes_dir.rglob("*.md")
-        if "concepts" not in f.parts
-        and "insights" not in f.parts
-        and f.name != "INDEX.md"
-        and "diagrams" not in f.parts
-    ]
 
 
 async def compile_notes(
