@@ -277,6 +277,9 @@ class AppConfig(BaseModel):
     scan_settings: ScanSettings = Field(default_factory=ScanSettings)
     output_settings: OutputSettings = Field(default_factory=OutputSettings)
     experimental: list[str] = Field(default_factory=list)
+    # P0 Daily Action Loop: user-controlled current focus, ordered by priority.
+    # Older config.json files omit this field and remain valid.
+    top_of_mind: list[str] = Field(default_factory=list, max_length=3)
     # Q11: 配置了 LLM key 时 `neocortex clip` 默认走即时关联；设 False 退回零 LLM 路径。
     clip_default_process: bool = True
 
@@ -572,6 +575,40 @@ class SurfacingItem(BaseModel):
     context_update: str = ""
     # True when the concept this clip touches has matured (≥3 evidences).
     absorbed: bool = False
+    # Deterministic explanation for an ordering boost, e.g. "Top of Mind: SQLite".
+    priority_reason: str | None = None
+
+
+class InboxItem(BaseModel):
+    """A stored clip exposed by the P0 Inbox/Today contract."""
+    clip_id: str
+    saved_path: str
+    source: str = ""
+    title: str = ""
+    summary: str = ""
+    status: str = "inbox"
+    created_at: str = ""
+    next_surface: str = ""
+    related_concepts: list[str] = Field(default_factory=list)
+
+
+class InboxListResponse(BaseModel):
+    items: list[InboxItem] = Field(default_factory=list)
+    total: int = 0
+
+
+class InboxActionResponse(BaseModel):
+    action_id: str
+    clip_id: str
+    action: str
+    status: str
+    saved_path: str
+    undone_action_id: str | None = None
+    recovered: bool = False
+
+
+class TopOfMindResponse(BaseModel):
+    topics: list[str] = Field(default_factory=list)
 
 
 class SurfaceUpdate(BaseModel):
@@ -608,6 +645,11 @@ class DailyBriefing(BaseModel):
     """
     date: str  # YYYY-MM-DD
     surfacing: list[SurfacingItem] = Field(default_factory=list)
+    # Total due inbox clips before the P0 display budget truncates to three.
+    surfacing_total: int = 0
+    # At most one clip explicitly placed in the "continue reading" state.
+    continue_read: SurfacingItem | None = None
+    top_of_mind: list[str] = Field(default_factory=list)
     due_flashcard_count: int = 0
     cluster_suggestions: list[ClusterSuggestion] = Field(default_factory=list)
     uncompiled_count: int = 0
