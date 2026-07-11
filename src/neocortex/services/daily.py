@@ -50,54 +50,88 @@ async def build_briefing(
     ``with_llm=True`` triggers one batched LLM call to summarise "what's
     changed" — slower (1–3s), better signal.
     """
-    from neocortex.config import load_clips
     from neocortex.services.review import get_review_queue_summary
+    from neocortex.services.inbox import load_stored_clips
 
     today = date.today()
     today_str = today.isoformat()
 
-    all_clips = load_clips(notes_dir)
-    surfacing_clips = [
-        c for c in all_clips
-        if c.status in ("inbox", "reference")
-        and c.next_surface
-        and c.next_surface <= today_str
+    stored_clips = load_stored_clips(notes_dir)
+    all_clips = [stored.clip for stored in stored_clips]
+    surfacing_stored = [
+        stored for stored in stored_clips
+        if stored.clip.status == "inbox"
+        and stored.clip.next_surface
+        and stored.clip.next_surface <= today_str
     ]
 
+    # P0 ordering is deterministic and explainable: an explicit Top of Mind
+    # match wins, then the oldest due date, creation date and clip id break ties.
+    ranked = [
+        (stored, _top_of_mind_reason(stored.clip, cfg.top_of_mind))
+        for stored in surfacing_stored
+    ]
+    ranked.sort(key=lambda pair: _surfacing_sort_key(pair[0].clip, pair[1], cfg.top_of_mind))
+    surfacing_total = len(ranked)
+    selected = ranked[:3]
+
     # Context updates (optional, costly) — only when caller opts in.
-    context_updates: list[dict] = [{} for _ in surfacing_clips]
-    if with_llm and surfacing_clips and cfg.provider and cfg.api_key:
+    selected_clips = [stored.clip for stored, _reason in selected]
+    context_updates: list[dict] = [{} for _ in selected_clips]
+    if with_llm and selected_clips and cfg.provider and cfg.api_key:
         context_updates = await _llm_context_updates(
-            surfacing_clips, notes_dir, cfg,
+            selected_clips, notes_dir, cfg,
         ) or context_updates
 
     surfacing_items: list[SurfacingItem] = []
-    for i, clip in enumerate(surfacing_clips):
+    for i, (stored, priority_reason) in enumerate(selected):
+        clip = stored.clip
         days_ago = 0
         try:
             days_ago = (today - date.fromisoformat(clip.created_at)).days
         except (ValueError, TypeError):
             pass
         upd = context_updates[i] if i < len(context_updates) else {}
-        # Best-effort saved_path: vault layout writes clips under
-        # clips/{date}-{slug}.md but the in-memory Clip doesn't carry the
-        # full path. We rebuild relative to notes_dir so the GUI can open it.
-        saved = _guess_clip_path(notes_dir, clip)
         surfacing_items.append(SurfacingItem(
             clip_id=clip.id,
-            saved_path=str(saved) if saved else "",
+            saved_path=str(stored.path),
             title=clip.title or "(untitled)",
             summary=clip.summary or "",
             days_ago=days_ago,
             related_concepts=list(clip.related_concepts or []),
             context_update=str(upd.get("context_update", "")),
             absorbed=bool(upd.get("absorbed", False)),
+            priority_reason=priority_reason,
         ))
+
+    continue_read = None
+    later = [stored for stored in stored_clips if stored.clip.status == "later"]
+    later.sort(key=lambda stored: (
+        stored.clip.processed_at or stored.clip.created_at,
+        stored.clip.created_at,
+        stored.clip.id,
+    ))
+    if later:
+        stored = later[0]
+        clip = stored.clip
+        days_ago = 0
+        try:
+            days_ago = (today - date.fromisoformat(clip.created_at)).days
+        except (ValueError, TypeError):
+            pass
+        continue_read = SurfacingItem(
+            clip_id=clip.id,
+            saved_path=str(stored.path),
+            title=clip.title or "(untitled)",
+            summary=clip.summary or "",
+            days_ago=days_ago,
+            related_concepts=list(clip.related_concepts or []),
+        )
 
     # Cluster suggestions: concepts touched by ≥3 inbox clips
     concept_counts: dict[str, int] = {}
     for c in all_clips:
-        if c.status not in ("inbox", "reference"):
+        if c.status != "inbox":
             continue
         for concept in c.related_concepts:
             concept_counts[concept] = concept_counts.get(concept, 0) + 1
@@ -123,6 +157,9 @@ async def build_briefing(
     return DailyBriefing(
         date=today_str,
         surfacing=surfacing_items,
+        surfacing_total=surfacing_total,
+        continue_read=continue_read,
+        top_of_mind=list(cfg.top_of_mind),
         due_flashcard_count=due_count,
         cluster_suggestions=cluster_suggestions,
         uncompiled_count=uncompiled,
@@ -141,12 +178,17 @@ def mark_surfaced(
         otherwise           → +90d (quarterly maintenance)
     """
     from datetime import timedelta
-    from neocortex.config import load_clips, save_clip
+    from neocortex.services.inbox import (
+        InboxFlowError,
+        find_stored_clip,
+        update_clip_frontmatter,
+    )
 
-    clips = load_clips(notes_dir)
-    target = next((c for c in clips if c.id == clip_id), None)
-    if target is None:
+    try:
+        stored = find_stored_clip(notes_dir, clip_id)
+    except InboxFlowError:
         return None
+    target = stored.clip
 
     today = date.today()
     target.surface_count += 1
@@ -158,7 +200,10 @@ def mark_surfaced(
         next_days = _OVERFLOW_DAYS
     target.next_surface = (today + timedelta(days=next_days)).isoformat()
 
-    save_clip(notes_dir, target)
+    update_clip_frontmatter(stored.path, {
+        "next_surface": target.next_surface,
+        "surface_count": target.surface_count,
+    })
     return SurfaceUpdate(
         clip_id=target.id,
         next_surface=target.next_surface,
@@ -167,19 +212,47 @@ def mark_surfaced(
     )
 
 
-def _guess_clip_path(notes_dir: Path, clip) -> Path | None:
-    """Reconstruct the on-disk path for a Clip (id-based filename pattern)."""
-    if not clip.id:
-        return None
-    # save_clip's pattern: clips/{date}-{id8}.md (where id8 = first 8 chars of uuid).
-    # Some legacy clips use a slug-based name — fall back to a glob search.
-    name = f"{clip.created_at}-{clip.id}.md"
-    candidate = notes_dir / "clips" / name
-    if candidate.exists():
-        return candidate
-    for p in (notes_dir / "clips").glob(f"*{clip.id}*.md"):
-        return p
+def _top_of_mind_reason(clip, topics: list[str]) -> str | None:
+    """Return the first explicit case-insensitive topic match explanation."""
+    import re
+
+    haystacks = [
+        clip.title, clip.summary, clip.topic,
+        *clip.related_concepts, *clip.auto_tags,
+    ]
+    normalised = [str(value).casefold() for value in haystacks if value]
+    for topic in topics:
+        needle = topic.casefold()
+        if not needle:
+            continue
+        # Latin topics use token boundaries so a focus on "AI" does not
+        # accidentally boost "daily". CJK topics use direct substring match.
+        if needle.isascii():
+            pattern = re.compile(rf"(?<![0-9a-z]){re.escape(needle)}(?![0-9a-z])")
+            matched = any(pattern.search(value) for value in normalised)
+        else:
+            matched = any(needle in value for value in normalised)
+        if matched:
+            return f"Top of Mind: {topic}"
     return None
+
+
+def _surfacing_sort_key(clip, reason: str | None, topics: list[str]) -> tuple:
+    if reason is None:
+        topic_rank = len(topics)
+    else:
+        matched = reason.removeprefix("Top of Mind: ").casefold()
+        topic_rank = next(
+            (index for index, topic in enumerate(topics) if topic.casefold() == matched),
+            len(topics),
+        )
+    return (
+        reason is None,
+        topic_rank,
+        clip.next_surface or "9999-12-31",
+        clip.created_at,
+        clip.id,
+    )
 
 
 async def _llm_context_updates(surfacing, notes_dir: Path, cfg: AppConfig) -> list[dict]:
